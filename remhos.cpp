@@ -3,31 +3,32 @@
 // Compile with: make
 //
 // Sample runs:
+//    Using lua problem definition file
+//    ./remhos -p balls-and-jacks.lua -r 4 -dt 0.001 -tf 5.0
 //
 //    Standard transport mode:
-//    remhos -m ../data/periodic-segment.mesh -p 0 -r 2 -dt 0.005
-//    remhos -m ../data/periodic-square.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    remhos -m ../data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    remhos -m ../data/periodic-square.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    remhos -m ../data/periodic-hexagon.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    remhos -m ../data/amr-quad.mesh -p 1 -r 2 -dt 0.002 -tf 9
-//    remhos -m ../data/star-q3.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    remhos -m ../data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 9
-//    remhos -m ../data/disc-nurbs.mesh -p 2 -r 3 -dt 0.005 -tf 9
-//    remhos -m ../data/periodic-square.mesh -p 3 -r 4 -dt 0.0025 -tf 9 -vs 20
-//    remhos -m ../data/periodic-cube.mesh -p 0 -r 2 -o 2 -dt 0.02 -tf 8
-//    remhos -m ../data/periodic-square.mesh -p 4 -r 4 -dt 0.001 -o 2 -mt 3
-//    remhos -m ../data/periodic-square.mesh -p 3 -r 2 -dt 0.0025 -o 15 -tf 9 -mt 4
-//    remhos -m ../data/periodic-cube.mesh -p 5 -r 5 -dt 0.0001 -o 1 -tf 0.8 -mt 4
-
+//    ./remhos -m ./data/periodic-segment.mesh -p 0 -r 2 -dt 0.005
+//    ./remhos -m ./data/periodic-square.mesh -p 0 -r 2 -dt 0.01 -tf 10
+//    ./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.01 -tf 10
+//    ./remhos -m ./data/periodic-square.mesh -p 1 -r 2 -dt 0.005 -tf 9
+//    ./remhos -m ./data/periodic-hexagon.mesh -p 1 -r 2 -dt 0.005 -tf 9
+//    ./remhos -m ./data/amr-quad.mesh -p 1 -r 2 -dt 0.002 -tf 9
+//    ./remhos -m ./data/star-q3.mesh -p 1 -r 2 -dt 0.005 -tf 9
+//    ./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 9
+//    ./remhos -m ./data/disc-nurbs.mesh -p 2 -r 3 -dt 0.005 -tf 9
+//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 4 -dt 0.0025 -tf 9 -vs 20
+//    ./remhos -m ./data/periodic-cube.mesh -p 0 -r 2 -o 2 -dt 0.02 -tf 8
+//    ./remhos -m ./data/periodic-square.mesh -p 4 -r 4 -dt 0.001 -o 2 -mt 3
+//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 2 -dt 0.0025 -o 15 -tf 9 -mt 4
+//    ./remhos -m ./data/periodic-cube.mesh -p 5 -r 5 -dt 0.0001 -o 1 -tf 0.8 -mt 4
 //
 //    Standard remap mode:
-//    remhos -m ../data/periodic-square.mesh -p 10 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//    remhos -m ../data/periodic-square.mesh -p 11 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
+//    ./remhos -m ./data/periodic-square.mesh -p 10 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
+//    ./remhos -m ./data/periodic-square.mesh -p 11 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
 //
 //    Lagrangian step followed by mesh return mode:
-//    remhos -m ../data/periodic-square.mesh -p 20 -r 3 -dt 0.005 -tf 4 -mt 4 -vs 10
-//    remhos -m ../data/periodic-square.mesh -p 21 -r 3 -dt 0.005 -tf 4 -mt 4 -vs 10
+//    ./remhos -m ./data/periodic-square.mesh -p 20 -r 3 -dt 0.005 -tf 4 -mt 4 -vs 10
+//    ./remhos -m ./data/periodic-square.mesh -p 21 -r 3 -dt 0.005 -tf 4 -mt 4 -vs 10
 //
 // Description:  This example code solves the time-dependent advection equation
 //               du/dt + v.grad(u) = 0, where v is a given fluid velocity, and
@@ -49,9 +50,14 @@
 using namespace std;
 using namespace mfem;
 
+#ifdef USE_LUA
+#include "lua.hpp"
+lua_State* L;
+#endif
+
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
-int problem;
+int problem_num;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -934,12 +940,20 @@ public:
    virtual ~FE_Evolution() { }
 };
 
+FE_Evolution* adv;
 
 int main(int argc, char *argv[])
 {
    // 1. Parse command-line options.
-   problem = 4;
-   const char *mesh_file = "../data/unit-square.mesh";
+  
+#ifdef USE_LUA
+   L = luaL_newstate();
+   luaL_openlibs(L);
+   const char* problem_file = "problem.lua";
+#else
+   problem_num = 4;
+#endif
+   const char *mesh_file = "./data/unit-square.mesh";
    int ref_levels = 2;
    int order = 3;
    int ode_solver_type = 3;
@@ -958,8 +972,13 @@ int main(int argc, char *argv[])
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
-   args.AddOption(&problem, "-p", "--problem",
+#ifdef USE_LUA
+   args.AddOption(&problem_file, "-p", "--problem",
+                  "lua problem definition file.");
+#else
+   args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
+#endif
    args.AddOption(&ref_levels, "-r", "--refine",
                   "Number of times to refine the mesh uniformly.");
    args.AddOption(&order, "-o", "--order",
@@ -998,16 +1017,33 @@ int main(int argc, char *argv[])
    }
    args.PrintOptions(cout);
 
-   if (problem < 10)      { exec_mode = 0; }
-   else if (problem < 20) { exec_mode = 1; }
-   else if (problem < 30) { exec_mode = 2; }
+   // When not using lua, exec mode is derived from problem number convention
+   if (problem_num < 10)      { exec_mode = 0; }
+   else if (problem_num < 20) { exec_mode = 1; }
+   else if (problem_num < 30) { exec_mode = 2; }
    else { MFEM_ABORT("Unspecified execution mode."); }
+
+#ifdef USE_LUA
+   // When using lua, exec mode is read from lua file
+   if (luaL_dofile(L, problem_file)) {
+      printf("Error opening lua file: %s\n",problem_file);
+      exit(1);
+   }
+
+   lua_getglobal(L, "exec_mode");
+   if (!lua_isnumber(L, -1)) {
+      printf("Did not find exec_mode in lua input.\n");
+      return 1;
+   }
+   exec_mode = (int)lua_tonumber(L, -1);
+#endif
 
    // 2. Read the mesh from the given mesh file. We can handle geometrically
    //    periodic meshes in this code.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
    int dim = mesh->Dimension();
 
+   
    // 3. Define the ODE solver used for time integration. Several explicit
    //    Runge-Kutta methods are available.
    ODESolver *ode_solver = NULL;
@@ -1339,32 +1375,34 @@ int main(int argc, char *argv[])
    // 8. Define the time-dependent evolution operator describing the ODE
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
-   FE_Evolution adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), b, *x, v_gf, asmbl,
-                    lom, dofs);
+   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), b, *x, v_gf, asmbl,
+					lom, dofs);
+   // FE_Evolution adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), b, *x, v_gf, asmbl,
+   //                  lom, dofs);
 
    double t = 0.0;
-   adv.SetTime(t);
-   ode_solver->Init(adv);
+   adv->SetTime(t);
+   ode_solver->Init(*adv);
 
    bool done = false;
    for (int ti = 0; !done; )
    {
       double dt_real = min(dt, t_final - t);
 
-      adv.SetDt(dt_real);
+      adv->SetDt(dt_real);
 
       if (exec_mode == 1)
       {
-         adv.SetRemapStartPos(x0);
+         adv->SetRemapStartPos(x0);
       }
       else if (exec_mode == 2)
       {
          // Move the mesh (and the solution) from x0 (one step).
          add(x0, dt_real, v_gf, *x);
-         adv.SetRemapStartPos(*x);
+         adv->SetRemapStartPos(*x);
       }
 
-      adv.SetInitialTimeStepTime(t);
+      adv->SetInitialTimeStepTime(t);
 
       ode_solver->Step(u, t, dt_real);
       ti++;
@@ -1421,7 +1459,7 @@ int main(int argc, char *argv[])
    cout << "Mass loss: " << abs(initialMass - finalMass) << endl;
 
    // Compute errors, if the initial condition is equal to the final solution
-   if (problem == 4) // solid body rotation
+   if (problem_num == 4) // solid body rotation
    {
       cout << "L1-error: " << u.ComputeLpError(1., u0) << ", L-Inf-error: "
            << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
@@ -1903,10 +1941,52 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    }
 }
 
+void lua_velocity_function(const Vector &x, Vector &v)
+{
+   lua_getglobal(L, "velocity_function");
+   int dim = x.Size();
+   
+   lua_pushnumber(L, x(0));
+   if (dim > 1)
+      lua_pushnumber(L, x(1));
+   if (dim > 2)
+      lua_pushnumber(L, x(2));
+
+   double v0 = 0;
+   double v1 = 0;
+   double v2 = 0;
+   lua_call(L, dim, dim);
+   v0 = (double)lua_tonumber(L, -1);
+   lua_pop(L, 1);
+   if (dim > 1) {
+      v1 = (double)lua_tonumber(L, -1);
+      lua_pop(L, 1);
+   }
+   if (dim > 2) {
+      v2 = (double)lua_tonumber(L, -1);
+      lua_pop(L, 1);
+   }
+
+   v(0) = v0;
+   if (dim > 1) {
+     v(0) = v1;
+     v(1) = v0;
+   }
+   if (dim > 2) {
+      v(0) = v2;
+      v(1) = v1;
+      v(2) = v0;
+   }
+}
 
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
+#ifdef USE_LUA
+   lua_velocity_function(x, v);
+   return;
+#endif
+  
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -1917,7 +1997,7 @@ void velocity_function(const Vector &x, Vector &v)
       X(i) = 2 * (x(i) - center) / (bb_max[i] - bb_min[i]);
    }
    
-   int ProbExec = problem % 20;
+   int ProbExec = problem_num % 20;
 
    switch (ProbExec)
    {
@@ -2078,9 +2158,32 @@ double ring(double rin, double rout, Vector c, Vector y)
    }
 }
 
-// Initial condition
+// Initial condition as defined by lua function
+double lua_u0_function(const Vector &x)
+{
+   lua_getglobal(L, "initial_function");
+   int dim = x.Size();
+
+   lua_pushnumber(L, x(0));
+   if (dim > 1)
+      lua_pushnumber(L, x(1));
+   if (dim > 2)
+      lua_pushnumber(L, x(2));
+
+   lua_call(L, dim, 1);
+   double u = (double)lua_tonumber(L, -1);
+   lua_pop(L, 1);
+
+   return u;
+}
+
+// Initial condition: lua function or hardcoded functions
 double u0_function(const Vector &x)
 {
+#ifdef USE_LUA
+   return lua_u0_function(x);
+#endif
+   
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -2091,7 +2194,7 @@ double u0_function(const Vector &x)
       X(i) = 2 * (x(i) - center) / (bb_max[i] - bb_min[i]);
    }
    
-   int ProbExec = problem % 10;
+   int ProbExec = problem_num % 10;
 
    switch (ProbExec)
    {
@@ -2220,10 +2323,35 @@ double u0_function(const Vector &x)
    return 0.0;
 }
 
+double lua_inflow_function(const Vector& x)
+{
+   lua_getglobal(L, "boundary_condition");
+
+   int dim = x.Size();
+
+   double t;
+   adv ? t = adv->GetTime() : t = 0.0;
+   
+   for (int d = 0; d < dim; d++) {
+      lua_pushnumber(L, x(d));
+   }
+   lua_pushnumber(L, t);
+
+   lua_call(L, dim+1, 1);
+   double u = (double)lua_tonumber(L, -1);
+   lua_pop(L, 1);
+
+   return u;
+}
+
 // Inflow boundary condition (zero for the problems considered in this example)
 double inflow_function(const Vector &x)
 {
-   switch (problem)
+#ifdef USE_LUA
+   return lua_inflow_function(x);
+#endif
+   
+   switch (problem_num)
    {
       case 0:
       case 1:

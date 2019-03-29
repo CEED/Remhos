@@ -46,6 +46,9 @@ make style
 
 endef
 
+# Configurable use of lua for problem setup
+USE_LUA = YES
+
 # Default installation location
 PREFIX = ./bin
 INSTALL = /usr/bin/install
@@ -70,6 +73,13 @@ MFEM_DIR2 := $(realpath $(MFEM_DIR))
 MFEM_LIB_FILE = mfem_is_not_built
 ifeq (,$(filter help clean distclean style,$(MAKECMDGOALS)))
    -include $(CONFIG_MK)
+endif
+
+# Add lua related flags if compiling with lua
+ifeq ($(USE_LUA),YES)
+  LUA = ../lua-5.1.5
+  MFEM_CPPFLAGS += -I$(LUA)/include -DUSE_LUA
+  MFEM_LIBS += -L$(LUA)/include -llua
 endif
 
 CXX = $(MFEM_CXX)
@@ -131,6 +141,9 @@ opt:
 
 debug:
 	$(MAKE) "REMHOS_DEBUG=YES"
+
+nolua:
+	$(MAKE) "USE_LUA=NO"
 
 $(OBJECT_FILES): override MFEM_DIR = $(MFEM_DIR2)
 $(OBJECT_FILES): $(HEADER_FILES) $(CONFIG_MK)
