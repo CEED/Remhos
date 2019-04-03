@@ -47,7 +47,7 @@ make style
 endef
 
 # Configurable use of lua for problem setup
-USE_LUA = YES
+USE_LUA = NO
 
 # Default installation location
 PREFIX = ./bin

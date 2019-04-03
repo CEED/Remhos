@@ -1908,6 +1908,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    }
 }
 
+#ifdef USE_LUA
 void lua_velocity_function(const Vector &x, Vector &v)
 {
    lua_getglobal(L, "velocity_function");
@@ -1945,6 +1946,7 @@ void lua_velocity_function(const Vector &x, Vector &v)
       v(2) = v0;
    }
 }
+#endif
 
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
@@ -2124,6 +2126,7 @@ double ring(double rin, double rout, Vector c, Vector y)
 }
 
 // Initial condition as defined by lua function
+#ifdef USE_LUA
 double lua_u0_function(const Vector &x)
 {
    lua_getglobal(L, "initial_function");
@@ -2141,6 +2144,7 @@ double lua_u0_function(const Vector &x)
 
    return u;
 }
+#endif
 
 // Initial condition: lua function or hardcoded functions
 double u0_function(const Vector &x)
@@ -2288,6 +2292,7 @@ double u0_function(const Vector &x)
    return 0.0;
 }
 
+#ifdef USE_LUA
 double lua_inflow_function(const Vector& x)
 {
    lua_getglobal(L, "boundary_condition");
@@ -2308,6 +2313,7 @@ double lua_inflow_function(const Vector& x)
 
    return u;
 }
+#endif
 
 // Inflow boundary condition (zero for the problems considered in this example)
 double inflow_function(const Vector &x)
