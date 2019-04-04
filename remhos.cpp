@@ -12,7 +12,6 @@
 //    ./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.01 -tf 10
 //    ./remhos -m ./data/periodic-square.mesh -p 1 -r 2 -dt 0.005 -tf 9
 //    ./remhos -m ./data/periodic-hexagon.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/amr-quad.mesh -p 1 -r 2 -dt 0.002 -tf 9
 //    ./remhos -m ./data/star-q3.mesh -p 1 -r 2 -dt 0.005 -tf 9
 //    ./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 9
 //    ./remhos -m ./data/disc-nurbs.mesh -p 2 -r 3 -dt 0.005 -tf 9
@@ -20,11 +19,12 @@
 //    ./remhos -m ./data/periodic-cube.mesh -p 0 -r 2 -o 2 -dt 0.02 -tf 8
 //    ./remhos -m ./data/periodic-square.mesh -p 4 -r 4 -dt 0.001 -o 2 -mt 3
 //    ./remhos -m ./data/periodic-square.mesh -p 3 -r 2 -dt 0.0025 -o 15 -tf 9 -mt 4
+//    ./remhos -m ./data/periodic-square.mesh -p 5 -r 4 -dt 0.002 -o 2 -tf 0.8 -mt 4
 //    ./remhos -m ./data/periodic-cube.mesh -p 5 -r 5 -dt 0.0001 -o 1 -tf 0.8 -mt 4
 //
 //    Remap mode:
 //    ./remhos -m ./data/periodic-square.mesh -p 10 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//    ./remhos -m ./data/periodic-square.mesh -p 11 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
+//    ./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
 //
 //
 // Description:  This example code solves the time-dependent advection equation
@@ -1377,18 +1377,12 @@ int main(int argc, char *argv[])
 
       adv->SetDt(dt_real);
 
-      if (exec_mode == 1)
-      {
-         adv->SetRemapStartPos(x0);
-      }
+      if (exec_mode == 1) { adv->SetRemapStartPos(x0); }
 
       ode_solver->Step(u, t, dt_real);
       ti++;
 
-      if (exec_mode == 1)
-      {
-         add(x0, t, v_gf, *x);
-      }
+      if (exec_mode == 1) { add(x0, t, v_gf, *x); }
 
       done = (t >= t_final - 1.e-8*dt);
 
@@ -1396,10 +1390,7 @@ int main(int argc, char *argv[])
       {
          cout << "time step: " << ti << ", time: " << t << endl;
 
-         if (visualization)
-         {
-            sout << "solution\n" << *mesh << u << flush;
-         }
+         if (visualization) { sout << "solution\n" << *mesh << u << flush; }
 
          if (visit)
          {
@@ -1428,7 +1419,10 @@ int main(int argc, char *argv[])
       finalMass = lumpedM * u;
    }
    else { finalMass = mass * u; }
-   cout << "Mass loss: " << abs(initialMass - finalMass) << endl;
+   cout << setprecision(10)
+        << "Final mass: " << finalMass << endl
+        << "Max value:  " << u.Max() << endl << setprecision(6)
+        << "Mass loss:  " << abs(initialMass - finalMass) << endl;
 
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
