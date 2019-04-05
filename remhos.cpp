@@ -975,6 +975,7 @@ int main(int argc, char *argv[])
    const char *mesh_file = "./data/unit-square.mesh";
    int ref_levels = 2;
    int order = 3;
+   int mesh_order = 2;
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
@@ -1001,7 +1002,9 @@ int main(int argc, char *argv[])
    args.AddOption(&ref_levels, "-r", "--refine",
                   "Number of times to refine the mesh uniformly.");
    args.AddOption(&order, "-o", "--order",
-                  "Order (degree) of the finite elements.");
+                  "Order (degree) of the finite element solution.");
+   args.AddOption(&order, "-mo", "--mesh-order",
+                  "Order (degree) of the mesh.");
    args.AddOption(&ode_solver_type, "-s", "--ode-solver",
                   "ODE solver: 1 - Forward Euler,\n\t"
                   "            2 - RK2 SSP, 3 - RK3 SSP, 4 - RK4, 6 - RK6.");
@@ -1079,18 +1082,13 @@ int main(int argc, char *argv[])
          return 3;
    }
 
-   // 4. Refine the mesh to increase the resolution. In this example we do
-   //    'ref_levels' of uniform refinement, where 'ref_levels' is a
-   //    command-line parameter. If the mesh is of NURBS type, we convert it to
-   //    a (piecewise-polynomial) high-order mesh.
-   for (int lev = 0; lev < ref_levels; lev++)
-   {
-      mesh->UniformRefinement();
-   }
-   if (mesh->NURBSext)
-   {
-      mesh->SetCurvature(max(order, 1));
-   }
+   // Refine the mesh and set the required curvature.
+   for (int lev = 0; lev < ref_levels; lev++) { mesh->UniformRefinement(); }
+   // Check if the input mesh is periodic.
+   const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
+                                    (mesh->GetNodes()->FESpace()->FEColl());
+   const bool periodic = (L2_coll != NULL);
+   mesh->SetCurvature(mesh_order, periodic);
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
    // Current mesh positions.
@@ -1271,8 +1269,8 @@ int main(int argc, char *argv[])
       }
    }
    if (exec_mode == 1) { lom.coef = &v_coef; }
-   else { lom.coef = &velocity; }
-   
+   else                { lom.coef = &velocity; }
+
    lom.irF = GetFaceIntRule(&fes);
    
    DG_FECollection fec0(0, dim, btype);
