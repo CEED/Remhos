@@ -165,7 +165,7 @@ $(CONFIG_MK) $(MFEM_LIB_FILE):
 clean: clean-build clean-exec
 
 clean-build:
-	rm -rf remhos *.o *~ *.dSYM
+	rm -rf remhos *.o *~ *.dSYM *.mesh *.gf
 clean-exec:
 	rm -rf ./results
 

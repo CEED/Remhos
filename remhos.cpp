@@ -1096,7 +1096,7 @@ int main(int argc, char *argv[])
    // Current mesh positions.
    GridFunction *x = mesh->GetNodes();
 
-   // Store initial positions.
+   // Store initial mesh positions.
    Vector x0(x->Size());
    x0 = *x;
 
@@ -1300,12 +1300,9 @@ int main(int argc, char *argv[])
       lom.fec0 = &fec0;
       lom.fec1 = &fec1;
 
-      if (exec_mode == 0)
-      {
-         lom.subcell_mesh = GetSubcellMesh(mesh, order);
-         lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, lom.fec0);
-         lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, lom.fec1);
-      }
+      lom.subcell_mesh = GetSubcellMesh(mesh, order);
+      lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, lom.fec0);
+      lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, lom.fec1);
    }
 
    Assembly asmbl(dofs, lom);
@@ -1316,19 +1313,21 @@ int main(int argc, char *argv[])
    GridFunction u(&fes);
    u.ProjectCoefficient(u0);
 
-   // Print starting meshes and initial condition.
-   ofstream omesh("remhos.mesh");
-   omesh.precision(precision);
-   mesh->Print(omesh);
-   if (lom.subcell_mesh)
+   // Print the starting meshes and initial condition.
    {
-      ofstream omesh_fine("remhos_fine.mesh");
-      omesh_fine.precision(precision);
-      lom.subcell_mesh->Print(omesh_fine);
+      ofstream meshHO("meshHO_init.mesh");
+      meshHO.precision(precision);
+      mesh->Print(meshHO);
+      if (lom.subcell_mesh)
+      {
+         ofstream meshLO("meshLO_init.mesh");
+         meshLO.precision(precision);
+         lom.subcell_mesh->Print(meshLO);
+      }
+      ofstream sltn("sltn_init.gf");
+      sltn.precision(precision);
+      u.Save(sltn);
    }
-   ofstream osol("remhos-init.gf");
-   osol.precision(precision);
-   u.Save(osol);
 
    // Create data collection for solution output: either VisItDataCollection for
    // ascii data files, or SidreDataCollection for binary data files.
@@ -1386,9 +1385,8 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k,
-					k.SpMat(), b, *x, v_gf, asmbl,
-					lom, dofs);
+   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
+                                        b, *x, v_gf, asmbl, lom, dofs);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1425,12 +1423,20 @@ int main(int argc, char *argv[])
       }
    }
 
-   // 9. Save the final solution. This output can be viewed later using GLVis:
-   //    "glvis -m remhos.mesh -g remhos-final.gf".
+   // Print the final meshes and solution.
    {
-      ofstream osol("remhos-final.gf");
-      osol.precision(precision);
-      u.Save(osol);
+      ofstream meshHO("meshHO_final.mesh");
+      meshHO.precision(precision);
+      mesh->Print(meshHO);
+      if (asmbl.subcell_mesh)
+      {
+         ofstream meshLO("meshLO_final.mesh");
+         meshLO.precision(precision);
+         asmbl.subcell_mesh->Print(meshLO);
+      }
+      ofstream sltn("sltn_final.gf");
+      sltn.precision(precision);
+      u.Save(sltn);
    }
 
    // check for conservation
