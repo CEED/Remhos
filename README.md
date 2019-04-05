@@ -19,7 +19,7 @@ maximum value (`max`) for the runs listed below:
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
 |  1. | 0.3888354875 | 0.9304836587 |
-|  2. | 0.3888354875 | 0.9435930561 |
+|  2. | 0.3888354875 | 0.941987734  |
 |  3. | 3.598223766  | 0.9995717563 |
 |  4. | 3.598223766  | 0.9995717563 |
 |  5. | 0.1631944444 | 0.9916942643 |
@@ -28,3 +28,4 @@ maximum value (`max`) for the runs listed below:
 
 An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.
+

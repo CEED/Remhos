@@ -153,26 +153,42 @@ void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
 
 // The mesh corresponding to Bezier subcells of order p is constructed.
 // NOTE: The mesh is assumed to consist of segments, quads or hexes.
-// TODO It seems that for an original mesh with periodic boundaries, this
-// routine produces a mesh that cannot be used for its intended purpose.
 Mesh* GetSubcellMesh(Mesh *mesh, int p)
 {
-   Mesh *subcell_mesh;
-   if (p == 1) // This case should never be called
-   {
-      subcell_mesh = mesh;
-   }
-   else if (mesh->Dimension() > 1)
+   MFEM_VERIFY(p > 1, "This function should not be called with p = 1.");
+
+   Mesh *subcell_mesh = NULL;
+   if (mesh->Dimension() > 1)
    {
       int basis_lor = BasisType::ClosedUniform; // Get a uniformly refined mesh.
       subcell_mesh = new Mesh(mesh, p, basis_lor);
-      // NOTE: Curvature is not considered for subcell weights.
-      subcell_mesh->SetCurvature(1);
+
+      // Check if the mesh is periodic.
+      const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
+                                       (mesh->GetNodes()->FESpace()->FEColl());
+      if (L2_coll == NULL)
+      {
+         // Standard non-periodic mesh.
+         // Note that the fine mesh is always linear.
+         subcell_mesh->SetCurvature(1);
+      }
+      else
+      {
+         // Periodic mesh - the node positions must be corrected after
+         // the call to the above Mesh constructor.
+         // Note that the fine mesh is always linear.
+         const bool disc_nodes = true;
+         subcell_mesh->SetCurvature(1, disc_nodes);
+         GridFunction *coarse = mesh->GetNodes();
+         GridFunction *fine   = subcell_mesh->GetNodes();
+         InterpolationGridTransfer transf(*coarse->FESpace(), *fine->FESpace());
+         transf.ForwardOperator().Mult(*coarse, *fine);
+      }
    }
    else
    {
       // TODO generalize to arbitrary 1D segments (different length than 1).
-      subcell_mesh = new Mesh(mesh->GetNE()*p, 1.);
+      subcell_mesh = new Mesh(mesh->GetNE() * p, 1.);
       subcell_mesh->SetCurvature(1);
    }
    return subcell_mesh;
@@ -711,8 +727,9 @@ private:
 class Assembly
 {
 public:
-   Assembly(DofInfo &_dofs, LowOrderMethod &lom) :
-            fes(lom.fes), dofs(_dofs)
+   Assembly(DofInfo &_dofs, LowOrderMethod &lom)
+      : fes(lom.fes), SubFes0(NULL), SubFes1(NULL), dofs(_dofs),
+        subcell_mesh(NULL)
    {
       Mesh *mesh = fes->GetMesh();
       int k, i, m, nd, dim = mesh->Dimension(), ne = fes->GetNE();
@@ -738,7 +755,7 @@ public:
       if (NeedSubcells)
       {
          VolumeTerms = lom.VolumeTerms;
-         SubcellWeights.SetSize(ne, dofs.numSubcells, dofs.numDofsSubcell);
+         SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
          
          if (exec_mode == 0)
          {
@@ -885,7 +902,7 @@ public:
       for (int j = 0; j < elmat.Width(); j++)
       {
          // Using the fact that elmat has just one row.
-         SubcellWeights(k,m,j) = elmat(0,j);
+         SubcellWeights(k)(m,j) = elmat(0,j);
       }
    }
 };
@@ -966,7 +983,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool visit = false;
    bool binary = false;
-   int vis_steps = 100;
+   int vis_steps = 20;
 
    int precision = 8;
    cout.precision(precision);
@@ -1215,6 +1232,7 @@ int main(int argc, char *argv[])
    lom.OptScheme = OptScheme;
    lom.fes = &fes;
 
+   lom.pk = NULL;
    if ((lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT))
    {
       if (!lom.OptScheme)
@@ -1264,6 +1282,7 @@ int main(int argc, char *argv[])
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
                                                lom.MonoType == ResDist_FCT);
 
+   lom.subcell_mesh = NULL;
    if (NeedSubcells)
    {
       if (exec_mode == 0)
@@ -1297,14 +1316,19 @@ int main(int argc, char *argv[])
    GridFunction u(&fes);
    u.ProjectCoefficient(u0);
 
+   // Print starting meshes and initial condition.
+   ofstream omesh("remhos.mesh");
+   omesh.precision(precision);
+   mesh->Print(omesh);
+   if (lom.subcell_mesh)
    {
-      ofstream omesh("remhos.mesh");
-      omesh.precision(precision);
-      mesh->Print(omesh);
-      ofstream osol("remhos-init.gf");
-      osol.precision(precision);
-      u.Save(osol);
+      ofstream omesh_fine("remhos_fine.mesh");
+      omesh_fine.precision(precision);
+      lom.subcell_mesh->Print(omesh_fine);
    }
+   ofstream osol("remhos-init.gf");
+   osol.precision(precision);
+   u.Save(osol);
 
    // Create data collection for solution output: either VisItDataCollection for
    // ascii data files, or SidreDataCollection for binary data files.
@@ -1436,12 +1460,8 @@ int main(int argc, char *argv[])
    delete mesh;
    delete ode_solver;
    delete dc;
-   
-   if ( lom.OptScheme && ( (lom.MonoType == DiscUpw)
-                        || (lom.MonoType = DiscUpw_FCT) ) )
-   {
-      delete lom.pk;
-   }
+
+   delete lom.pk;
    
    if (NeedSubcells)
    {
@@ -1654,7 +1674,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                for (i = 0; i < dofs.numDofsSubcell; i++)
                {
                   dofInd = k*nd + dofs.Sub2Ind(m, i);
-                  fluct += asmbl.SubcellWeights(k,m,i) * x(dofInd);
+                  fluct += asmbl.SubcellWeights(k)(m,i) * x(dofInd);
                   xMaxSubcell(m) = max(xMaxSubcell(m), x(dofInd));
                   xMinSubcell(m) = min(xMinSubcell(m), x(dofInd));
                   xSum += x(dofInd);
