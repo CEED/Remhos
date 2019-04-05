@@ -757,12 +757,9 @@ public:
          VolumeTerms = lom.VolumeTerms;
          SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
          
-         if (exec_mode == 0)
-         {
-            SubFes0 = lom.SubFes0;
-            SubFes1 = lom.SubFes1;
-            subcell_mesh = lom.subcell_mesh;
-         }
+         SubFes0 = lom.SubFes0;
+         SubFes1 = lom.SubFes1;
+         subcell_mesh = lom.subcell_mesh;
       }
       
       // Initialization for transport mode.
@@ -921,8 +918,8 @@ private:
    Vector &lumpedM;
    const Vector &b;
 
-   Vector start_pos;
-   GridFunction &mesh_pos, &vel_pos;
+   Vector start_mesh_pos, start_submesh_pos;
+   GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
 
    mutable Vector z;
 
@@ -935,14 +932,19 @@ private:
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM, BilinearForm &Kbf_, SparseMatrix &_K,
-                const Vector &_b, GridFunction &mpos, GridFunction &vpos,
+                const Vector &_b,
+                GridFunction &mpos, GridFunction *sm_pos,
+                GridFunction &vpos, GridFunction &vsm_pos,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
    virtual void SetDt(double _dt) { dt = _dt; }
-   void SetRemapStartPos(const Vector &spos) { start_pos = spos; }
-   void GetRemapStartPos(Vector &spos) { spos = start_pos; }
+   void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
+   {
+      start_mesh_pos    = m_pos;
+      start_submesh_pos = sm_pos;
+   }
 
    // Mass matrix solve, addressing the bad Bernstein condition number.
    virtual void NeumannSolve(const Vector &b, Vector &x) const;
@@ -1152,6 +1154,7 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
 
    // Mesh velocity.
+   // Note that the resulting coefficient will be evaluated in logical space.
    GridFunction v_gf(x->FESpace());
    v_gf.ProjectCoefficient(velocity);
    if (mesh->bdr_attributes.Size() > 0)
@@ -1200,7 +1203,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   // Compute the lumped mass matrix algebraicly
+   // Compute the lumped mass matrix algebraically
    Vector lumpedM;
    BilinearForm ml(&fes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
@@ -1279,8 +1282,9 @@ int main(int argc, char *argv[])
    // For linear elements, Opt scheme has already been disabled.
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
                                                lom.MonoType == ResDist_FCT);
-
    lom.subcell_mesh = NULL;
+   lom.SubFes0 = NULL;
+   lom.SubFes1 = NULL;
    if (NeedSubcells)
    {
       if (exec_mode == 0)
@@ -1301,6 +1305,31 @@ int main(int argc, char *argv[])
       lom.subcell_mesh = GetSubcellMesh(mesh, order);
       lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, lom.fec0);
       lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, lom.fec1);
+   }
+
+   // Submesh velocity.
+   GridFunction *xsub = NULL;
+   GridFunction v_sub_gf;
+   Vector x0_sub;
+   if (NeedSubcells)
+   {
+      xsub = lom.subcell_mesh->GetNodes();
+      v_sub_gf.SetSpace(xsub->FESpace());
+      v_sub_gf.ProjectCoefficient(velocity);
+      if (lom.subcell_mesh->bdr_attributes.Size() > 0)
+      {
+         // Zero it out on boundaries (not moving boundaries).
+         Array<int> ess_bdr(lom.subcell_mesh->bdr_attributes.Max()), ess_vdofs;
+         ess_bdr = 1;
+         xsub->FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
+         for (int i = 0; i < v_sub_gf.Size(); i++)
+         {
+            if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
+         }
+      }
+
+      // Store initial submesh positions.
+      x0_sub = *xsub;
    }
 
    Assembly asmbl(dofs, lom);
@@ -1384,7 +1413,8 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
-                                        b, *x, v_gf, asmbl, lom, dofs);
+                                        b, *x, xsub, v_gf, v_sub_gf,
+                                        asmbl, lom, dofs);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1397,12 +1427,16 @@ int main(int argc, char *argv[])
 
       adv->SetDt(dt_real);
 
-      if (exec_mode == 1) { adv->SetRemapStartPos(x0); }
+      if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
 
       ode_solver->Step(u, t, dt_real);
       ti++;
 
-      if (exec_mode == 1) { add(x0, t, v_gf, *x); }
+      if (exec_mode == 1)
+      {
+         add(x0, t, v_gf, *x);
+         add(x0_sub, t, v_sub_gf, *xsub);
+      }
 
       done = (t >= t_final - 1.e-8*dt);
 
@@ -1411,7 +1445,6 @@ int main(int argc, char *argv[])
          cout << "time step: " << ti << ", time: " << t << endl;
 
          if (visualization) { sout << "solution\n" << *mesh << u << flush; }
-
          if (visit)
          {
             dc->SetCycle(ti);
@@ -1472,7 +1505,7 @@ int main(int argc, char *argv[])
       delete asmbl.SubFes0;
       delete asmbl.SubFes1;
       delete asmbl.VolumeTerms;
-      delete asmbl.subcell_mesh;
+      delete lom.subcell_mesh;
    }
 
    return 0;
@@ -1603,18 +1636,6 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       // Discretization terms
       y = b;
       K.Mult(x, z);
-      
-      if ((exec_mode == 1) && (lom.OptScheme))
-      {
-         // TODO efficiency.
-         delete asmbl.subcell_mesh;
-         delete asmbl.SubFes0;
-         delete asmbl.SubFes1;
-         
-         asmbl.subcell_mesh = GetSubcellMesh(mesh, dummy->GetOrder());
-         asmbl.SubFes0 =  new FiniteElementSpace(asmbl.subcell_mesh, lom.fec0);
-         asmbl.SubFes1 =  new FiniteElementSpace(asmbl.subcell_mesh, lom.fec1);
-      }
 
       // Monotonicity terms
       for (k = 0; k < ne; k++)
@@ -1835,12 +1856,17 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            BilinearForm &Kbf_, SparseMatrix &_K,
-                           const Vector &_b, GridFunction &mpos,
-                           GridFunction &vpos, Assembly &_asmbl,
+                           const Vector &_b,
+                           GridFunction &mpos, GridFunction *sm_pos,
+                           GridFunction &vpos, GridFunction &vsm_pos,
+                           Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
    TimeDependentOperator(_M.Size()), z(_M.Size()), Mbf(Mbf_), M(_M), ml(_ml),
-   lumpedM(_lumpedM), Kbf(Kbf_), K(_K), b(_b), start_pos(mpos.Size()),
-   mesh_pos(mpos), vel_pos(vpos), asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
+   lumpedM(_lumpedM), Kbf(Kbf_), K(_K), b(_b),
+   start_mesh_pos(mpos.Size()), start_submesh_pos(vsm_pos.Size()),
+   mesh_pos(mpos), submesh_pos(sm_pos),
+   mesh_vel(vpos), submesh_vel(vsm_pos),
+   asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -1854,7 +1880,11 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
    if (exec_mode == 1)
    {
-      add(start_pos, t, vel_pos, mesh_pos);
+      add(start_mesh_pos, t, mesh_vel, mesh_pos);
+      if (submesh_pos)
+      {
+         add(start_submesh_pos, t, submesh_vel, *submesh_pos);
+      }
    }
 
    // Reassemble on the new mesh (given by mesh_pos).

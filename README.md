@@ -24,7 +24,7 @@ maximum value (`max`) for the runs listed below:
 |  4. | 3.5982222    | 0.9995717563 |
 |  5. | 0.1631944444 | 0.9916942643 |
 |  6. | 0.1631944444 | 0.9501635831 |
-|  7. | 0.3725812924 | 0.9999996774 |
+|  7. | 0.3725812924 | 0.9999996775 |
 
 An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.
