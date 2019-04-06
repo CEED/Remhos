@@ -77,7 +77,6 @@ struct LowOrderMethod
 {
    MONOTYPE MonoType;
    bool OptScheme;
-   DG_FECollection *fec0, *fec1;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;
    SparseMatrix D;
@@ -1285,35 +1284,21 @@ int main(int argc, char *argv[])
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
-   if (NeedSubcells)
-   {
-      if (exec_mode == 0)
-      {
-         lom.VolumeTerms = new MixedConvectionIntegrator(velocity, -1.0);
-      }
-      else if (exec_mode == 1)
-      {
-         // TODO Figure out why this gives a seg-fault, it should be v_coef, as
-         //      it is v_coef for the high order bilinearform k.
-         // lom.VolumeTerms = new MixedConvectionIntegrator(v_coef);
-         lom.VolumeTerms = new MixedConvectionIntegrator(velocity);
-      }
-      
-      lom.fec0 = &fec0;
-      lom.fec1 = &fec1;
-
-      lom.subcell_mesh = GetSubcellMesh(mesh, order);
-      lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, lom.fec0);
-      lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, lom.fec1);
-   }
-
-   // Submesh velocity.
    GridFunction *xsub = NULL;
    GridFunction v_sub_gf;
+   VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
    if (NeedSubcells)
    {
+      // Create the low order refined submesh.
+      lom.subcell_mesh = GetSubcellMesh(mesh, order);
+      lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, &fec0);
+      lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, &fec1);
+
+      // Submesh positions.
       xsub = lom.subcell_mesh->GetNodes();
+
+      // Submesh velocity.
       v_sub_gf.SetSpace(xsub->FESpace());
       v_sub_gf.ProjectCoefficient(velocity);
       if (lom.subcell_mesh->bdr_attributes.Size() > 0)
@@ -1327,9 +1312,20 @@ int main(int argc, char *argv[])
             if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
          }
       }
+      v_sub_coef.SetGridFunction(&v_sub_gf);
 
       // Store initial submesh positions.
       x0_sub = *xsub;
+
+      // Integrator on the submesh.
+      if (exec_mode == 0)
+      {
+         lom.VolumeTerms = new MixedConvectionIntegrator(velocity, -1.0);
+      }
+      else if (exec_mode == 1)
+      {
+         lom.VolumeTerms = new MixedConvectionIntegrator(v_sub_coef);
+      }
    }
 
    Assembly asmbl(dofs, lom);
