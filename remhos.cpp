@@ -928,8 +928,8 @@ public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM, BilinearForm &Kbf_, SparseMatrix &_K,
                 const Vector &_b,
-                GridFunction &mpos, GridFunction *sm_pos,
-                GridFunction &vpos, GridFunction &vsm_pos,
+                GridFunction &pos, GridFunction *sub_pos,
+                GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
 
    virtual void Mult(const Vector &x, Vector &y) const;
@@ -1427,7 +1427,7 @@ int main(int argc, char *argv[])
       if (exec_mode == 1)
       {
          add(x0, t, v_gf, *x);
-         add(x0_sub, t, v_sub_gf, *xsub);
+         if (NeedSubcells) { add(x0_sub, t, v_sub_gf, *xsub); }
       }
 
       done = (t >= t_final - 1.e-8*dt);
@@ -1848,15 +1848,15 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            BilinearForm &Kbf_, SparseMatrix &_K,
                            const Vector &_b,
-                           GridFunction &mpos, GridFunction *sm_pos,
-                           GridFunction &vpos, GridFunction &vsm_pos,
+                           GridFunction &pos, GridFunction *sub_pos,
+                           GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM), b(_b),
-   start_mesh_pos(mpos.Size()), start_submesh_pos(vsm_pos.Size()),
-   mesh_pos(mpos), submesh_pos(sm_pos),
-   mesh_vel(vpos), submesh_vel(vsm_pos),
+   start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
+   mesh_pos(pos), submesh_pos(sub_pos),
+   mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
 
