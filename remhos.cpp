@@ -731,11 +731,7 @@ public:
         subcell_mesh(NULL)
    {
       Mesh *mesh = fes->GetMesh();
-      int k, i, m, nd, dim = mesh->Dimension(), ne = fes->GetNE();
-      
-      // Use the first mesh element as indicator.
-      const FiniteElement &dummy = *fes->GetFE(0);
-      nd = dummy.GetDof();
+      int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
       
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
@@ -889,10 +885,10 @@ public:
    void ComputeSubcellWeights(const int k, const int m)
    {
       DenseMatrix elmat; // These are essentially the same.
-      int dofInd = k*dofs.numSubcells+m;
-      const FiniteElement *el0 = SubFes0->GetFE(dofInd);
-      const FiniteElement *el1 = SubFes1->GetFE(dofInd);
-      ElementTransformation *tr = subcell_mesh->GetElementTransformation(dofInd);
+      const int e_id = k*dofs.numSubcells + m;
+      const FiniteElement *el0 = SubFes0->GetFE(e_id);
+      const FiniteElement *el1 = SubFes1->GetFE(e_id);
+      ElementTransformation *tr = subcell_mesh->GetElementTransformation(e_id);
       VolumeTerms->AssembleElementMatrix2(*el1, *el0, *tr, elmat);
       
       for (int j = 0; j < elmat.Width(); j++)
@@ -1621,11 +1617,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)
    {
-      Mesh *mesh = lom.fes->GetMesh();
-      int m, dofInd2, loc, dim(mesh->Dimension());
-      double xSum, xNeighbor, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN, gammaP, gammaN,
-             minGammaP, minGammaN, aux, fluct, gamma = 10., eps = 1.E-15;
+      int m, dofInd2, loc;
+      double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
+             sumWeightsN, weightP, weightN, rhoP, rhoN,
+             aux, fluct, gamma = 10., eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
             
@@ -1857,11 +1852,12 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &vpos, GridFunction &vsm_pos,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
-   TimeDependentOperator(_M.Size()), z(_M.Size()), Mbf(Mbf_), M(_M), ml(_ml),
-   lumpedM(_lumpedM), Kbf(Kbf_), K(_K), b(_b),
+   TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
+   M(_M), K(_K), lumpedM(_lumpedM), b(_b),
    start_mesh_pos(mpos.Size()), start_submesh_pos(vsm_pos.Size()),
    mesh_pos(mpos), submesh_pos(sm_pos),
    mesh_vel(vpos), submesh_vel(vsm_pos),
+   z(_M.Size()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
