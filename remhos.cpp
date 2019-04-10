@@ -1889,29 +1889,18 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
-   Mesh *mesh = lom.fes->GetMesh();
-   int i, k, dim = mesh->Dimension(), ne = lom.fes->GetNE();
-   Array <int> bdrs, orientation;
-   FaceElementTransformations *Trans;
-
-   // Move towards x0 with current t.
-   const double t = GetTime();
-
    if (exec_mode == 1)
    {
+      // Move the mesh positions.
+      const double t = GetTime();
       add(start_mesh_pos, t, mesh_vel, mesh_pos);
       if (submesh_pos)
       {
          add(start_submesh_pos, t, submesh_vel, *submesh_pos);
       }
-   }
 
-   // Reassemble on the new mesh (given by mesh_pos).
-   if (exec_mode == 1)
-   {
-      ///////////////////////////
-      // Element contributions //
-      ///////////////////////////
+      // Reassemble on the new mesh.
+      // Element contributions.
       Mbf.BilinearForm::operator=(0.0);
       Mbf.Assemble();
       Kbf.BilinearForm::operator=(0.0);
@@ -1920,16 +1909,19 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.Assemble();
       ml.SpMat().GetDiag(lumpedM);
 
-      ////////////////////////////
-      // Boundary contributions //
-      ////////////////////////////
-      const bool NeedBdr = lom.OptScheme || ( (lom.MonoType != DiscUpw)
-                                              && (lom.MonoType != DiscUpw_FCT) );
-
+      // Boundary contributions.
+      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
+                                             lom.MonoType != DiscUpw_FCT);
       if (NeedBdr)
       {
          asmbl.bdrInt = 0.;
-         for (k = 0; k < ne; k++)
+
+         Mesh *mesh = lom.fes->GetMesh();
+         const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
+         Array<int> bdrs, orientation;
+         FaceElementTransformations *Trans;
+
+         for (int k = 0; k < ne; k++)
          {
             if (dim==1)
             {
@@ -1944,7 +1936,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
                mesh->GetElementFaces(k, bdrs, orientation);
             }
 
-            for (i = 0; i < dofs.numBdrs; i++)
+            for (int i = 0; i < dofs.numBdrs; i++)
             {
                Trans = mesh->GetFaceElementTransformations(bdrs[i]);
                asmbl.ComputeFluxTerms(k, i, Trans, lom);
