@@ -830,6 +830,8 @@ public:
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
+   // bdrInt - eq (32).
+   // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
 
    void ComputeFluxTerms(const int k, const int BdrID,
@@ -837,13 +839,12 @@ public:
    {
       Mesh *mesh = fes->GetMesh();
 
-      int i, j, l, nd, dim = mesh->Dimension();
+      int i, j, l, dim = mesh->Dimension();
       double aux, vn;
 
       const FiniteElement &el = *fes->GetFE(k);
-      nd = el.GetDof();
 
-      Vector vval, nor(dim), shape(nd);
+      Vector vval, nor(dim), shape(el.GetDof());
 
       for (l = 0; l < lom.irF->GetNPoints(); l++)
       {
@@ -868,7 +869,6 @@ public:
             Trans->Elem2->SetIntPoint(&eip1);
             lom.coef->Eval(vval, *Trans->Elem2, eip1);
             nor *= -1.;
-            Trans->Loc1.Transform(ip, eip1);
          }
          else
          {
@@ -876,7 +876,6 @@ public:
             el.CalcShape(eip1, shape);
             Trans->Elem1->SetIntPoint(&eip1);
             lom.coef->Eval(vval, *Trans->Elem1, eip1);
-            Trans->Loc2.Transform(ip, eip1);
          }
 
          nor /= nor.Norml2();
@@ -900,8 +899,8 @@ public:
 
             for (j = 0; j < dofs.numDofs; j++)
             {
-               bdrInt(k, BdrID, i*dofs.numDofs+j) -= aux
-                                                     * shape(dofs.BdrDofs(j,BdrID));
+               bdrInt(k, BdrID, i*dofs.numDofs+j) -=
+                  aux * shape(dofs.BdrDofs(j,BdrID));
             }
          }
       }
