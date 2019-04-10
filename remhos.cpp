@@ -1025,7 +1025,7 @@ int main(int argc, char *argv[])
                   "Number of times to refine the mesh uniformly.");
    args.AddOption(&order, "-o", "--order",
                   "Order (degree) of the finite element solution.");
-   args.AddOption(&order, "-mo", "--mesh-order",
+   args.AddOption(&mesh_order, "-mo", "--mesh-order",
                   "Order (degree) of the mesh.");
    args.AddOption(&ode_solver_type, "-s", "--ode-solver",
                   "ODE solver: 1 - Forward Euler,\n\t"
