@@ -68,7 +68,9 @@ maximum value (`max`) for the runs listed below:
 4. `./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 3 -mt 4`
 5. `./remhos -m ./data/periodic-square.mesh -p 5 -r 4 -dt 0.002 -o 2 -tf 0.8 -mt 2`
 6. `./remhos -m ./data/periodic-square.mesh -p 5 -r 4 -dt 0.002 -o 2 -tf 0.8 -mt 4`
-7. `./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4`
+7. `./remhos -m ./data/periodic-cube.mesh -p 0 -r 1 -o 2 -dt 0.02 -tf 8 -mt 4`
+8. `./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4`
+9. `./remhos -m ./data/periodic-cube.mesh -p 10 -r 1 -o 2 -dt 0.02 -tf 0.5 -mt 4`
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
@@ -78,7 +80,9 @@ maximum value (`max`) for the runs listed below:
 |  4. | 3.5982222    | 0.9995717563 |
 |  5. | 0.1631944444 | 0.9916942643 |
 |  6. | 0.1631944444 | 0.9501635831 |
-|  7. | 0.3725812939 | 0.9999996397 |
+|  7. | 0.9607429525 | 0.763596485  |
+|  8. | 0.3725812939 | 0.9999996397 |
+|  9. | 0.9607434514 | 0.9999600963 |
 
 An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.
