@@ -265,7 +265,7 @@ public:
    DenseMatrix BdrDofs, Sub2Ind;
    DenseTensor NbrDof;
 
-   int dim, numBdrs, numDofs, numSubcells, numDofsSubcell;
+   int dim, numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
    DofInfo(FiniteElementSpace* _fes)
    {
@@ -284,7 +284,7 @@ public:
       // Use the first mesh element as indicator.
       const FiniteElement &dummy = *fes->GetFE(0);
       dummy.ExtractBdrDofs(BdrDofs);
-      numDofs = BdrDofs.Height();
+      numFaceDofs = BdrDofs.Height();
       numBdrs = BdrDofs.Width();
 
       GetVertexBoundsMap();  // Fill map_for_bounds.
@@ -427,7 +427,7 @@ private:
 
             if (NbrElem[i] < 0) { continue; }
 
-            for (j = 0; j < numDofs; j++)
+            for (j = 0; j < numFaceDofs; j++)
             {
                dofInd = k*nd+BdrDofs(j,i);
                map_for_bounds[dofInd].push_back(NbrElem[i]);
@@ -587,7 +587,7 @@ private:
       Array <int> bdrs, NbrBdrs, orientation;
       FaceElementTransformations *Trans;
 
-      NbrDof.SetSize(ne, numBdrs, numDofs);
+      NbrDof.SetSize(ne, numBdrs, numFaceDofs);
 
       for (k = 0; k < ne; k++)
       {
@@ -611,7 +611,7 @@ private:
                Trans = mesh->GetFaceElementTransformations(bdrs[i]);
                nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
-               for (j = 0; j < numDofs; j++)
+               for (j = 0; j < numFaceDofs; j++)
                {
                   if (nbr >= 0)
                   {
@@ -623,7 +623,7 @@ private:
                      }
                      // Here it is utilized that the orientations of the face
                      // for the two elements are opposite of each other.
-                     NbrDof(k,i,j) = nbr*nd + BdrDofs(numDofs-1-j,ind);
+                     NbrDof(k,i,j) = nbr*nd + BdrDofs(numFaceDofs-1-j,ind);
                   }
                   else
                   {
@@ -638,7 +638,7 @@ private:
 
             // TODO: This works only for meshes of cubes with uniformly ordered
             // nodes.
-            for (j = 0; j < numDofs; j++)
+            for (j = 0; j < numFaceDofs; j++)
             {
                Trans = mesh->GetFaceElementTransformations(bdrs[0]);
                nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
@@ -769,7 +769,7 @@ public:
 
       if (NeedBdr)
       {
-         bdrInt.SetSize(ne, dofs.numBdrs, dofs.numDofs*dofs.numDofs);
+         bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
          bdrInt = 0.;
       }
       if (NeedSubcells)
@@ -834,7 +834,7 @@ public:
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
 
-   void ComputeFluxTerms(const int k, const int BdrID,
+   void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans, LowOrderMethod &lom)
    {
       Mesh *mesh = fes->GetMesh();
@@ -842,7 +842,7 @@ public:
       int i, j, l, dim = mesh->Dimension();
       double aux, vn;
 
-      const FiniteElement &el = *fes->GetFE(k);
+      const FiniteElement &el = *fes->GetFE(e_id);
 
       Vector vval, nor(dim), shape(el.GetDof());
 
@@ -862,7 +862,7 @@ public:
             CalcOrtho(Trans->Face->Jacobian(), nor);
          }
 
-         if (Trans->Elem1No != k)
+         if (Trans->Elem1No != e_id)
          {
             Trans->Loc2.Transform(ip, eip1);
             el.CalcShape(eip1, shape);
@@ -892,14 +892,13 @@ public:
             vn *= -1.0;
          }
 
-         for (i = 0; i < dofs.numDofs; i++)
+         const double w = ip.weight * Trans->Face->Weight();
+         for (i = 0; i < dofs.numFaceDofs; i++)
          {
-            aux = ip.weight * Trans->Face->Weight()
-                  * shape(dofs.BdrDofs(i,BdrID)) * vn;
-
-            for (j = 0; j < dofs.numDofs; j++)
+            aux = w * shape(dofs.BdrDofs(i,BdrID)) * vn;
+            for (j = 0; j < dofs.numFaceDofs; j++)
             {
-               bdrInt(k, BdrID, i*dofs.numDofs+j) -=
+               bdrInt(e_id, BdrID, i*dofs.numFaceDofs+j) -=
                   aux * shape(dofs.BdrDofs(j,BdrID));
             }
          }
@@ -935,6 +934,7 @@ private:
    BilinearForm &Mbf, &Kbf, &ml;
    SparseMatrix &M, &K;
    Vector &lumpedM;
+   const GridFunction &inflow_gf;
    const Vector &b;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -951,7 +951,7 @@ private:
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM, BilinearForm &Kbf_, SparseMatrix &_K,
-                const Vector &_b,
+                const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
@@ -1166,13 +1166,14 @@ int main(int argc, char *argv[])
 
    cout << "Number of unknowns: " << fes.GetVSize() << endl;
 
-   // 6. Set up and assemble the bilinear and linear forms corresponding to the
-   //    DG discretization. The DGTraceIntegrator involves integrals over mesh
-   //    interior faces.
-   //    Also prepare for the use of low and high order schemes.
-   VectorFunctionCoefficient velocity(dim, velocity_function);
+   // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
-   FunctionCoefficient u0(u0_function);
+   GridFunction inflow_gf(&fes);
+   inflow_gf.ProjectCoefficient(inflow);
+
+   // Velocity for the problem. Depending on the execution mode, this is the
+   // advective velocity (transport) or mesh velocity (remap).
+   VectorFunctionCoefficient velocity(dim, velocity_function);
 
    // Mesh velocity.
    // Note that the resulting coefficient will be evaluated in logical space.
@@ -1191,11 +1192,11 @@ int main(int argc, char *argv[])
    }
    VectorGridFunctionCoefficient v_coef(&v_gf);
 
+   // Set up the bilinear and linear forms corresp. to the DG discretization.
    BilinearForm m(&fes);
    m.AddDomainIntegrator(new MassIntegrator);
 
    BilinearForm k(&fes);
-
    if (exec_mode == 0)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
@@ -1224,6 +1225,10 @@ int main(int argc, char *argv[])
       }
    }
 
+   LinearForm b(&fes);
+   b.AddBdrFaceIntegrator(
+      new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
+
    // Compute the lumped mass matrix algebraically
    Vector lumpedM;
    BilinearForm ml(&fes);
@@ -1231,10 +1236,6 @@ int main(int argc, char *argv[])
    ml.Assemble();
    ml.Finalize();
    ml.SpMat().GetDiag(lumpedM);
-
-   LinearForm b(&fes);
-   b.AddBdrFaceIntegrator(
-      new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
 
    m.Assemble();
    m.Finalize();
@@ -1352,10 +1353,9 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dofs, lom);
 
-   // 7. Define the initial conditions, save the corresponding grid function to
-   //    a file and (optionally) save data in the VisIt format and initialize
-   //    GLVis visualization.
+   // Initial condition.
    GridFunction u(&fes);
+   FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
    // Print the starting meshes and initial condition.
@@ -1431,7 +1431,7 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
-                                        b, *x, xsub, v_gf, v_sub_gf,
+                                        b, inflow_gf, *x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs);
 
    double t = 0.0;
@@ -1561,27 +1561,26 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
 {
    int i, j, idx, dofInd;
    double xNeighbor;
-   Vector xDiff(dofs.numDofs);
+   Vector xDiff(dofs.numFaceDofs);
 
-   for (j = 0; j < dofs.numDofs; j++)
+   for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
       idx = dofs.NbrDof(k, BdrID, j);
-      // If NbrDof is -1 and bdrInt > 0., this is an inflow boundary. If NbrDof
-      // is -1 and bdrInt = 0., this is an outflow, which is handled correctly.
-      // TODO use inflow instead of xNeighbor = 0.
-      xNeighbor = idx < 0 ? 0. : x(idx);
+      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+      // s.t. this value will not matter.
+      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
       xDiff(j) = xNeighbor - x(dofInd);
    }
 
-   for (i = 0; i < dofs.numDofs; i++)
+   for (i = 0; i < dofs.numFaceDofs; i++)
    {
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      for (j = 0; j < dofs.numDofs; j++)
+      for (j = 0; j < dofs.numFaceDofs; j++)
       {
          // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
          // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numDofs + j)
+         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j)
                       * ( xDiff(i) + (xDiff(j)-xDiff(i)) * alpha(dofs.BdrDofs(i,BdrID))
                           * alpha(dofs.BdrDofs(j,BdrID)) );
       }
@@ -1787,15 +1786,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 // ydot = M^{-1} (K x + b).
 void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 {
-   const FiniteElement* dummy = lom.fes->GetFE(0);
-   int i, k, nd = dummy->GetDof(), ne = lom.fes->GetNE();
+   int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 1.;
 
    K.Mult(x, z);
    z += b;
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
-   if ((lom.MonoType != DiscUpw_FCT) || (lom.OptScheme))
+   if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The boundary contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
@@ -1873,13 +1871,13 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            BilinearForm &Kbf_, SparseMatrix &_K,
-                           const Vector &_b,
+                           const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), lumpedM(_lumpedM), b(_b),
+   M(_M), K(_K), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
@@ -2393,14 +2391,5 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
-   switch (problem_num)
-   {
-      case 0:
-      case 1:
-      case 2:
-      case 3:
-      case 4:
-      case 5: return 0.0;
-   }
    return 0.0;
 }
