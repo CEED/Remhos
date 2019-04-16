@@ -996,7 +996,7 @@ int main(int argc, char *argv[])
    const char *mesh_file = "./data/unit-square.mesh";
    int ref_levels = 2;
    int order = 3;
-   int mesh_order = 2;
+   int mesh_order = 1;
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
