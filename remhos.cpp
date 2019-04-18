@@ -99,7 +99,7 @@ Vector bb_min, bb_max;
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 
-enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT };
+enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT, ResDist_Monolithic };
 
 struct LowOrderMethod
 {
@@ -817,11 +817,12 @@ public:
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      const bool NeedBdr = lom.OptScheme || ( (lom.MonoType != DiscUpw)
-                                              && (lom.MonoType != DiscUpw_FCT) );
+      const bool NeedBdr = lom.OptScheme || ( lom.MonoType != DiscUpw
+                                           && lom.MonoType != DiscUpw_FCT );
 
-      const bool NeedSubcells = lom.OptScheme && (( lom.MonoType == ResDist)
-                                                  || (lom.MonoType == ResDist_FCT) );
+      const bool NeedSubcells = lom.OptScheme && ( lom.MonoType == ResDist
+                                     || lom.MonoType == ResDist_FCT
+                                     || lom.MonoType == ResDist_Monolithic );
 
       if (NeedBdr)
       {
@@ -1054,7 +1055,7 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = ResDist_FCT;
+   MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
    double t_final = 2.0;
    double dt = 0.0025;
@@ -1090,7 +1091,8 @@ int main(int argc, char *argv[])
                   "                     1 - discrete upwinding - LO,\n\t"
                   "                     2 - discrete upwinding - FCT,\n\t"
                   "                     3 - residual distribution - LO,\n\t"
-                  "                     4 - residual distribution - FCT.");
+                  "                     4 - residual distribution - FCT,n\t"
+                  "                     5 - residual distribution - monolithic.");
    args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element (basic)",
                   "Optimized scheme: PDU / subcell (optimized).");
    args.AddOption(&t_final, "-tf", "--t-final",
@@ -1187,7 +1189,7 @@ int main(int argc, char *argv[])
    bool fail = false;
    if (MonoType != None)
    {
-      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 4))
+      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
       {
          cout << "Unsupported option for monotonicity treatment." << endl;
          fail = true;
@@ -1359,7 +1361,8 @@ int main(int argc, char *argv[])
 
    // For linear elements, Opt scheme has already been disabled.
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
-                                               lom.MonoType == ResDist_FCT);
+                                               lom.MonoType == ResDist_FCT ||
+                                               lom.MonoType == ResDist_Monolithic);
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
@@ -1703,21 +1706,89 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              sumWeightsN, weightP, weightN, rhoP, rhoN,
              aux, fluct, gamma = 10., eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
+             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, dtx, RhoDot, alphaDot;
+      
+      alphaDot.SetSize(nd);
+      
+      int ctr1 = 0, ctr2 = 0; 
+      double* Mij = M.GetData();
 
+      if (lom.MonoType == ResDist_Monolithic)
+      {
+         dtx.SetSize(x.Size());
+         RhoDot.SetSize(x.Size());
+         
+         ComputeHighOrderSolution(x, dtx);
+         
+         for (k = 0; k < ne; k++)
+         {
+            dofs.xe_min(k) = numeric_limits<double>::infinity();
+            dofs.xe_max(k) = -dofs.xe_min(k);
+            
+            for (j = 0; j < nd; j++)
+            {
+               dofInd = k*nd+j;
+               dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
+               dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
+            }
+            
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               RhoDot(dofInd) = 0.;
+               for (j = nd-1; j >= 0; j--) // run backwards through columns
+               {
+                  RhoDot(dofInd) += Mij[ctr1] * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
+                  ctr1++;
+               }
+            }
+         }
+      }
+      
       // Discretization terms
       y = b;
       K.Mult(x, z);
-
+      
       // Monotonicity terms
       for (k = 0; k < ne; k++)
       {
+         if (lom.MonoType == ResDist_Monolithic)
+         {
+            for (j = 0; j < nd; j++)
+            {
+               dofInd = k*nd+j;
+               dofs.ComputeVertexBounds(x, dofInd);
+               
+               double beta = 10.;
+               alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
+                                       / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+               
+               alphaDot(j) = min(1., alpha(j) * abs(z(dofInd)) / (abs(RhoDot(dofInd)) + eps));
+               
+               // Splitting for volume term.
+               y(dofInd) += alpha(j) * z(dofInd);
+               z(dofInd) -= alpha(j) * z(dofInd);
+            }
+            
+            // Time derivative.
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               for (j = nd-1; j >= 0; j--) // run backwards through columns
+               {
+                  y(dofInd) += Mij[ctr2] * alphaDot(i) * alphaDot(j) * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
+                  ctr2++;
+               }
+            }
+         }
+         
          ////////////////////////////
          // Boundary contributions //
          ////////////////////////////
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
+            Vector alphaBdr; alphaBdr.SetSize(nd); alphaBdr = 0.;
+            LinearFluxLumping(k, nd, i, x, y, alphaBdr); // TODO
          }
 
          ///////////////////////////
@@ -1731,7 +1802,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          {
             dofInd = k*nd+j;
             dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
-            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
+            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd)); // computed twice
             xSum += x(dofInd);
             if (lom.OptScheme)
             {
@@ -2006,6 +2077,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    {
       if (lom.MonoType % 2 == 1)
       {
+         // NOTE: Right now this is called for monolithic limiting.
          ComputeLowOrderSolution(x, y);
       }
       else if (lom.MonoType % 2 == 0)
