@@ -1050,19 +1050,19 @@ int main(int argc, char *argv[])
 #else
    problem_num = 4;
 #endif
-   const char *mesh_file = "./data/unit-square.mesh";
+   const char *mesh_file = "data/periodic-square.mesh";
    int ref_levels = 2;
    int order = 3;
-   int mesh_order = 2;
+   int mesh_order = 1;
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
-   double t_final = 2.0;
-   double dt = 0.0025;
+   double t_final = 4.0;
+   double dt = 0.005;
    bool visualization = true;
    bool visit = false;
    bool binary = false;
-   int vis_steps = 20;
+   int vis_steps = 100;
 
    int precision = 8;
    cout.precision(precision);
