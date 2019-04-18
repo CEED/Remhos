@@ -96,6 +96,9 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
+                         int face_dof_id, int face_dof1D_cnt);
+
 enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT };
 
 struct LowOrderMethod
@@ -261,7 +264,6 @@ public:
    Vector xi_min, xi_max; // min/max values for each dof
    Vector xe_min, xe_max; // min/max values for each element
 
-   // TODO should these three be Tables?
    DenseMatrix BdrDofs, Sub2Ind;
    DenseTensor NbrDof;
 
@@ -589,6 +591,29 @@ private:
 
       NbrDof.SetSize(ne, numBdrs, numFaceDofs);
 
+      // Permutations of BdrDofs, taking into account all posible orientations.
+      // Assumes BdrDofs are ordered in xyz order, which is true for 3D hexes,
+      // but it isn't true for 2D quads.
+      // TODO check other FEs, function ExtractBoundaryDofs().
+      int orient_cnt = 1;
+      if (dim == 2) { orient_cnt = 2; }
+      if (dim == 3) { orient_cnt = 8; }
+      const int dof1D_cnt = p+1;
+      DenseTensor fdof_ids(numFaceDofs, numBdrs, orient_cnt);
+      for (int ori = 0; ori < orient_cnt; ori++)
+      {
+         for (int face_id = 0; face_id < numBdrs; face_id++)
+         {
+            for (int fdof_id = 0; fdof_id < numFaceDofs; fdof_id++)
+            {
+               // Index of fdof_id in the current orientation.
+               const int ori_fdof_id = GetLocalFaceDofIndex(dim, face_id, ori,
+                                                            fdof_id, dof1D_cnt);
+               fdof_ids(ori)(ori_fdof_id, face_id) = BdrDofs(fdof_id, face_id);
+            }
+         }
+      }
+
       for (k = 0; k < ne; k++)
       {
          if (dim==1)
@@ -609,26 +634,25 @@ private:
             for (i = 0; i < numBdrs; i++)
             {
                Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+               nbr = (Trans->Elem1No == k) ? Trans->Elem2No : Trans->Elem1No;
+
+               if (nbr < 0)
+               {
+                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k,i,j) = -1; }
+                  continue;
+               }
 
                for (j = 0; j < numFaceDofs; j++)
                {
-                  if (nbr >= 0)
+                  mesh->GetElementEdges(nbr, NbrBdrs, orientation);
+                  // Current face's id in the neighbor element.
+                  for (ind = 0; ind < numBdrs; ind++)
                   {
-                     mesh->GetElementEdges(nbr, NbrBdrs, orientation);
-                     // Find the local index ind in nbr of the common face.
-                     for (ind = 0; ind < numBdrs; ind++)
-                     {
-                        if (NbrBdrs[ind] == bdrs[i]) { break; }
-                     }
-                     // Here it is utilized that the orientations of the face
-                     // for the two elements are opposite of each other.
-                     NbrDof(k,i,j) = nbr*nd + BdrDofs(numFaceDofs-1-j,ind);
+                     if (NbrBdrs[ind] == bdrs[i]) { break; }
                   }
-                  else
-                  {
-                     NbrDof(k,i,j) = -1;
-                  }
+                  // Here it is utilized that the orientations of the face
+                  // for the two elements are opposite of each other.
+                  NbrDof(k,i,j) = nbr*nd + BdrDofs(numFaceDofs-1-j,ind);
                }
             }
          }
@@ -636,39 +660,71 @@ private:
          {
             mesh->GetElementFaces(k, bdrs, orientation);
 
-            // TODO: This works only for meshes of cubes with uniformly ordered
-            // nodes.
-            for (j = 0; j < numFaceDofs; j++)
+            for (int f = 0; f < numBdrs; f++)
             {
-               Trans = mesh->GetFaceElementTransformations(bdrs[0]);
+               Trans = mesh->GetFaceElementTransformations(bdrs[f]);
                nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
-               NbrDof(k,0,j) = nbr*nd + (p+1)*(p+1)*p+j;
+               if (nbr < 0)
+               {
+                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k, f, j) = -1; }
+                  continue;
+               }
 
-               Trans = mesh->GetFaceElementTransformations(bdrs[1]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+               // Current face's id in the neighbor element.
+               int face_id_nbr;
+               Array<int> nbr_faces, ori;
+               mesh->GetElementFaces(nbr, nbr_faces, ori);
+               for (int nf = 0; nf < nbr_faces.Size(); nf++)
+               {
+                  if (nbr_faces[nf] == bdrs[f]) { face_id_nbr = nf; break; }
+               }
 
-               NbrDof(k,1,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(p+1)*p+(j%(p+1));
+               for (j = 0; j < numFaceDofs; j++)
+               {
+                  // What is the index of the j-th dof on the face, given its
+                  // orientation.
+                  const int loc_face_dof_id =
+                     GetLocalFaceDofIndex(dim, face_id_nbr, ori[face_id_nbr],
+                                          j, dof1D_cnt);
+                  // What is the corresponding local dof id on the element,
+                  // given the face orientation.
+                  const int loc_dof_id =
+                     fdof_ids(ori[face_id_nbr])(loc_face_dof_id, face_id_nbr);
 
-               Trans = mesh->GetFaceElementTransformations(bdrs[2]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+                  NbrDof(k, f, j) = nbr*nd + loc_dof_id;
 
-               NbrDof(k,2,j) = nbr*nd + j*(p+1);
+                  /* // old method
+                  Trans = mesh->GetFaceElementTransformations(bdrs[0]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+                  NbrDof(k,0,j) = nbr*nd + (p+1)*(p+1)*p+j;
 
-               Trans = mesh->GetFaceElementTransformations(bdrs[3]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+                  Trans = mesh->GetFaceElementTransformations(bdrs[1]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
-               NbrDof(k,3,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(j%(p+1));
+                  NbrDof(k,1,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(p+1)*p+(j%(p+1));
 
-               Trans = mesh->GetFaceElementTransformations(bdrs[4]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+                  Trans = mesh->GetFaceElementTransformations(bdrs[2]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
-               NbrDof(k,4,j) = nbr*nd + (j+1)*(p+1)-1;
+                  NbrDof(k,2,j) = nbr*nd + j*(p+1);
 
-               Trans = mesh->GetFaceElementTransformations(bdrs[5]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+                  Trans = mesh->GetFaceElementTransformations(bdrs[3]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
-               NbrDof(k,5,j) = nbr*nd + j;
+                  NbrDof(k,3,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(j%(p+1));
+
+                  Trans = mesh->GetFaceElementTransformations(bdrs[4]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+
+                  NbrDof(k,4,j) = nbr*nd + (j+1)*(p+1)-1;
+
+                  Trans = mesh->GetFaceElementTransformations(bdrs[5]);
+                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+
+                  NbrDof(k,5,j) = nbr*nd + j;
+                  */
+               }
             }
          }
       }
@@ -996,7 +1052,7 @@ int main(int argc, char *argv[])
    const char *mesh_file = "./data/unit-square.mesh";
    int ref_levels = 2;
    int order = 3;
-   int mesh_order = 1;
+   int mesh_order = 2;
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
@@ -2392,4 +2448,282 @@ double inflow_function(const Vector &x)
 #endif
 
    return 0.0;
+}
+
+int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
+                           int face_dof_id, int face_dof1D_cnt)
+{
+   int k1, k2;
+   int kf1 = face_dof_id % face_dof1D_cnt;
+   int kf2 = face_dof_id / face_dof1D_cnt;
+   switch(loc_face_id)
+   {
+      case 0://BOTTOM
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      case 1://SOUTH
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      case 2://EAST
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      case 3://NORTH
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      case 4://WEST
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      case 5://TOP
+         switch(face_orient)
+         {
+            case 0://{0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1://{0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2://{1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3://{1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4://{2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5://{2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6://{3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7://{3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
+         break;
+      default: MFEM_ABORT("This face_id does not exist in 3D");
+   }
+   return k1 + face_dof1D_cnt * k2;
+}
+
+int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
+                         int face_dof_id, int face_dof1D_cnt)
+{
+   switch(dim)
+   {
+      case 1:
+         return face_dof_id;
+      case 2:
+         if (loc_face_id <= 1)
+         {
+            // SOUTH or EAST (canonical ordering)
+            return face_dof_id;
+         }
+         else
+         {
+            // NORTH or WEST (counter-canonical ordering)
+            return face_dof1D_cnt - 1 - face_dof_id;
+         }
+      case 3:
+         return GetLocalFaceDofIndex3D(loc_face_id, face_orient,
+                                       face_dof_id, face_dof1D_cnt);
+      default: MFEM_ABORT("Dimension too high!"); return 0;
+   }
 }
