@@ -2456,10 +2456,10 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
    int k1, k2;
    int kf1 = face_dof_id % face_dof1D_cnt;
    int kf2 = face_dof_id / face_dof1D_cnt;
-   switch(loc_face_id)
+   switch (loc_face_id)
    {
       case 0://BOTTOM
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2499,7 +2499,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 1://SOUTH
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2539,7 +2539,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 2://EAST
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2579,7 +2579,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 3://NORTH
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = face_dof1D_cnt-1-kf1;
@@ -2619,7 +2619,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 4://WEST
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = face_dof1D_cnt-1-kf1;
@@ -2659,7 +2659,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 5://TOP
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2706,7 +2706,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt)
 {
-   switch(dim)
+   switch (dim)
    {
       case 1:
          return face_dof_id;
