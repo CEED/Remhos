@@ -115,8 +115,8 @@ struct LowOrderMethod
    Mesh* subcell_mesh;
 };
 
-// Utility function to build a map to the offset
-// of the symmetric entry in a sparse matrix.
+// Utility function to build a map to the offset of the symmetric entry in a
+// sparse matrix.
 Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 {
    // Assuming that A is finalized
@@ -129,8 +129,7 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
       for (int end = I[row+1]; j < end; j++)
       {
          int col = J[j];
-         // Find the offset, _j, of the (col,row) entry
-         // and store it in smap[j].
+         // Find the offset, _j, of the (col,row) entry and store it in smap[j].
          for (int _j = I[col], _end = I[col+1]; true; _j++)
          {
             if (_j == _end)
@@ -149,8 +148,8 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
    return smap;
 }
 
-// Given a matrix K, matrix D (initialized with same sparsity as K)
-// is computed, such that (K+D)_ij >= 0 for i != j.
+// Given a matrix K, matrix D (initialized with same sparsity as K) is computed,
+// such that (K+D)_ij >= 0 for i != j.
 void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
                                     Array<int> smap, SparseMatrix& D)
 {
@@ -201,9 +200,9 @@ Mesh* GetSubcellMesh(Mesh *mesh, int p)
       }
       else
       {
-         // Periodic mesh - the node positions must be corrected after
-         // the call to the above Mesh constructor.
-         // Note that the fine mesh is always linear.
+         // Periodic mesh - the node positions must be corrected after the call
+         // to the above Mesh constructor. Note that the fine mesh is always
+         // linear.
          const bool disc_nodes = true;
          subcell_mesh->SetCurvature(1, disc_nodes);
          GridFunction *coarse = mesh->GetNodes();
@@ -222,8 +221,8 @@ Mesh* GetSubcellMesh(Mesh *mesh, int p)
 }
 
 // Appropriate quadrature rule for faces of is obtained.
-// TODO check if this gives the desired order. I use the same order
-// for all faces. In DGTraceIntegrator it uses the min of OrderW, why?
+// TODO: check if this gives the desired order. I use the same order for all
+// faces. In DGTraceIntegrator it uses the min of OrderW, why?
 const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
 {
    int i, qOrdF;
@@ -237,8 +236,8 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
       qOrdF = Trans->Elem1->OrderW();
       if (Trans->Elem2No >= 0)
       {
-         // qOrdF is chosen such that L2-norm of basis functions is
-         // computed accurately.
+         // qOrdF is chosen such that L2-norm of basis functions is computed
+         // accurately.
          qOrdF = max(qOrdF, Trans->Elem2->OrderW());
          break;
       }
@@ -362,8 +361,8 @@ private:
          {
             if (NbrEl2[j] < 0) { continue; }
 
-            // add neighbor elements that share a face
-            // with el1 and el2 but are not el
+            // add neighbor elements that share a face with el1 and el2 but are
+            // not el
             if ((NbrEl1[i] == NbrEl2[j]) && (NbrEl1[i] != el))
             {
                if (!found)
@@ -575,9 +574,9 @@ private:
    }
 
    // For each DOF on an element boundary, the global index of the DOF on the
-   // opposite site is computed and stored in a list. This is needed for
-   // lumping the flux contributions as in the paper. Right now it works on
-   // 1D meshes, quad meshes in 2D and 3D meshes of ordered cubes.
+   // opposite site is computed and stored in a list. This is needed for lumping
+   // the flux contributions as in the paper. Right now it works on 1D meshes,
+   // quad meshes in 2D and 3D meshes of ordered cubes.
    // NOTE: The mesh is assumed to consist of segments, quads or hexes.
    // NOTE: This approach will not work for meshes with hanging nodes.
    void FillNeighborDofs()
@@ -591,10 +590,10 @@ private:
 
       NbrDof.SetSize(ne, numBdrs, numFaceDofs);
 
-      // Permutations of BdrDofs, taking into account all posible orientations.
+      // Permutations of BdrDofs, taking into account all possible orientations.
       // Assumes BdrDofs are ordered in xyz order, which is true for 3D hexes,
       // but it isn't true for 2D quads.
-      // TODO check other FEs, function ExtractBoundaryDofs().
+      // TODO: check other FEs, function ExtractBoundaryDofs().
       int orient_cnt = 1;
       if (dim == 2) { orient_cnt = 2; }
       if (dim == 3) { orient_cnt = 8; }
@@ -650,8 +649,8 @@ private:
                   {
                      if (NbrBdrs[ind] == bdrs[i]) { break; }
                   }
-                  // Here it is utilized that the orientations of the face
-                  // for the two elements are opposite of each other.
+                  // Here it is utilized that the orientations of the face for
+                  // the two elements are opposite of each other.
                   NbrDof(k,i,j) = nbr*nd + BdrDofs(numFaceDofs-1-j,ind);
                }
             }
@@ -694,7 +693,8 @@ private:
 
                   NbrDof(k, f, j) = nbr*nd + loc_dof_id;
 
-                  /* // old method
+#if 0
+                  // old method
                   Trans = mesh->GetFaceElementTransformations(bdrs[0]);
                   nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
                   NbrDof(k,0,j) = nbr*nd + (p+1)*(p+1)*p+j;
@@ -723,15 +723,15 @@ private:
                   nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
                   NbrDof(k,5,j) = nbr*nd + j;
-                  */
+#endif
                }
             }
          }
       }
    }
 
-   // A list is filled to later access the correct element-global
-   // indices given the subcell number and subcell index.
+   // A list is filled to later access the correct element-global indices given
+   // the subcell number and subcell index.
    // NOTE: The mesh is assumed to consist of segments, quads or hexes.
    void FillSubcell2CellDof()
    {
@@ -1201,7 +1201,7 @@ int main(int argc, char *argv[])
       }
       if (order == 0)
       {
-         // Disable monotonicity treatment for piecwise constants.
+         // Disable monotonicity treatment for piecewise constants.
          mfem_warning("For -o 0, monotonicity treatment is disabled.");
          MonoType = None;
          OptScheme = false;
@@ -1233,8 +1233,8 @@ int main(int argc, char *argv[])
    // advective velocity (transport) or mesh velocity (remap).
    VectorFunctionCoefficient velocity(dim, velocity_function);
 
-   // Mesh velocity.
-   // Note that the resulting coefficient will be evaluated in logical space.
+   // Mesh velocity. Note that the resulting coefficient will be evaluated in
+   // logical space.
    GridFunction v_gf(x->FESpace());
    v_gf.ProjectCoefficient(velocity);
    if (mesh->bdr_attributes.Size() > 0)
@@ -1250,7 +1250,8 @@ int main(int argc, char *argv[])
    }
    VectorGridFunctionCoefficient v_coef(&v_gf);
 
-   // Set up the bilinear and linear forms corresp. to the DG discretization.
+   // Set up the bilinear and linear forms corresponding to the DG
+   // discretization.
    BilinearForm m(&fes);
    m.AddDomainIntegrator(new MassIntegrator);
 
@@ -1306,7 +1307,7 @@ int main(int argc, char *argv[])
    DofInfo dofs(&fes);
 
    // Precompute data required for high and low order schemes. This could be put
-   // into a seperate routine. I am using a struct now because the various
+   // into a separate routine. I am using a struct now because the various
    // schemes require quite different information.
    LowOrderMethod lom;
    lom.MonoType = MonoType;
@@ -1676,9 +1677,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
       {
-         ////////////////////////////
-         // Boundary contributions //
-         ////////////////////////////
+         // Boundary contributions
          if (lom.OptScheme)
          {
             for (i = 0; i < dofs.numBdrs; i++)
@@ -1782,18 +1781,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             }
          }
          
-         ////////////////////////////
-         // Boundary contributions //
-         ////////////////////////////
+         // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
             Vector alphaBdr; alphaBdr.SetSize(nd); alphaBdr = 0.;
             LinearFluxLumping(k, nd, i, x, y, alphaBdr); // TODO
          }
 
-         ///////////////////////////
-         // Element contributions //
-         ///////////////////////////
+         // Element contributions
          dofs.xe_min(k) = numeric_limits<double>::infinity();
          dofs.xe_max(k) = -dofs.xe_min(k);
          rhoP = rhoN = xSum = 0.;
@@ -2023,8 +2018,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
          add(start_submesh_pos, t, submesh_vel, *submesh_pos);
       }
 
-      // Reassemble on the new mesh.
-      // Element contributions.
+      // Reassemble on the new mesh. Element contributions.
       Mbf.BilinearForm::operator=(0.0);
       Mbf.Assemble();
       Kbf.BilinearForm::operator=(0.0);
@@ -2342,7 +2336,7 @@ double lua_u0_function(const Vector &x)
 }
 #endif
 
-// Initial condition: lua function or hardcoded functions
+// Initial condition: lua function or hard-coded functions
 double u0_function(const Vector &x)
 {
 #ifdef USE_LUA
@@ -2528,10 +2522,10 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
    int k1, k2;
    int kf1 = face_dof_id % face_dof1D_cnt;
    int kf2 = face_dof_id / face_dof1D_cnt;
-   switch(loc_face_id)
+   switch (loc_face_id)
    {
       case 0://BOTTOM
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2571,7 +2565,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 1://SOUTH
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2611,7 +2605,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 2://EAST
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2651,7 +2645,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 3://NORTH
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = face_dof1D_cnt-1-kf1;
@@ -2691,7 +2685,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 4://WEST
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = face_dof1D_cnt-1-kf1;
@@ -2731,7 +2725,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
          }
          break;
       case 5://TOP
-         switch(face_orient)
+         switch (face_orient)
          {
             case 0://{0, 1, 2, 3}
                k1 = kf1;
@@ -2778,7 +2772,7 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt)
 {
-   switch(dim)
+   switch (dim)
    {
       case 1:
          return face_dof_id;
