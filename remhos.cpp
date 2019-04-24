@@ -1497,6 +1497,8 @@ int main(int argc, char *argv[])
    double t = 0.0;
    adv->SetTime(t);
    ode_solver->Init(*adv);
+	
+	double umax = u.Max();
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1509,6 +1511,13 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(u, t, dt_real);
       ti++;
+		
+// 		if (u.Max() > umax + 1.E-12)
+// 			MFEM_ABORT("Overshoot");
+// 		umax = u.Max();
+// 		if (u.Min() < -1.E-12)
+// 			MFEM_ABORT("Undershoot"); // TODO debug
+		
 
       if (exec_mode == 1)
       {
@@ -1700,24 +1709,28 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)
    {
-      int m, dofInd2, loc;
+      int m, dofInd2, loc, n = x.Size();
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN,
              aux, fluct, gamma = 10., eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, dtx, RhoDot, alphaDot;
+             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, dtx, RhoDot, alphaDot, alphaBdr;
       
-      alphaDot.SetSize(nd);
+      alphaDot.SetSize(nd); alphaBdr.SetSize(nd);
       
-      int ctr1 = 0, ctr2 = 0; 
+      int ctr1 = 0, ctr2 = 0;
       double* Mij = M.GetData();
 
       if (lom.MonoType == ResDist_Monolithic)
       {
-         dtx.SetSize(x.Size());
-         RhoDot.SetSize(x.Size());
+         dtx.SetSize(n);
+         RhoDot.SetSize(n);
          
          ComputeHighOrderSolution(x, dtx);
+			
+			// Discretization terms
+			y = b;
+			K.Mult(x, z);
          
          for (k = 0; k < ne; k++)
          {
@@ -1740,13 +1753,27 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                   RhoDot(dofInd) += Mij[ctr1] * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
                   ctr1++;
                }
-            }
+//                alphaDot(i) = min(1., 1. * abs(z(dofInd)) / (abs(RhoDot(dofInd)) + eps));
+				}
+				
+// 				for (i = 0; i < nd; i++)
+//             {
+// 					dofInd = k*nd+i;
+// 					for (j = nd-1; j >= 0; j--) // run backwards through columns
+//                {
+//                   z(dofInd) += Mij[ctr2] * alphaDot(i) * alphaDot(j) * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
+//                   ctr2++;
+//                }
+//             }
          }
       }
-      
-      // Discretization terms
-      y = b;
-      K.Mult(x, z);
+      else
+		{
+			// Discretization terms
+			y = b;
+			K.Mult(x, z);
+		}
+
       
       // Monotonicity terms
       for (k = 0; k < ne; k++)
@@ -1762,30 +1789,31 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                        / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
                
-               alphaDot(j) = min(1., alpha(j) * abs(z(dofInd)) / (abs(RhoDot(dofInd)) + eps));
-               
+					alphaDot(j) = min(1., alpha(j) * abs(z(dofInd)) / (abs(RhoDot(dofInd)) + eps));
+               alpha(j) = 1.;
+					alphaBdr(j) = 0;
+               alphaDot(j) = 1.; // TODO debug
+					
                // Splitting for volume term.
                y(dofInd) += alpha(j) * z(dofInd);
                z(dofInd) -= alpha(j) * z(dofInd);
             }
             
-            // Time derivative.
             for (i = 0; i < nd; i++)
             {
-               dofInd = k*nd+i;
-               for (j = nd-1; j >= 0; j--) // run backwards through columns
+					dofInd = k*nd+i;
+					for (j = nd-1; j >= 0; j--) // run backwards through columns
                {
                   y(dofInd) += Mij[ctr2] * alphaDot(i) * alphaDot(j) * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
                   ctr2++;
                }
-            }
+				}
          }
          
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            Vector alphaBdr; alphaBdr.SetSize(nd); alphaBdr = 0.;
-            LinearFluxLumping(k, nd, i, x, y, alphaBdr); // TODO
+            LinearFluxLumping(k, nd, i, x, y, alphaBdr);
          }
 
          // Element contributions
@@ -1909,13 +1937,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 {
    int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
-   Vector alpha(nd); alpha = 1.;
+   Vector alpha(nd); 
 
    K.Mult(x, z);
    z += b;
 
-   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
-   if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
+   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
+	// order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
+   if ( (lom.MonoType != DiscUpw_FCT || lom.OptScheme) && lom.MonoType != ResDist_Monolithic)
    {
       // The boundary contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
