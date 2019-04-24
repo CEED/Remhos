@@ -1937,7 +1937,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 {
    int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
-   Vector alpha(nd); 
+   Vector alpha(nd); alpha = 1.;
 
    K.Mult(x, z);
    z += b;
