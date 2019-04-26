@@ -363,25 +363,18 @@ private:
 
             // add neighbor elements that share a face with el1 and el2 but are
             // not el
-            if ((NbrEl1[i] == NbrEl2[j]) && (NbrEl1[i] != el))
+            if (NbrEl1[i] == NbrEl2[j] && NbrEl1[i] != el)
             {
                if (!found)
                {
                   CmnNbr = NbrEl1[i];
                   found = true;
                }
-               else
-               {
-                  mfem_error("Found multiple common neighbor elements.");
-               }
+               else { MFEM_ABORT("Found multiple common neighbor elements."); }
             }
          }
       }
-      if (found)
-      {
-         return CmnNbr;
-      }
-      else { return -1; }
+      return (found == true) ? CmnNbr : -1;
    }
 
    // This fills the map_for_bounds according to our paper.
@@ -760,13 +753,10 @@ private:
       {
          for (j = 0; j < numDofsSubcell; j++)
          {
-            if (dim == 1)
-            {
-               Sub2Ind(m,j) = m + j;
-            }
+            if (dim == 1) { Sub2Ind(m,j) = m + j; }
             else if (dim == 2)
             {
-               aux = m + (m/p);
+               aux = m + m/p;
                switch (j)
                {
                   case 0: Sub2Ind(m,j) =  aux; break;
@@ -777,25 +767,17 @@ private:
             }
             else if (dim == 3)
             {
-               aux = m + (m/p)+(p+1)*(m/(p*p));
+               aux = m + m/p + (p+1)*(m/(p*p));
                switch (j)
                {
-                  case 0:
-                     Sub2Ind(m,j) = aux; break;
-                  case 1:
-                     Sub2Ind(m,j) = aux + 1; break;
-                  case 2:
-                     Sub2Ind(m,j) = aux + p+1; break;
-                  case 3:
-                     Sub2Ind(m,j) = aux + p+2; break;
-                  case 4:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
-                  case 5:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
-                  case 6:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
-                  case 7:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
+                  case 0: Sub2Ind(m,j) = aux; break;
+                  case 1: Sub2Ind(m,j) = aux + 1; break;
+                  case 2: Sub2Ind(m,j) = aux + p+1; break;
+                  case 3: Sub2Ind(m,j) = aux + p+2; break;
+                  case 4: Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
+                  case 5: Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
+                  case 6: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
+                  case 7: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
                }
             }
          }
@@ -817,11 +799,11 @@ public:
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      const bool NeedBdr = lom.OptScheme || ( (lom.MonoType != DiscUpw)
-                                              && (lom.MonoType != DiscUpw_FCT) );
+      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
+                                             lom.MonoType != DiscUpw_FCT);
 
-      const bool NeedSubcells = lom.OptScheme && (( lom.MonoType == ResDist)
-                                                  || (lom.MonoType == ResDist_FCT) );
+      const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
+                                                  lom.MonoType == ResDist_FCT);
 
       if (NeedBdr)
       {
@@ -839,24 +821,15 @@ public:
       }
 
       // Initialization for transport mode.
-      if ((exec_mode == 0) && (NeedBdr || NeedSubcells))
+      if (exec_mode == 0 && (NeedBdr || NeedSubcells))
       {
          for (k = 0; k < ne; k++)
          {
             if (NeedBdr)
             {
-               if (dim==1)
-               {
-                  mesh->GetElementVertices(k, bdrs);
-               }
-               else if (dim==2)
-               {
-                  mesh->GetElementEdges(k, bdrs, orientation);
-               }
-               else if (dim==3)
-               {
-                  mesh->GetElementFaces(k, bdrs, orientation);
-               }
+               if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
+               else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
+               else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
                for (i = 0; i < dofs.numBdrs; i++)
                {
@@ -886,8 +859,6 @@ public:
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
-   // bdrInt - eq (32).
-   // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
