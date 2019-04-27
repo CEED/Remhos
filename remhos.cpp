@@ -1561,12 +1561,12 @@ int main(int argc, char *argv[])
 void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
-   Vector y;
-   double resid = f.Norml2(), abs_tol = 1.e-4;
+   Vector y(n);
+   const double abs_tol = 1.e-4;
 
-   y.SetSize(n);
    x = 0.;
 
+   double resid = f.Norml2();
    for (iter = 1; iter <= max_iter; iter++)
    {
       M.Mult(x, y);
@@ -1608,9 +1608,10 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
       {
          // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
          // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j)
-                      * ( xDiff(i) + (xDiff(j)-xDiff(i)) * alpha(dofs.BdrDofs(i,BdrID))
-                          * alpha(dofs.BdrDofs(j,BdrID)) );
+         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
+                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
+                                  alpha(dofs.BdrDofs(i,BdrID)) *
+                                  alpha(dofs.BdrDofs(j,BdrID)));
       }
    }
 }
@@ -1621,7 +1622,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
 
-   if ( (lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT) )
+   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
       // Reassemble on the new mesh (given by mesh_pos).
       if (exec_mode == 1)
@@ -1858,8 +1859,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
          // Compute the bounds for each dof inside the loop.
          dofs.ComputeVertexBounds(x, dofInd);
 
-         uClipped(j) = min( dofs.xi_max(dofInd), max( x(dofInd) + dt*yH(dofInd),
-                                                      dofs.xi_min(dofInd) ) );
+         uClipped(j) = min(dofs.xi_max(dofInd), max(x(dofInd) + dt*yH(dofInd),
+                                                    dofs.xi_min(dofInd)) );
 
          fClipped(j) = lumpedM(dofInd) / dt
                        * ( uClipped(j) - (x(dofInd) + dt * yL(dofInd)) );
@@ -1975,8 +1976,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       }
       else if (lom.MonoType % 2 == 0)
       {
-         Vector yH, yL;
-         yH.SetSize(x.Size()); yL.SetSize(x.Size());
+         Vector yH(x.Size()), yL(x.Size());
 
          ComputeLowOrderSolution(x, yL);
          ComputeHighOrderSolution(x, yH);
