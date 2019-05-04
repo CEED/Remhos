@@ -654,37 +654,38 @@ private:
 
             for (int f = 0; f < numBdrs; f++)
             {
-               Trans = mesh->GetFaceElementTransformations(bdrs[f]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+               int el1_id, el2_id, nbr_id;
+               mesh->GetFaceElements(bdrs[f], &el1_id, &el2_id);
+               nbr_id = (el1_id == k) ? el2_id : el1_id;
 
-               if (nbr < 0)
+               if (nbr_id < 0)
                {
                   for (j = 0; j < numFaceDofs; j++) { NbrDof(k, f, j) = -1; }
                   continue;
                }
 
-               // Current face's id in the neighbor element.
-               int face_id_nbr;
-               Array<int> nbr_faces, ori;
-               mesh->GetElementFaces(nbr, nbr_faces, ori);
-               for (int nf = 0; nf < nbr_faces.Size(); nf++)
-               {
-                  if (nbr_faces[nf] == bdrs[f]) { face_id_nbr = nf; break; }
-               }
+               // Local index and orientation of the face, when considered in
+               // the neighbor element.
+               int el1_info, el2_info;
+               mesh->GetFaceInfos(bdrs[f], &el1_info, &el2_info);
+               const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
+                                                          : el2_info / 64;
+               const int face_or_nbr = (nbr_id == el1_id) ? el1_info % 64
+                                                          : el2_info % 64;
 
                for (j = 0; j < numFaceDofs; j++)
                {
                   // What is the index of the j-th dof on the face, given its
                   // orientation.
                   const int loc_face_dof_id =
-                     GetLocalFaceDofIndex(dim, face_id_nbr, ori[face_id_nbr],
+                     GetLocalFaceDofIndex(dim, face_id_nbr, face_or_nbr,
                                           j, dof1D_cnt);
                   // What is the corresponding local dof id on the element,
                   // given the face orientation.
                   const int loc_dof_id =
-                     fdof_ids(ori[face_id_nbr])(loc_face_dof_id, face_id_nbr);
+                     fdof_ids(face_or_nbr)(loc_face_dof_id, face_id_nbr);
 
-                  NbrDof(k, f, j) = nbr*nd + loc_dof_id;
+                  NbrDof(k, f, j) = nbr_id*nd + loc_dof_id;
 
 #if 0
                   // old method
@@ -2419,8 +2420,8 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
    int k1, k2;
-   int kf1 = face_dof_id % face_dof1D_cnt;
-   int kf2 = face_dof_id / face_dof1D_cnt;
+   const int kf1 = face_dof_id % face_dof1D_cnt;
+   const int kf2 = face_dof_id / face_dof1D_cnt;
    switch (loc_face_id)
    {
       case 0://BOTTOM
