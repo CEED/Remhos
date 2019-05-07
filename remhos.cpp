@@ -113,7 +113,7 @@ struct LowOrderMethod
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
    Mesh* subcell_mesh;
-	Vector scale;
+   Vector scale;
 };
 
 // Utility function to build a map to the offset of the symmetric entry in a
@@ -1413,34 +1413,34 @@ int main(int argc, char *argv[])
    }
 
    Assembly asmbl(dofs, lom);
-	
-	// Monolithic limiting correction factors.
-	if (lom.MonoType == ResDist_Monolithic)
-	{
-		int ne = mesh->GetNE();
-		lom.scale.SetSize(ne);
-		
-		double h = sqrt(dim) * 2. / (3. * pow(2., ref_levels)); // TODO generalize
-		
-		for (int e = 0; e < ne; e++)
-		{
-			const FiniteElement* el = fes.GetFE(0);
-			DenseMatrix velEval;
-			Vector vval;
-			double vmax = 0.;
-			ElementTransformation *tr = mesh->GetElementTransformation(e);
-			int qOrdE = tr->OrderW() + 2*el->GetOrder() + 2*max(tr->OrderGrad(el), 0);
-			const IntegrationRule *irE = &IntRules.Get(el->GetGeomType(), qOrdE);
-			velocity.Eval(velEval, *tr, *irE);
-			
-			for (int l = 0; l < irE->GetNPoints(); l++)
-			{
-				velEval.GetColumnReference(l, vval);
-				vmax = max(vmax, vval.Norml2());
-			}
-			lom.scale(e) = vmax / (2. * (h / order));
-		}
-	}
+   
+   // Monolithic limiting correction factors.
+   if (lom.MonoType == ResDist_Monolithic)
+   {
+      int ne = mesh->GetNE();
+      lom.scale.SetSize(ne);
+      
+      double h = sqrt(dim) * 2. / (3. * pow(2., ref_levels)); // TODO generalize
+      
+      for (int e = 0; e < ne; e++)
+      {
+         const FiniteElement* el = fes.GetFE(0);
+         DenseMatrix velEval;
+         Vector vval;
+         double vmax = 0.;
+         ElementTransformation *tr = mesh->GetElementTransformation(e);
+         int qOrdE = tr->OrderW() + 2*el->GetOrder() + 2*max(tr->OrderGrad(el), 0);
+         const IntegrationRule *irE = &IntRules.Get(el->GetGeomType(), qOrdE);
+         velocity.Eval(velEval, *tr, *irE);
+         
+         for (int l = 0; l < irE->GetNPoints(); l++)
+         {
+            velEval.GetColumnReference(l, vval);
+            vmax = max(vmax, vval.Norml2());
+         }
+         lom.scale(e) = vmax / (2. * (h / order));
+      }
+   }
 
    // Initial condition.
    GridFunction u(&fes);
@@ -1526,12 +1526,12 @@ int main(int argc, char *argv[])
    double t = 0.0;
    adv->SetTime(t);
    ode_solver->Init(*adv);
-	
-	double umax = u.Max();
-	double umin = u.Min();
-	
-	Vector res = u;
-	bool converged = false;
+   
+   double umax = u.Max();
+   double umin = u.Min();
+   
+   Vector res = u;
+   bool converged = false;
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1544,20 +1544,20 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(u, t, dt_real);
       ti++;
-		
-		// Monotonicity check for debug purposes mainly.
-		if (problem_num % 10 != 6)
-		{
-			if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
-			umax = u.Max();
-			if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
-			umin = u.Min();
-		}
-		else
-		{
-			if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
-			if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
-		}
+      
+      // Monotonicity check for debug purposes mainly.
+      if (problem_num % 10 != 6)
+      {
+         if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         umax = u.Max();
+         if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+         umin = u.Min();
+      }
+      else
+      {
+         if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+      }
 
       if (exec_mode == 1)
       {
@@ -1566,13 +1566,13 @@ int main(int argc, char *argv[])
       }
 
       done = (t >= t_final - 1.e-8*dt);
-		
-		if (problem_num == 6) // Steady state simulation.
-		{
-			res -= u;
-			if (res.Norml2() < 1.e-6) { done == true; }
-			else { cout << res.Norml2() << endl; res = u; }
-		}
+      
+      if (problem_num == 6) // Steady state simulation.
+      {
+         res -= u;
+         if (res.Norml2() < 1.e-6) { done == true; }
+         else { cout << res.Norml2() << endl; res = u; } // TODO development
+      }
 
       if (done || ti % vis_steps == 0)
       {
@@ -1728,10 +1728,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       // Discretization and monotonicity terms.
       lom.D.Mult(x, y);
-		if (!lom.OptScheme)
+      if (!lom.OptScheme)
       {
-			y += b; // Only use b, in case that no flux lumping is used.
-		}
+         y += b; // Only use b, in case that no flux lumping is used.
+      }
 
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
@@ -1895,127 +1895,61 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)-Monolithic
    {
-      int m, dofInd2, loc, N = x.Size();
+      int m, dofInd2, loc, it, CtrIt, ctr = 0, max_iter = 100;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN,
-             aux, fluct, gamma = 10., eps = 1.E-15,
-				 SumRhoDotP, SumRhoDotN;
+             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct, 
+             uDotMin, uDotMax, diff, MassP, MassN,
+             gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
-
-
-		
-		enum LIMTYPE {FCT, ABA};
-		LIMTYPE lim = FCT;
-		Vector alphaDot(nd), alpha0(nd), alpha1(nd); alpha0 = 0.; alpha1 = 1.;// TODO-dev
-		Vector dtx(N), RhoDot(N), dtxe_max(ne), dtxe_min(ne);
-		int ctr = 0;
-		int max_iter = 100;
-		bool UseMassLim = false;
-		
-		if (!UseMassLim) { max_iter = -1; }
-		
+             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
+             m_it(nd), uDot(nd), res(nd), alpha0(nd), alpha1(nd);
+      
+      bool UseMassLim = false;
       double* Mij = M.GetData();
-		
-		double beta = 10.;
-		
-// 		ComputeHighOrderSolution(x, dtx); // Has to be called before z is set.
-		
-		for (k = 0; k < ne; k++)
+      
+      if (!UseMassLim) { max_iter = -1; }
+      alpha0 = 0.; alpha1 = 1.;// TODO development
+      
+      for (k = 0; k < ne; k++)
       {
-			dofs.xe_min(k) = numeric_limits<double>::infinity();
+         dofs.xe_min(k) = numeric_limits<double>::infinity();
          dofs.xe_max(k) = -dofs.xe_min(k);
-// 			dtxe_min(k) = numeric_limits<double>::infinity();
-// 			dtxe_max(k) = -dtxe_min(k);
-			for (i = 0; i < nd; i++)
-			{
-				dofInd = k*nd+i;
-				dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
+
+         for (i = 0; i < nd; i++)
+         {
+            dofInd = k*nd+i;
+            dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
             dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
-// 				dtxe_max(k) = max(dtxe_max(k), dtx(dofInd));
-// 				dtxe_min(k) = min(dtxe_min(k), dtx(dofInd));
-				
-// 				RhoDot(dofInd) = 0.;
-//             for (j = nd-1; j >= 0; j--) // run backwards through columns
-//             {
-//                RhoDot(dofInd) += Mij[ctr] * (dtx(dofInd) - dtx(k*nd+j)); // use knowledge of how M looks like
-//                ctr++;
-//             }
-			}
-		}
+         }
+      }
 
       // Discretization terms
       y = 0.;
       K.Mult(x, z);
-		Vector d(z);
+      d = z;
 
       // Monotonicity terms
       for (k = 0; k < ne; k++)
       {
-// 			SumRhoDotP = SumRhoDotN = 0.;
-			for (j = 0; j < nd; j++)
+         for (j = 0; j < nd; j++)
          {
             dofInd = k*nd+j;
-				// Compute the bounds for each dof inside the loop.
-				dofs.ComputeVertexBounds(x, dofInd);
-				
+            // Compute the bounds for each dof inside the loop.
+            dofs.ComputeVertexBounds(x, dofInd);
+            
             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
             
-// 				alphaDot(j) = min(1., alpha(j) * abs(z(dofInd)) / (abs(RhoDot(dofInd)) + eps));
-				
-				
-				// Other correction factors.
-// 				double dtxi_min = numeric_limits<double>::infinity();
-// 				double dtxi_max = -dtxi_min;
-// 				
-// 				for (i = 0; i < (int)dofs.map_for_bounds[dofInd].size(); i++)
-// 				{
-// 					dtxi_max = max(dtxi_max, dtxe_max(dofs.map_for_bounds[dofInd][i]));
-// 					dtxi_min = min(dtxi_min, dtxe_min(dofs.map_for_bounds[dofInd][i]));
-// 				}
-				
-// 				alphaDot(j) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
-// 																	  / (max(dtxe_max(k) - dtx(dofInd), dtx(dofInd) - dtxe_min(k)) + eps) );
-            
             // Splitting for volume term.
             y(dofInd) += alpha(j) * z(dofInd);
-            z(dofInd) -= alpha(j) * z(dofInd);
-				
-// 				if (lim == FCT)
-// 				{
-// 					RhoDot(dofInd) *= alphaDot(j);
-// 					SumRhoDotP += max(0., RhoDot(dofInd));
-// 					SumRhoDotN += min(0., RhoDot(dofInd));
-// 				}
-// 				else
-// 				{
-// 					MFEM_ABORT("TODO.");
-// 				}
-			}
-			
-// 			if (lim == FCT)
-// 			{
-// 				for (j = 0; j < nd; j++)
-// 				{
-// 					dofInd = k*nd+j;
-// 					if ((SumRhoDotP + SumRhoDotN > eps) && (RhoDot(dofInd) > eps))
-// 					{
-// 						RhoDot(dofInd) *= - SumRhoDotN / SumRhoDotP;
-// 					}
-// 					if ((SumRhoDotP + SumRhoDotN < -eps) && (RhoDot(dofInd) < -eps))
-// 					{
-// 						RhoDot(dofInd) *= - SumRhoDotP / SumRhoDotN;
-// 					}
-// 					y(dofInd) += RhoDot(dofInd);
-// 				}
-// 			}
-			
+            z(dofInd) -= alpha(j) * z(dofInd);            
+         }
+         
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
             LinearFluxLumping(k, nd, i, x, y, alpha);
-				LinearFluxLumping(k, nd, i, x, d, alpha1); // TODO dev alpha
+            LinearFluxLumping(k, nd, i, x, d, alpha1); // TODO development alpha
          }
 
          // Element contributions
@@ -2126,82 +2060,78 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             }
          }
          
-         // Time derivative and mass matrix.
-         // y = f_e, fH_e - f_e = d - y
-         Vector g_e(nd), uDot(nd);
-			g_e = uDot = 0.;
-			for (int it = 0; it <= max_iter; it++)
-			{
-				for (i = 0; i < nd; i++)
-				{
-					dofInd = k*nd+i;
-					uDot(i) = (y(dofInd) + g_e(i)) / lumpedM(dofInd);
-				}
-				
-				int CtrIt = ctr;
-				
-				double uDotMin = numeric_limits<double>::infinity();
-				double uDotMax = -uDotMin;
-				
-				for (i = 0; i < nd; i++) // eq. (28)
-				{
-					uDotMin = min(uDotMin, uDot(i));
-					uDotMax = max(uDotMax, uDot(i));
-					
-					dofInd = k*nd+i;
-					g_e(i) = 0.;
-					for (j = nd-1; j >= 0; j--) // run backwards through columns
-					{
-						g_e(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
-						ctr++;
-					}
-					double diff = d(dofInd) - y(dofInd);
-					g_e(i) += min(1., abs(g_e(i)) / (abs(diff) + eps)) * diff; // eq. (27) - (29)
-				}
-				
-				ctr = CtrIt;
-				double MassP, MassN;
-				MassP = MassN = 0.;
-				
-				for (i = 0; i < nd; i++)
-				{
-					dofInd = k*nd+i;
-					alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
-																	  / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-					g_e(i) *= alpha(i);
-					MassP += max(0., g_e(i));
-					MassN += min(0., g_e(i));
-				}
-				
-				for (i = 0; i < nd; i++)
-				{
-					if (MassP + MassN > eps)
-					{
-						g_e(i) = min(0., g_e(i)) - max(0., g_e(i)) * MassN / MassP;
-					}
-					else if (MassP + MassN < -eps)
-					{
-						g_e(i) = max(0., g_e(i)) - min(0., g_e(i)) * MassP / MassN;
-					}
-				}
-				
-				Vector res(nd);
-				for (i = 0; i < nd; i++)
-				{
-					dofInd = k*nd+i;
-					res(i) = g_e(i) + y(dofInd) - lumpedM(dofInd) * uDot(i);
-				}
-				if (res.Norml2() <= 1.e-8)
-				{
-					break;
-				}
-			}
-         
+         // Time derivative and mass matrix, if UseMassLim = false, max_iter has
+         // been set to -1, and the iteration loop is not entered.
+         m_it = uDot = 0.;
+         for (it = 0; it <= max_iter; it++)
+         {
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               uDot(i) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
+            }
+            
+            CtrIt = ctr;
+            
+            uDotMin = numeric_limits<double>::infinity();
+            uDotMax = -uDotMin;
+            
+            for (i = 0; i < nd; i++) // eq. (28)
+            {
+               uDotMin = min(uDotMin, uDot(i));
+               uDotMax = max(uDotMax, uDot(i));
+               
+               dofInd = k*nd+i;
+               m_it(i) = 0.;
+               for (j = nd-1; j >= 0; j--) // run backwards through columns
+               {
+                  m_it(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
+                  ctr++;
+               }
+               diff = d(dofInd) - y(dofInd);
+               m_it(i) += min(1., abs(m_it(i)) / (abs(diff) + eps)) * diff; // eq. (27) - (29)
+            }
+            
+            ctr = CtrIt;
+            MassP = MassN = 0.;
+            
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
+                                                     / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
+               m_it(i) *= alpha(i);
+               MassP += max(0., m_it(i));
+               MassN += min(0., m_it(i));
+            }
+            
+            for (i = 0; i < nd; i++)
+            {
+               if (MassP + MassN > eps)
+               {
+                  m_it(i) = min(0., m_it(i)) - max(0., m_it(i)) * MassN / MassP;
+               }
+               else if (MassP + MassN < -eps)
+               {
+                  m_it(i) = max(0., m_it(i)) - min(0., m_it(i)) * MassP / MassN;
+               }
+            }
+            
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               res(i) = m_it(i) + y(dofInd) - lumpedM(dofInd) * uDot(i);
+            }
+            if (res.Norml2() <= tol)
+            {
+               break;
+            }
+         }
 
          for (i = 0; i < nd; i++)
          {
-				dofInd = k*nd+i;
-            y(dofInd) = (y(dofInd) + g_e(i)) / lumpedM(dofInd);
+            dofInd = k*nd+i;
+            y(dofInd) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
          }
       }
    }
@@ -2217,7 +2147,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    K.Mult(x, z);
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
-	// order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
+   // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The boundary contributions have been computed in the low order scheme.
@@ -2509,23 +2439,23 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-		case 6:
-		{
-			switch (dim)
+      case 6:
+      {
+         switch (dim)
          {
             case 1: v(0) = 1.0; break;
             case 2: v(0) = x(1); v(1) = -x(0); break;
             case 3: v(0) = x(1); v(1) = -x(0); v(2) = 0.0; break;
          }
-			break;
-		}
+         break;
+      }
       case 10:
       case 11:
       case 12:
       case 13:
       case 14:
       case 15:
-		case 16:
+      case 16:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2828,16 +2758,16 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
-	if ((problem_num % 10) == 6 && x.Size() == 2)
-	{
-		if (x(1) >= 0.15 && x(1) < 0.45) { return 1.; }
-		else if (x(1) >= 0.55 && x(1) < 0.85)
-		{
-			return pow(cos(10.*M_PI * (x(1) - 0.7) / 3.), 2.);
-		}
-		else { return 0.; }
-	}
-	else { return 0.0; }
+   if ((problem_num % 10) == 6 && x.Size() == 2)
+   {
+      if (x(1) >= 0.15 && x(1) < 0.45) { return 1.; }
+      else if (x(1) >= 0.55 && x(1) < 0.85)
+      {
+         return pow(cos(10.*M_PI * (x(1) - 0.7) / 3.), 2.);
+      }
+      else { return 0.; }
+   }
+   else { return 0.0; }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
