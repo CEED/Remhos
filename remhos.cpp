@@ -71,6 +71,55 @@
 using namespace std;
 using namespace mfem;
 
+void VisualizeField(socketstream &sock, const char *vishost, int visport,
+                    ParGridFunction &gf, const char *title,
+                    int x, int y, int w, int h, bool vec)
+{
+   ParMesh &pmesh = *gf.ParFESpace()->GetParMesh();
+   MPI_Comm comm = pmesh.GetComm();
+
+   int num_procs, myid;
+   MPI_Comm_size(comm, &num_procs);
+   MPI_Comm_rank(comm, &myid);
+
+   bool newly_opened = false;
+   int connection_failed;
+
+   do
+   {
+      if (myid == 0)
+      {
+         if (!sock.is_open() || !sock)
+         {
+            sock.open(vishost, visport);
+            sock.precision(8);
+            newly_opened = true;
+         }
+         sock << "solution\n";
+      }
+
+      pmesh.PrintAsOne(sock);
+      gf.SaveAsOne(sock);
+
+      if (myid == 0 && newly_opened)
+      {
+         sock << "window_title '" << title << "'\n"
+              << "window_geometry "
+              << x << " " << y << " " << w << " " << h << "\n"
+              << "keys maaAcl";
+         if ( vec ) { sock << "vvv"; }
+         sock << endl;
+      }
+
+      if (myid == 0)
+      {
+         connection_failed = !sock && !newly_opened;
+      }
+      MPI_Bcast(&connection_failed, 1, MPI_INT, 0, comm);
+   }
+   while (connection_failed);
+}
+
 #ifdef USE_LUA
 #include "lua.hpp"
 lua_State* L;
@@ -112,7 +161,7 @@ struct LowOrderMethod
    VectorCoefficient* coef;
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
-   Mesh* subcell_mesh;
+   ParMesh* subcell_mesh;
 };
 
 // Utility function to build a map to the offset of the symmetric entry in a
@@ -177,49 +226,6 @@ void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
    }
 }
 
-// The mesh corresponding to Bezier subcells of order p is constructed.
-// NOTE: The mesh is assumed to consist of segments, quads or hexes.
-Mesh* GetSubcellMesh(Mesh *mesh, int p)
-{
-   MFEM_VERIFY(p > 1, "This function should not be called with p = 1.");
-
-   Mesh *subcell_mesh = NULL;
-   if (mesh->Dimension() > 1)
-   {
-      int basis_lor = BasisType::ClosedUniform; // Get a uniformly refined mesh.
-      subcell_mesh = new Mesh(mesh, p, basis_lor);
-
-      // Check if the mesh is periodic.
-      const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
-                                       (mesh->GetNodes()->FESpace()->FEColl());
-      if (L2_coll == NULL)
-      {
-         // Standard non-periodic mesh.
-         // Note that the fine mesh is always linear.
-         subcell_mesh->SetCurvature(1);
-      }
-      else
-      {
-         // Periodic mesh - the node positions must be corrected after the call
-         // to the above Mesh constructor. Note that the fine mesh is always
-         // linear.
-         const bool disc_nodes = true;
-         subcell_mesh->SetCurvature(1, disc_nodes);
-         GridFunction *coarse = mesh->GetNodes();
-         GridFunction *fine   = subcell_mesh->GetNodes();
-         InterpolationGridTransfer transf(*coarse->FESpace(), *fine->FESpace());
-         transf.ForwardOperator().Mult(*coarse, *fine);
-      }
-   }
-   else
-   {
-      // TODO generalize to arbitrary 1D segments (different length than 1).
-      subcell_mesh = new Mesh(mesh->GetNE() * p, 1.);
-      subcell_mesh->SetCurvature(1);
-   }
-   return subcell_mesh;
-}
-
 // Appropriate quadrature rule for faces of is obtained.
 // TODO: check if this gives the desired order. I use the same order for all
 // faces. In DGTraceIntegrator it uses the min of OrderW, why?
@@ -252,8 +258,8 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
 // Class storing information on dofs needed for the low order methods and FCT.
 class DofInfo
 {
-   Mesh* mesh;
-   FiniteElementSpace* fes;
+   ParFiniteElementSpace *pfes;
+   ParMesh *pmesh;
 
 public:
 
@@ -268,23 +274,19 @@ public:
 
    int dim, numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
-   DofInfo(FiniteElementSpace* _fes)
+   DofInfo(ParFiniteElementSpace* _fes) : pfes(_fes), pmesh(pfes->GetParMesh())
    {
-      fes = _fes;
-      mesh = fes->GetMesh();
-      dim = mesh->Dimension();
+      dim = pmesh->Dimension();
 
-      int n = fes->GetVSize();
-      int ne = mesh->GetNE();
+      int n = pfes->GetVSize();
+      int ne = pmesh->GetNE();
 
       xi_min.SetSize(n);
       xi_max.SetSize(n);
       xe_min.SetSize(ne);
       xe_max.SetSize(ne);
 
-      // Use the first mesh element as indicator.
-      const FiniteElement &dummy = *fes->GetFE(0);
-      dummy.ExtractBdrDofs(BdrDofs);
+      pfes->GetFE(0)->ExtractBdrDofs(BdrDofs);
       numFaceDofs = BdrDofs.Height();
       numBdrs = BdrDofs.Width();
 
@@ -330,27 +332,27 @@ private:
 
       if (dim==1)
       {
-         mesh->GetElementVertices(el1, bdrs1);
-         mesh->GetElementVertices(el2, bdrs2);
+         pmesh->GetElementVertices(el1, bdrs1);
+         pmesh->GetElementVertices(el2, bdrs2);
       }
       else if (dim==2)
       {
-         mesh->GetElementEdges(el1, bdrs1, orientation);
-         mesh->GetElementEdges(el2, bdrs2, orientation);
+         pmesh->GetElementEdges(el1, bdrs1, orientation);
+         pmesh->GetElementEdges(el2, bdrs2, orientation);
       }
       else if (dim==3)
       {
-         mesh->GetElementFaces(el1, bdrs1, orientation);
-         mesh->GetElementFaces(el2, bdrs2, orientation);
+         pmesh->GetElementFaces(el1, bdrs1, orientation);
+         pmesh->GetElementFaces(el2, bdrs2, orientation);
       }
 
       // Get lists of all neighbors of el1 and el2.
       for (i = 0; i < numBdrs; i++)
       {
-         Trans = mesh->GetFaceElementTransformations(bdrs1[i]);
+         Trans = pmesh->GetFaceElementTransformations(bdrs1[i]);
          NbrEl1[i] = Trans->Elem1No != el1 ? Trans->Elem1No : Trans->Elem2No;
 
-         Trans = mesh->GetFaceElementTransformations(bdrs2[i]);
+         Trans = pmesh->GetFaceElementTransformations(bdrs2[i]);
          NbrEl2[i] = Trans->Elem1No != el2 ? Trans->Elem1No : Trans->Elem2No;
       }
 
@@ -382,9 +384,9 @@ private:
    // NOTE: This approach will not work for meshes with hanging nodes.
    void GetVertexBoundsMap()
    {
-      const FiniteElement &dummy = *fes->GetFE(0);
+      const FiniteElement &dummy = *pfes->GetFE(0);
       int i, j, k, dofInd, nbr;
-      int ne = mesh->GetNE(), nd = dummy.GetDof(), p = dummy.GetOrder();
+      int ne = pmesh->GetNE(), nd = dummy.GetDof(), p = dummy.GetOrder();
       Array<int> bdrs, orientation, NbrElem;
       FaceElementTransformations *Trans;
 
@@ -401,21 +403,21 @@ private:
 
          if (dim==1)
          {
-            mesh->GetElementVertices(k, bdrs);
+            pmesh->GetElementVertices(k, bdrs);
          }
          else if (dim==2)
          {
-            mesh->GetElementEdges(k, bdrs, orientation);
+            pmesh->GetElementEdges(k, bdrs, orientation);
          }
          else if (dim==3)
          {
-            mesh->GetElementFaces(k, bdrs, orientation);
+            pmesh->GetElementFaces(k, bdrs, orientation);
          }
 
          // Include neighbors sharing a face with element k for face dofs.
          for (i = 0; i < numBdrs; i++)
          {
-            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
 
             NbrElem[i] = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
 
@@ -575,11 +577,13 @@ private:
    void FillNeighborDofs()
    {
       // Use the first mesh element as indicator.
-      const FiniteElement &dummy = *fes->GetFE(0);
-      int i, j, k, ind, nbr, ne = mesh->GetNE();
+      const FiniteElement &dummy = *pfes->GetFE(0);
+      int i, j, k, ind, nbr, ne = pmesh->GetNE();
       int nd = dummy.GetDof(), p = dummy.GetOrder();
       Array <int> bdrs, NbrBdrs, orientation;
       FaceElementTransformations *Trans;
+
+      Table *face_to_el = pmesh->GetFaceToAllElementTable();
 
       NbrDof.SetSize(ne, numBdrs, numFaceDofs);
 
@@ -610,22 +614,22 @@ private:
       {
          if (dim==1)
          {
-            mesh->GetElementVertices(k, bdrs);
+            pmesh->GetElementVertices(k, bdrs);
 
             for (i = 0; i < numBdrs; i++)
             {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
                nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
                NbrDof(k,i,0) = nbr*nd + BdrDofs(0,(i+1)%2);
             }
          }
          else if (dim==2)
          {
-            mesh->GetElementEdges(k, bdrs, orientation);
+            pmesh->GetElementEdges(k, bdrs, orientation);
 
             for (i = 0; i < numBdrs; i++)
             {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
                nbr = (Trans->Elem1No == k) ? Trans->Elem2No : Trans->Elem1No;
 
                if (nbr < 0)
@@ -636,7 +640,7 @@ private:
 
                for (j = 0; j < numFaceDofs; j++)
                {
-                  mesh->GetElementEdges(nbr, NbrBdrs, orientation);
+                  pmesh->GetElementEdges(nbr, NbrBdrs, orientation);
                   // Current face's id in the neighbor element.
                   for (ind = 0; ind < numBdrs; ind++)
                   {
@@ -650,29 +654,35 @@ private:
          }
          else if (dim==3)
          {
-            mesh->GetElementFaces(k, bdrs, orientation);
+            pmesh->GetElementFaces(k, bdrs, orientation);
 
             for (int f = 0; f < numBdrs; f++)
             {
-               int el1_id, el2_id, nbr_id;
-               mesh->GetFaceElements(bdrs[f], &el1_id, &el2_id);
-               nbr_id = (el1_id == k) ? el2_id : el1_id;
-
-               if (nbr_id < 0)
+               const int nbr_cnt = face_to_el->RowSize(bdrs[f]);
+               if (nbr_cnt == 1)
                {
+                  // No neighbor element.
                   for (j = 0; j < numFaceDofs; j++) { NbrDof(k, f, j) = -1; }
                   continue;
                }
 
+               int el1_id, el2_id, nbr_id;
+               pmesh->GetFaceElements(bdrs[f], &el1_id, &el2_id);
+               if (el2_id < 0)
+               {
+                  // This element is in a different mpi task.
+                  el2_id = -1 - el2_id + ne;
+               }
+               nbr_id = (el1_id == k) ? el2_id : el1_id;
+
                // Local index and orientation of the face, when considered in
                // the neighbor element.
                int el1_info, el2_info;
-               mesh->GetFaceInfos(bdrs[f], &el1_info, &el2_info);
+               pmesh->GetFaceInfos(bdrs[f], &el1_info, &el2_info);
                const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
                                                           : el2_info / 64;
                const int face_or_nbr = (nbr_id == el1_id) ? el1_info % 64
                                                           : el2_info % 64;
-
                for (j = 0; j < numFaceDofs; j++)
                {
                   // What is the index of the j-th dof on the face, given its
@@ -682,10 +692,10 @@ private:
                                           j, dof1D_cnt);
                   // What is the corresponding local dof id on the element,
                   // given the face orientation.
-                  const int loc_dof_id =
+                  const int nbr_dof_id =
                      fdof_ids(face_or_nbr)(loc_face_dof_id, face_id_nbr);
 
-                  NbrDof(k, f, j) = nbr_id*nd + loc_dof_id;
+                  NbrDof(k, f, j) = nbr_id*nd + nbr_dof_id;
 
 #if 0
                   // old method
@@ -729,7 +739,7 @@ private:
    // NOTE: The mesh is assumed to consist of segments, quads or hexes.
    void FillSubcell2CellDof()
    {
-      const FiniteElement &dummy = *fes->GetFE(0);
+      const FiniteElement &dummy = *pfes->GetFE(0);
       int j, m, aux, p = dummy.GetOrder();
 
       if (dim==1)
@@ -1012,8 +1022,11 @@ FE_Evolution* adv;
 
 int main(int argc, char *argv[])
 {
-   // 1. Parse command-line options.
+   // Initialize MPI.
+   MPI_Session mpi(argc, argv);
+   const int myid = mpi.WorldRank();
 
+   // Parse command-line options.
 #ifdef USE_LUA
    L = luaL_newstate();
    luaL_openlibs(L);
@@ -1022,7 +1035,8 @@ int main(int argc, char *argv[])
    problem_num = 4;
 #endif
    const char *mesh_file = "./data/unit-square.mesh";
-   int ref_levels = 2;
+   int rs_levels = 2;
+   int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
@@ -1048,8 +1062,10 @@ int main(int argc, char *argv[])
    args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
 #endif
-   args.AddOption(&ref_levels, "-r", "--refine",
-                  "Number of times to refine the mesh uniformly.");
+   args.AddOption(&rs_levels, "-rs", "--refine-serial",
+                  "Number of times to refine the mesh uniformly in serial.");
+   args.AddOption(&rp_levels, "-rp", "--refine-parallel",
+                  "Number of times to refine the mesh uniformly in parallel.");
    args.AddOption(&order, "-o", "--order",
                   "Order (degree) of the finite element solution.");
    args.AddOption(&mesh_order, "-mo", "--mesh-order",
@@ -1110,12 +1126,18 @@ int main(int argc, char *argv[])
    exec_mode = (int)lua_tonumber(L, -1);
 #endif
 
-   // 2. Read the mesh from the given mesh file. We can handle geometrically
-   //    periodic meshes in this code.
+   // Read the serial mesh from the given mesh file on all processors.
+   // Refine the mesh in serial to increase the resolution.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
-
    const int dim = mesh->Dimension();
+   for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
+   mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
+   // Parallel partitioning of the mesh.
+   // Refine the mesh further in parallel to increase the resolution.
+   ParMesh pmesh(MPI_COMM_WORLD, *mesh);
+   delete mesh;
+   for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
 
    // 3. Define the ODE solver used for time integration. Several explicit
    //    Runge-Kutta methods are available.
@@ -1129,31 +1151,38 @@ int main(int argc, char *argv[])
       case 6: ode_solver = new RK6Solver; break;
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
-         delete mesh;
          return 3;
    }
 
-   // Refine the mesh and set the required curvature.
-   for (int lev = 0; lev < ref_levels; lev++) { mesh->UniformRefinement(); }
    // Check if the input mesh is periodic.
    const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
-                                    (mesh->GetNodes()->FESpace()->FEColl());
+                                    (pmesh.GetNodes()->FESpace()->FEColl());
    const bool periodic = (L2_coll != NULL);
-   mesh->SetCurvature(mesh_order, periodic);
-   mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+   pmesh.SetCurvature(mesh_order, periodic);
 
+   FiniteElementCollection *mesh_fec;
+   if (periodic)
+   {
+      mesh_fec = new L2_FECollection(mesh_order, dim, BasisType::GaussLobatto);
+   }
+   else
+   {
+      mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
+   }
    // Current mesh positions.
-   GridFunction *x = mesh->GetNodes();
+   ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
+   ParGridFunction x(&mesh_pfes);
+   pmesh.SetNodalGridFunction(&x);
 
    // Store initial mesh positions.
-   Vector x0(x->Size());
-   x0 = *x;
+   Vector x0(x.Size());
+   x0 = x;
 
    // 5. Define the discontinuous DG finite element space of the given
    //    polynomial order on the refined mesh.
    const int btype = BasisType::Positive;
    DG_FECollection fec(order, dim, btype);
-   FiniteElementSpace fes(mesh, &fec);
+   ParFiniteElementSpace pfes(&pmesh, &fec);
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
@@ -1187,16 +1216,18 @@ int main(int argc, char *argv[])
    }
    if (fail)
    {
-      delete mesh;
       delete ode_solver;
       return 5;
    }
 
-   cout << "Number of unknowns: " << fes.GetVSize() << endl;
+   if (myid == 0)
+   {
+      cout << "Number of unknowns: " << pfes.GlobalTrueVSize() << endl;
+   }
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
-   GridFunction inflow_gf(&fes);
+   ParGridFunction inflow_gf(&pfes);
    inflow_gf.ProjectCoefficient(inflow);
 
    // Velocity for the problem. Depending on the execution mode, this is the
@@ -1205,14 +1236,14 @@ int main(int argc, char *argv[])
 
    // Mesh velocity. Note that the resulting coefficient will be evaluated in
    // logical space.
-   GridFunction v_gf(x->FESpace());
+   GridFunction v_gf(x.FESpace());
    v_gf.ProjectCoefficient(velocity);
-   if (mesh->bdr_attributes.Size() > 0)
+   if (pmesh.bdr_attributes.Size() > 0)
    {
       // Zero it out on boundaries (not moving boundaries).
-      Array<int> ess_bdr(mesh->bdr_attributes.Max()), ess_vdofs;
+      Array<int> ess_bdr(pmesh.bdr_attributes.Max()), ess_vdofs;
       ess_bdr = 1;
-      x->FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
+      x.FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
       for (int i = 0; i < v_gf.Size(); i++)
       {
          if (ess_vdofs[i] == -1) { v_gf(i) = 0.0; }
@@ -1222,10 +1253,10 @@ int main(int argc, char *argv[])
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
-   BilinearForm m(&fes);
+   ParBilinearForm m(&pfes);
    m.AddDomainIntegrator(new MassIntegrator);
 
-   BilinearForm k(&fes);
+   ParBilinearForm k(&pfes);
    if (exec_mode == 0)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
@@ -1236,7 +1267,7 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
-   if (((MonoType == DiscUpw) || (MonoType == DiscUpw_FCT)) && (!OptScheme))
+   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && (!OptScheme))
    {
       if (exec_mode == 0)
       {
@@ -1254,13 +1285,13 @@ int main(int argc, char *argv[])
       }
    }
 
-   LinearForm b(&fes);
+   ParLinearForm b(&pfes);
    b.AddBdrFaceIntegrator(
       new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
 
    // Compute the lumped mass matrix algebraically
    Vector lumpedM;
-   BilinearForm ml(&fes);
+   ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
    ml.Assemble();
    ml.Finalize();
@@ -1274,7 +1305,7 @@ int main(int argc, char *argv[])
    b.Assemble();
 
    // Store topological dof data.
-   DofInfo dofs(&fes);
+   DofInfo dofs(&pfes);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -1282,7 +1313,7 @@ int main(int argc, char *argv[])
    LowOrderMethod lom;
    lom.MonoType = MonoType;
    lom.OptScheme = OptScheme;
-   lom.fes = &fes;
+   lom.fes = &pfes;
 
    lom.pk = NULL;
    if ((lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT))
@@ -1299,7 +1330,7 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lom.pk = new BilinearForm(&fes);
+         lom.pk = new BilinearForm(&pfes);
          if (exec_mode == 0)
          {
             lom.pk->AddDomainIntegrator(
@@ -1325,7 +1356,7 @@ int main(int argc, char *argv[])
    if (exec_mode == 1) { lom.coef = &v_coef; }
    else                { lom.coef = &velocity; }
 
-   lom.irF = GetFaceIntRule(&fes);
+   lom.irF = GetFaceIntRule(&pfes);
 
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
@@ -1336,22 +1367,59 @@ int main(int argc, char *argv[])
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
-   GridFunction *xsub = NULL;
-   GridFunction v_sub_gf;
+   FiniteElementCollection *fec_sub;
+   ParFiniteElementSpace *fes_sub;
+   ParGridFunction *xsub;
+   ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
    if (NeedSubcells)
    {
-      // Create the low order refined submesh.
-      lom.subcell_mesh = GetSubcellMesh(mesh, order);
+      // The mesh corresponding to Bezier subcells of order p is constructed.
+      // NOTE: The mesh is assumed to consist of segments, quads or hexes.
+
+      MFEM_VERIFY(order > 1, "This function should not be called with p = 1.");
+      MFEM_VERIFY(dim > 1, "Not implemented for dim = 1");
+
+      // Get a uniformly refined mesh.
+      lom.subcell_mesh = new ParMesh(&pmesh, order, BasisType::ClosedUniform);
+
+      // Check if the mesh is periodic.
+      const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
+                                       (pmesh.GetNodes()->FESpace()->FEColl());
+      if (L2_coll == NULL)
+      {
+         // Standard non-periodic mesh.
+         // Note that the fine mesh is always linear.
+         fec_sub = new H1_FECollection(1, dim, BasisType::ClosedUniform);
+         fes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         xsub = new ParGridFunction(fes_sub);
+         lom.subcell_mesh->SetCurvature(1);
+         lom.subcell_mesh->SetNodalGridFunction(xsub);
+      }
+      else
+      {
+         // Periodic mesh - the node positions must be corrected after the call
+         // to the above Mesh constructor. Note that the fine mesh is always
+         // linear.
+         const bool disc_nodes = true;
+         lom.subcell_mesh->SetCurvature(1, disc_nodes);
+
+         fec_sub = new L2_FECollection(1, dim, BasisType::ClosedUniform);
+         fes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         xsub = new ParGridFunction(fes_sub);
+         lom.subcell_mesh->SetNodalGridFunction(xsub);
+
+         GridFunction *coarse = pmesh.GetNodes();
+         InterpolationGridTransfer transf(*coarse->FESpace(), *fes_sub);
+         transf.ForwardOperator().Mult(*coarse, *xsub);
+      }
+
       lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, &fec0);
       lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, &fec1);
 
-      // Submesh positions.
-      xsub = lom.subcell_mesh->GetNodes();
-
       // Submesh velocity.
-      v_sub_gf.SetSpace(xsub->FESpace());
+      v_sub_gf.SetSpace(fes_sub);
       v_sub_gf.ProjectCoefficient(velocity);
       if (lom.subcell_mesh->bdr_attributes.Size() > 0)
       {
@@ -1383,7 +1451,7 @@ int main(int argc, char *argv[])
    Assembly asmbl(dofs, lom);
 
    // Initial condition.
-   GridFunction u(&fes);
+   ParGridFunction u(&pfes);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
@@ -1391,7 +1459,7 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_init.mesh");
       meshHO.precision(precision);
-      mesh->Print(meshHO);
+      pmesh.Print(meshHO);
       if (lom.subcell_mesh)
       {
          ofstream meshLO("meshLO_init.mesh");
@@ -1411,14 +1479,14 @@ int main(int argc, char *argv[])
       if (binary)
       {
 #ifdef MFEM_USE_SIDRE
-         dc = new SidreDataCollection("Example9", mesh);
+         dc = new SidreDataCollection("Example9", &pmesh);
 #else
          MFEM_ABORT("Must build with MFEM_USE_SIDRE=YES for binary output.");
 #endif
       }
       else
       {
-         dc = new VisItDataCollection("Example9", mesh);
+         dc = new VisItDataCollection("Example9", &pmesh);
          dc->SetPrecision(precision);
       }
       dc->RegisterField("solution", &u);
@@ -1428,27 +1496,20 @@ int main(int argc, char *argv[])
    }
 
    socketstream sout;
+   char vishost[] = "localhost";
+   int  visport   = 19916;
    if (visualization)
    {
-      char vishost[] = "localhost";
-      int  visport   = 19916;
-      sout.open(vishost, visport);
-      if (!sout)
-      {
-         cout << "Unable to connect to GLVis server at "
-              << vishost << ':' << visport << endl;
-         visualization = false;
-         cout << "GLVis visualization disabled.\n";
-      }
-      else
-      {
-         sout.precision(precision);
-         sout << "solution\n" << *mesh << u;
-         sout << "pause\n";
-         sout << flush;
-         cout << "GLVis visualization paused."
-              << " Press space (in the GLVis window) to resume it.\n";
-      }
+      // Make sure all MPI ranks have sent their 'v' solution before initiating
+      // another set of GLVis connections (one from each rank):
+      MPI_Barrier(pmesh.GetComm());
+
+      sout.precision(8);
+
+      int Wx = 0, Wy = 0; // window position
+      const int Ww = 350, Wh = 350; // window size
+      VisualizeField(sout, vishost, visport, u,
+                     "Solution", Wx, Wy, Ww, Wh, false);
    }
 
    // check for conservation
@@ -1460,7 +1521,7 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
-                                        b, inflow_gf, *x, xsub, v_gf, v_sub_gf,
+                                        b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs);
 
    double t = 0.0;
@@ -1481,7 +1542,7 @@ int main(int argc, char *argv[])
 
       if (exec_mode == 1)
       {
-         add(x0, t, v_gf, *x);
+         add(x0, t, v_gf, x);
          if (NeedSubcells) { add(x0_sub, t, v_sub_gf, *xsub); }
       }
 
@@ -1491,7 +1552,13 @@ int main(int argc, char *argv[])
       {
          cout << "time step: " << ti << ", time: " << t << endl;
 
-         if (visualization) { sout << "solution\n" << *mesh << u << flush; }
+         if (visualization)
+         {
+            int Wx = 0, Wy = 0; // window position
+            int Ww = 350, Wh = 350; // window size
+            VisualizeField(sout, vishost, visport,
+                           u, "Solution", Wx, Wy, Ww, Wh, false);
+         }
          if (visit)
          {
             dc->SetCycle(ti);
@@ -1505,7 +1572,7 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_final.mesh");
       meshHO.precision(precision);
-      mesh->Print(meshHO);
+      pmesh.Print(meshHO);
       if (asmbl.subcell_mesh)
       {
          ofstream meshLO("meshLO_final.mesh");
@@ -1541,7 +1608,6 @@ int main(int argc, char *argv[])
    }
 
    // 10. Free the used memory.
-   delete mesh;
    delete ode_solver;
    delete dc;
 
@@ -1819,7 +1885,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
-      // The boundary contributions have been computed in the low order scheme.
+      // The face contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
       {
          for (i = 0; i < dofs.numBdrs; i++)
