@@ -1626,10 +1626,10 @@ int main(int argc, char *argv[])
            << "." << endl;
    }
    else if (problem_num == 7)
-	{
-		FunctionCoefficient u_ex(inflow_function);
-		cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
-	}
+   {
+      FunctionCoefficient u_ex(inflow_function);
+      cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
+   }
 
    // 10. Free the used memory.
    delete mesh;
@@ -2551,7 +2551,7 @@ void velocity_function(const Vector &x, Vector &v)
          break;
       }
       case 6:
-		case 7:
+      case 7:
       {
          switch (dim)
          {
@@ -2568,7 +2568,7 @@ void velocity_function(const Vector &x, Vector &v)
       case 14:
       case 15:
       case 16:
-		case 17:
+      case 17:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2836,16 +2836,16 @@ double u0_function(const Vector &x)
          }
       }
       case 6:
-		{
-			double r = x.Norml2();
-			if (r >= 0.15 && r < 0.45) { return 1.; }
-			else if (r >= 0.55 && r < 0.85)
-			{
-				return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
-			}
-			else { return 0.; }
-		}
-		case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      {
+         double r = x.Norml2();
+         if (r >= 0.15 && r < 0.45) { return 1.; }
+         else if (r >= 0.55 && r < 0.85)
+         {
+            return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+         }
+         else { return 0.; }
+      }
+      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
    }
    return 0.0;
 }
@@ -2881,7 +2881,7 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
-	double r = x.Norml2();
+   double r = x.Norml2();
    if ((problem_num % 10) == 6 && x.Size() == 2)
    {
       if (r >= 0.15 && r < 0.45) { return 1.; }
