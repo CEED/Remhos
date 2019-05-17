@@ -860,6 +860,8 @@ public:
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
+   // bdrInt - eq (32).
+   // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
@@ -1028,7 +1030,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
-   double t_final = 2.0;
+   double t_final = 4.0;
    double dt = 0.0025;
    bool visualization = true;
    bool visit = false;
@@ -1467,6 +1469,9 @@ int main(int argc, char *argv[])
    adv->SetTime(t);
    ode_solver->Init(*adv);
 
+   double umax = u.Max();
+   double umin = u.Min();
+
    bool done = false;
    for (int ti = 0; !done; )
    {
@@ -1478,6 +1483,20 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(u, t, dt_real);
       ti++;
+
+      // Monotonicity check for debug purposes mainly.
+      if (problem_num % 10 != 6 && problem_num % 10 != 7)
+      {
+         if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         umax = u.Max();
+         if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+         umin = u.Min();
+      }
+      else
+      {
+         if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+      }
 
       if (exec_mode == 1)
       {
@@ -1538,6 +1557,11 @@ int main(int argc, char *argv[])
       cout << "L1-error: " << u.ComputeLpError(1., u0) << ", L-Inf-error: "
            << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
            << "." << endl;
+   }
+   else if (problem_num == 7)
+   {
+      FunctionCoefficient u_ex(inflow_function);
+      cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
    }
 
    // 10. Free the used memory.
@@ -1623,7 +1647,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
 
-   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
+   if ( (lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT) )
    {
       // Reassemble on the new mesh (given by mesh_pos).
       if (exec_mode == 1)
@@ -1642,7 +1666,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       // Discretization and monotonicity terms.
       lom.D.Mult(x, y);
-      y += b;
+      if (!lom.OptScheme)
+      {
+         y += b; // Only use b, in case that no flux lumping is used.
+      }
 
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
@@ -1678,7 +1705,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
 
       // Discretization terms
-      y = b;
+      y = 0.;
       K.Mult(x, z);
 
       // Monotonicity terms
@@ -1814,9 +1841,9 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    Vector alpha(nd); alpha = 1.;
 
    K.Mult(x, z);
-   z += b;
 
-   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
+   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
+   // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The boundary contributions have been computed in the low order scheme.
@@ -2106,12 +2133,25 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
+      case 6:
+      case 7:
+      {
+         switch (dim)
+         {
+            case 1: v(0) = 1.0; break;
+            case 2: v(0) = x(1); v(1) = -x(0); break;
+            case 3: v(0) = x(1); v(1) = -x(0); v(2) = 0.0; break;
+         }
+         break;
+      }
       case 10:
       case 11:
       case 12:
       case 13:
       case 14:
       case 15:
+      case 16:
+      case 17:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2378,6 +2418,17 @@ double u0_function(const Vector &x)
             return dom1 + 2.*dom2 + 3.*dom3;
          }
       }
+      case 6:
+      {
+         double r = x.Norml2();
+         if (r >= 0.15 && r < 0.45) { return 1.; }
+         else if (r >= 0.55 && r < 0.85)
+         {
+            return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+         }
+         else { return 0.; }
+      }
+      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
    }
    return 0.0;
 }
@@ -2413,7 +2464,21 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
-   return 0.0;
+   double r = x.Norml2();
+   if ((problem_num % 10) == 6 && x.Size() == 2)
+   {
+      if (r >= 0.15 && r < 0.45) { return 1.; }
+      else if (r >= 0.55 && r < 0.85)
+      {
+         return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+      }
+      else { return 0.; }
+   }
+   else if ((problem_num % 10) == 7 && x.Size() == 2)
+   {
+      return exp(-100.*pow(r - 0.7, 2.));
+   }
+   else { return 0.0; }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
