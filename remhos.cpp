@@ -1697,10 +1697,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)
    {
-      int m, dofInd2, loc;
+      int m, loc;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN,
-             aux, fluct, gamma = 10., eps = 1.E-15;
+             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
+             gamma = 10., eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
 
@@ -1728,11 +1728,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
             dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
             xSum += x(dofInd);
-            if (lom.OptScheme)
-            {
-               rhoP += max(0., z(dofInd));
-               rhoN += min(0., z(dofInd));
-            }
+            rhoP += max(0., z(dofInd));
+            rhoN += min(0., z(dofInd));
          }
 
          sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
@@ -1790,10 +1787,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                   dofInd = k*nd + loc;
                   nodalWeightsP(loc) += fluctSubcellP(m)
                                         * ((xMaxSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellP(m)); // eq. (10)
+                                           / sumWeightsSubcellP(m)); // eq. (58)
                   nodalWeightsN(loc) += fluctSubcellN(m)
                                         * ((xMinSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellN(m)); // eq. (11)
+                                           / sumWeightsSubcellN(m)); // eq. (59)
                }
             }
          }
@@ -1815,19 +1812,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
             }
 
-            for (j = 0; j < nd; j++)
-            {
-               dofInd2 = k*nd+j;
-               if (z(dofInd2) > eps)
-               {
-                  y(dofInd) += weightP * z(dofInd2);
-               }
-               else if (z(dofInd2) < -eps)
-               {
-                  y(dofInd) += weightN * z(dofInd2);
-               }
-            }
-            y(dofInd) /= lumpedM(dofInd);
+            y(dofInd) = (y(dofInd) + weightP * rhoP + weightN * rhoN)
+                        / lumpedM(dofInd);
          }
       }
    }
