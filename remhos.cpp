@@ -1030,6 +1030,18 @@ public:
                                   const int BdrID, const Vector &x,
                                   Vector &y, const Vector &alpha) const;
 
+   virtual void LinearFluxLumping2(const int k, const int nd,
+                                  const int BdrID, const Vector &x,
+                                  Vector &y, const Vector &alpha) const;
+
+   virtual void LinearFluxLumping3(const int k, const int nd,
+                                  const int BdrID, const Vector &x,
+                                  Vector &y, const Vector &alpha) const; // TODO
+   
+   virtual void NonlinFluxLumping(const int k, const int nd,
+                                  const int BdrID, const Vector &x,
+                                  Vector &y, const Vector &alpha) const;
+
    virtual void ComputeHighOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeFCTSolution(const Vector &x, const Vector &yH,
@@ -1055,7 +1067,7 @@ int main(int argc, char *argv[])
    int ref_levels = 2;
    int order = 3;
    int mesh_order = 1;
-   int ode_solver_type = 3;
+   int ode_solver_type = 1;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
    double t_final = 4.0;
@@ -1530,8 +1542,9 @@ int main(int argc, char *argv[])
    double umax = u.Max();
    double umin = u.Min();
    
-   Vector res = u;
+   Vector res = u, tmp = u; // Use any initialization for tmp.
    bool converged = false;
+	double residual = 0.;
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1546,7 +1559,7 @@ int main(int argc, char *argv[])
       ti++;
       
       // Monotonicity check for debug purposes mainly.
-      if (problem_num % 10 != 6)
+      if (problem_num % 10 != 6 && problem_num % 10 != 7)
       {
          if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
          umax = u.Max();
@@ -1567,16 +1580,28 @@ int main(int argc, char *argv[])
 
       done = (t >= t_final - 1.e-8*dt);
       
-      if (problem_num == 6) // Steady state simulation.
+      if (problem_num == 6 || problem_num == 7)  // Steady state simulation.
       {
-         res -= u;
-         if (res.Norml2() < 1.e-6) { done == true; }
-         else { cout << res.Norml2() << endl; res = u; } // TODO development
+//          res -= u;
+// 			res /= dt;
+// 			for (int i = 0; i < res.Size(); i++)
+// 				residual += res(i) * lumpedM(i);
+			
+			m.SpMat().Mult(res, tmp);
+			m.SpMat().Mult(u, res);
+			res -= tmp;
+			res /= dt;
+// 			res -= u;
+			residual = res.Norml2();
+			
+         if (abs(residual) < 1.e-10) { done = true; }
+         else { res = u; } // TODO dev
       }
 
       if (done || ti % vis_steps == 0)
       {
-         cout << "time step: " << ti << ", time: " << t << endl;
+         cout << "time step: " << ti << ", time: " << t << ", residual: " 
+				  << residual << endl;
 
          if (visualization) { sout << "solution\n" << *mesh << u << flush; }
          if (visit)
@@ -1626,6 +1651,11 @@ int main(int argc, char *argv[])
            << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
            << "." << endl;
    }
+   else if (problem_num == 7)
+	{
+		FunctionCoefficient u_ex(inflow_function);
+		cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
+	}
 
    // 10. Free the used memory.
    delete mesh;
@@ -1701,6 +1731,91 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
                           * alpha(dofs.BdrDofs(j,BdrID)) );
       }
    }
+}
+
+void FE_Evolution::LinearFluxLumping2(const int k, const int nd,
+                                     const int BdrID, const Vector &x,
+                                     Vector &y, const Vector &alpha) const
+{
+   int i, j, idx, dofInd;
+   double xNeighbor;
+
+   for (j = 0; j < dofs.numFaceDofs; j++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+      idx = dofs.NbrDof(k, BdrID, j);
+      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+      // s.t. this value will not matter.
+      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
+		for (i = 0; i < dofs.numFaceDofs; i++)
+		{
+			y(dofInd) += asmbl.bdrInt(k, BdrID, j*dofs.numFaceDofs + i) * xNeighbor;
+		}
+   }
+}
+
+void FE_Evolution::LinearFluxLumping3(const int k, const int nd,
+                                     const int BdrID, const Vector &x,
+                                     Vector &y, const Vector &alpha) const
+{
+   int i, j, idx, dofInd;
+   double xNeighbor;
+
+   for (j = 0; j < dofs.numFaceDofs; j++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+		for (i = 0; i < dofs.numFaceDofs; i++)
+		{
+			y(dofInd) += asmbl.bdrInt(k, BdrID, j*dofs.numFaceDofs + i);
+		}
+   }
+}
+
+void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
+                                     const int BdrID, const Vector &x,
+                                     Vector &y, const Vector &alpha) const
+{
+   int i, j, idx, dofInd;
+   double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
+   Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
+	BdrTermCorr = 0.;
+
+   for (j = 0; j < dofs.numFaceDofs; j++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+      idx = dofs.NbrDof(k, BdrID, j);
+      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+      // s.t. this value will not matter.
+      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
+      xDiff(j) = xNeighbor - x(dofInd);
+   }
+
+   for (i = 0; i < dofs.numFaceDofs; i++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+      for (j = 0; j < dofs.numFaceDofs; j++)
+      {
+// 			y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i); // TODO dev
+			
+         BdrTermCorr(i) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
+      }
+      BdrTermCorr(i) *= alpha(dofs.BdrDofs(i,BdrID));
+		SumCorrP += max(0., BdrTermCorr(i));
+		SumCorrN += min(0., BdrTermCorr(i));
+   }
+   
+   for (i = 0; i < dofs.numFaceDofs; i++)
+   {
+		dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+		if (SumCorrP + SumCorrN > eps)
+		{
+			y(dofInd) += min(0., BdrTermCorr(i)) - max(0., BdrTermCorr(i)) * SumCorrN / SumCorrP;
+		}
+		else if (SumCorrP + SumCorrN < -eps)
+		{
+			y(dofInd) += max(0., BdrTermCorr(i)) - min(0., BdrTermCorr(i)) * SumCorrP / SumCorrN;
+		}
+	}
 }
 
 void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
@@ -1899,17 +2014,18 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct, 
              uDotMin, uDotMax, diff, MassP, MassN,
-             gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
+             gamma = 1., beta = 1., tol = 1.E-8, eps = 1.E-15; //TODO dev
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
              m_it(nd), uDot(nd), res(nd), alpha0(nd), alpha1(nd);
-      
-      bool UseMassLim = false;
+
+      bool UseMassLim = (problem_num != 6) && (problem_num != 7);
       double* Mij = M.GetData();
+		
+		double kp = 0., kn = 0.; // TODO dev
       
       if (!UseMassLim) { max_iter = -1; }
-      alpha0 = 0.; alpha1 = 1.;// TODO development
-      
+      alpha0 = 0.; alpha1 = 1.;// TODO dev
       for (k = 0; k < ne; k++)
       {
          dofs.xe_min(k) = numeric_limits<double>::infinity();
@@ -1926,7 +2042,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       // Discretization terms
       y = 0.;
       K.Mult(x, z);
-      d = z;
+      d = y; //d = z; // TODO dev
+		Vector num(y), den(y); // TODO dev
 
       // Monotonicity terms
       for (k = 0; k < ne; k++)
@@ -1941,15 +2058,17 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
             
             // Splitting for volume term.
-            y(dofInd) += alpha(j) * z(dofInd);
-            z(dofInd) -= alpha(j) * z(dofInd);            
+            y(dofInd) += alpha(j) * z(dofInd); // TODO dev
+            z(dofInd) -= alpha(j) * z(dofInd); // TODO dev            
          }
          
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
-            LinearFluxLumping(k, nd, i, x, d, alpha1); // TODO development alpha
+// 				LinearFluxLumping(k, nd, i, x, y, alpha0);
+            LinearFluxLumping2(k, nd, i, x, num, alpha0); // TODO dev, nonlin, y, 2
+				LinearFluxLumping3(k, nd, i, x, den, alpha0);
+//             NonlinFluxLumping(k, nd, i, x, y, alpha); // TODO dev alpha1, d, nonlin
          }
 
          // Element contributions
@@ -1959,11 +2078,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          {
             dofInd = k*nd+j;
             xSum += x(dofInd);
-            if (lom.OptScheme)
-            {
-               rhoP += max(0., z(dofInd));
-               rhoN += min(0., z(dofInd));
-            }
+            rhoP += max(0., z(dofInd));
+            rhoN += min(0., z(dofInd));
          }
 
          sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
@@ -2021,10 +2137,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                   dofInd = k*nd + loc;
                   nodalWeightsP(loc) += fluctSubcellP(m)
                                         * ((xMaxSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellP(m)); // eq. (10)
+                                           / sumWeightsSubcellP(m)); // eq. (58)
                   nodalWeightsN(loc) += fluctSubcellN(m)
                                         * ((xMinSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellN(m)); // eq. (11)
+                                           / sumWeightsSubcellN(m)); // eq. (59)
                }
             }
          }
@@ -2044,26 +2160,24 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                aux = gamma / (rhoN - eps);
                weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
                weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
-            }
 
-            for (j = 0; j < nd; j++)
-            {
-               dofInd2 = k*nd+j;
-               if (z(dofInd2) > eps)
-               {
-                  y(dofInd) += weightP * z(dofInd2);
-               }
-               else if (z(dofInd2) < -eps)
-               {
-                  y(dofInd) += weightN * z(dofInd2);
-               }
+// 					y(dofInd) += min(gamma, rhoP/(sumFluctSubcellP+eps))*nodalWeightsP(i)
+// 								  + min(gamma, rhoN/(sumFluctSubcellN-eps))*nodalWeightsN(i);
+// 					double tmp = rhoP - min(gamma * sumFluctSubcellP, rhoP)
+// 								  + rhoN - max(gamma * sumFluctSubcellN, rhoN);
+// 					if (tmp > eps)
+// 						y(dofInd) += tmp * weightP;
+// 					else if (tmp < -eps)
+// 						y(dofInd) += tmp * weightN;
             }
+            
+            y(dofInd) += weightP * rhoP + weightN * rhoN;
          }
          
          // Time derivative and mass matrix, if UseMassLim = false, max_iter has
          // been set to -1, and the iteration loop is not entered.
          m_it = uDot = 0.;
-         for (it = 0; it <= max_iter; it++)
+         for (it = 0; it <= -1; it++) // TODO dev
          {
             for (i = 0; i < nd; i++)
             {
@@ -2100,7 +2214,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                dofInd = k*nd+i;
                alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                                      / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-               m_it(i) *= alpha(i);
+               m_it(i) *= alpha0(i); // TODO dev
                MassP += max(0., m_it(i));
                MassN += min(0., m_it(i));
             }
@@ -2122,18 +2236,55 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                dofInd = k*nd+i;
                res(i) = m_it(i) + y(dofInd) - lumpedM(dofInd) * uDot(i);
             }
-            if (res.Norml2() <= tol)
-            {
-               break;
-            }
+            
+            if (res.Norml2() <= tol) { break; }
          }
 
          for (i = 0; i < nd; i++)
          {
             dofInd = k*nd+i;
-            y(dofInd) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
+				
+				// TODO debug
+				if (dofs.xi_max(dofInd) - x(dofInd) < 0.)
+					MFEM_ABORT("plus");
+				if (dofs.xi_min(dofInd) - x(dofInd) > 0.)
+					MFEM_ABORT("minus");
+				
+				
+				double kappaP = 0., kappaN = 0., kappa = 0.;
+				if (y(dofInd) > eps)
+				{
+					kappa = y(dofInd) / (dofs.xi_max(dofInd) - x(dofInd) + eps);
+					if (dofs.xi_max(dofInd) - x(dofInd) < eps)
+						MFEM_ABORT("PLUS");
+					kappaP = kappa;
+						
+				}
+				else if (y(dofInd) < -eps)
+				{
+					kappa = y(dofInd) / (dofs.xi_min(dofInd) - x(dofInd) - eps);
+					if (dofs.xi_min(dofInd) - x(dofInd) > eps)
+						MFEM_ABORT("MINUS");
+					kappaN = kappa;
+				}
+				
+// 				double kappaP = max(0., kappa);
+// 				double kappaN = min(0., kappa);
+				
+// 				kp = max(kp, kappa);
+// 				kn = max(kn, kappaN);
+				
+            y(dofInd) = ( (lumpedM(dofInd) * x(dofInd) + dt * (num(dofInd) + kappaP * dofs.xi_max(dofInd) + kappaN * dofs.xi_min(dofInd)))
+								/ (lumpedM(dofInd) + dt*(den(dofInd) + kappaP + kappaN)) - x(dofInd) ) / dt;
          }
+         
+//          for (i = 0; i < nd; i++)
+//          {
+//             dofInd = k*nd+i;
+//             y(dofInd) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
+//          }
       }
+//       cout << kp /*<< " " << kn*/ << endl;
    }
 }
 
@@ -2440,6 +2591,7 @@ void velocity_function(const Vector &x, Vector &v)
          break;
       }
       case 6:
+		case 7:
       {
          switch (dim)
          {
@@ -2456,6 +2608,7 @@ void velocity_function(const Vector &x, Vector &v)
       case 14:
       case 15:
       case 16:
+		case 17:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2722,7 +2875,17 @@ double u0_function(const Vector &x)
             return dom1 + 2.*dom2 + 3.*dom3;
          }
       }
-      case 6: { return 0.0; }
+      case 6:
+		{
+			double r = x.Norml2();
+			if (r >= 0.15 && r < 0.45) { return 1.; }
+			else if (r >= 0.55 && r < 0.85)
+			{
+				return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+			}
+			else { return 0.; }
+		}
+		case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
    }
    return 0.0;
 }
@@ -2758,14 +2921,19 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
+	double r = x.Norml2();
    if ((problem_num % 10) == 6 && x.Size() == 2)
    {
-      if (x(1) >= 0.15 && x(1) < 0.45) { return 1.; }
-      else if (x(1) >= 0.55 && x(1) < 0.85)
+      if (r >= 0.15 && r < 0.45) { return 1.; }
+      else if (r >= 0.55 && r < 0.85)
       {
-         return pow(cos(10.*M_PI * (x(1) - 0.7) / 3.), 2.);
+         return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
       }
       else { return 0.; }
+   }
+   else if ((problem_num % 10) == 7 && x.Size() == 2)
+   {
+      return exp(-100.*pow(r - 0.7, 2.));
    }
    else { return 0.0; }
 }
