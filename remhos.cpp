@@ -364,25 +364,18 @@ private:
 
             // add neighbor elements that share a face with el1 and el2 but are
             // not el
-            if ((NbrEl1[i] == NbrEl2[j]) && (NbrEl1[i] != el))
+            if (NbrEl1[i] == NbrEl2[j] && NbrEl1[i] != el)
             {
                if (!found)
                {
                   CmnNbr = NbrEl1[i];
                   found = true;
                }
-               else
-               {
-                  mfem_error("Found multiple common neighbor elements.");
-               }
+               else { MFEM_ABORT("Found multiple common neighbor elements."); }
             }
          }
       }
-      if (found)
-      {
-         return CmnNbr;
-      }
-      else { return -1; }
+      return (found == true) ? CmnNbr : -1;
    }
 
    // This fills the map_for_bounds according to our paper.
@@ -662,37 +655,38 @@ private:
 
             for (int f = 0; f < numBdrs; f++)
             {
-               Trans = mesh->GetFaceElementTransformations(bdrs[f]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
+               int el1_id, el2_id, nbr_id;
+               mesh->GetFaceElements(bdrs[f], &el1_id, &el2_id);
+               nbr_id = (el1_id == k) ? el2_id : el1_id;
 
-               if (nbr < 0)
+               if (nbr_id < 0)
                {
                   for (j = 0; j < numFaceDofs; j++) { NbrDof(k, f, j) = -1; }
                   continue;
                }
 
-               // Current face's id in the neighbor element.
-               int face_id_nbr;
-               Array<int> nbr_faces, ori;
-               mesh->GetElementFaces(nbr, nbr_faces, ori);
-               for (int nf = 0; nf < nbr_faces.Size(); nf++)
-               {
-                  if (nbr_faces[nf] == bdrs[f]) { face_id_nbr = nf; break; }
-               }
+               // Local index and orientation of the face, when considered in
+               // the neighbor element.
+               int el1_info, el2_info;
+               mesh->GetFaceInfos(bdrs[f], &el1_info, &el2_info);
+               const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
+                                                          : el2_info / 64;
+               const int face_or_nbr = (nbr_id == el1_id) ? el1_info % 64
+                                                          : el2_info % 64;
 
                for (j = 0; j < numFaceDofs; j++)
                {
                   // What is the index of the j-th dof on the face, given its
                   // orientation.
                   const int loc_face_dof_id =
-                     GetLocalFaceDofIndex(dim, face_id_nbr, ori[face_id_nbr],
+                     GetLocalFaceDofIndex(dim, face_id_nbr, face_or_nbr,
                                           j, dof1D_cnt);
                   // What is the corresponding local dof id on the element,
                   // given the face orientation.
                   const int loc_dof_id =
-                     fdof_ids(ori[face_id_nbr])(loc_face_dof_id, face_id_nbr);
+                     fdof_ids(face_or_nbr)(loc_face_dof_id, face_id_nbr);
 
-                  NbrDof(k, f, j) = nbr*nd + loc_dof_id;
+                  NbrDof(k, f, j) = nbr_id*nd + loc_dof_id;
 
 #if 0
                   // old method
@@ -761,13 +755,10 @@ private:
       {
          for (j = 0; j < numDofsSubcell; j++)
          {
-            if (dim == 1)
-            {
-               Sub2Ind(m,j) = m + j;
-            }
+            if (dim == 1) { Sub2Ind(m,j) = m + j; }
             else if (dim == 2)
             {
-               aux = m + (m/p);
+               aux = m + m/p;
                switch (j)
                {
                   case 0: Sub2Ind(m,j) =  aux; break;
@@ -778,25 +769,17 @@ private:
             }
             else if (dim == 3)
             {
-               aux = m + (m/p)+(p+1)*(m/(p*p));
+               aux = m + m/p + (p+1)*(m/(p*p));
                switch (j)
                {
-                  case 0:
-                     Sub2Ind(m,j) = aux; break;
-                  case 1:
-                     Sub2Ind(m,j) = aux + 1; break;
-                  case 2:
-                     Sub2Ind(m,j) = aux + p+1; break;
-                  case 3:
-                     Sub2Ind(m,j) = aux + p+2; break;
-                  case 4:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
-                  case 5:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
-                  case 6:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
-                  case 7:
-                     Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
+                  case 0: Sub2Ind(m,j) = aux; break;
+                  case 1: Sub2Ind(m,j) = aux + 1; break;
+                  case 2: Sub2Ind(m,j) = aux + p+1; break;
+                  case 3: Sub2Ind(m,j) = aux + p+2; break;
+                  case 4: Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
+                  case 5: Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
+                  case 6: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
+                  case 7: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
                }
             }
          }
@@ -818,11 +801,11 @@ public:
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      const bool NeedBdr = lom.OptScheme || ( lom.MonoType != DiscUpw
-                                           && lom.MonoType != DiscUpw_FCT );
+      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
+                                             lom.MonoType != DiscUpw_FCT);
 
-      const bool NeedSubcells = lom.OptScheme && ( lom.MonoType == ResDist
-                                     || lom.MonoType == ResDist_FCT
+      const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
+                                                  lom.MonoType == ResDist_FCT
                                      || lom.MonoType == ResDist_Monolithic );
 
       if (NeedBdr)
@@ -841,24 +824,15 @@ public:
       }
 
       // Initialization for transport mode.
-      if ((exec_mode == 0) && (NeedBdr || NeedSubcells))
+      if (exec_mode == 0 && (NeedBdr || NeedSubcells))
       {
          for (k = 0; k < ne; k++)
          {
             if (NeedBdr)
             {
-               if (dim==1)
-               {
-                  mesh->GetElementVertices(k, bdrs);
-               }
-               else if (dim==2)
-               {
-                  mesh->GetElementEdges(k, bdrs, orientation);
-               }
-               else if (dim==3)
-               {
-                  mesh->GetElementFaces(k, bdrs, orientation);
-               }
+               if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
+               else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
+               else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
                for (i = 0; i < dofs.numBdrs; i++)
                {
@@ -1538,7 +1512,7 @@ int main(int argc, char *argv[])
    double t = 0.0;
    adv->SetTime(t);
    ode_solver->Init(*adv);
-   
+
    double umax = u.Max();
    double umin = u.Min();
    
@@ -1557,7 +1531,7 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(u, t, dt_real);
       ti++;
-      
+
       // Monotonicity check for debug purposes mainly.
       if (problem_num % 10 != 6 && problem_num % 10 != 7)
       {
@@ -1679,12 +1653,12 @@ int main(int argc, char *argv[])
 void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
-   Vector y;
-   double resid = f.Norml2(), abs_tol = 1.e-4;
+   Vector y(n);
+   const double abs_tol = 1.e-4;
 
-   y.SetSize(n);
    x = 0.;
 
+   double resid = f.Norml2();
    for (iter = 1; iter <= max_iter; iter++)
    {
       M.Mult(x, y);
@@ -1726,9 +1700,10 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
       {
          // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
          // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j)
-                      * ( xDiff(i) + (xDiff(j)-xDiff(i)) * alpha(dofs.BdrDofs(i,BdrID))
-                          * alpha(dofs.BdrDofs(j,BdrID)) );
+         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
+                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
+                                  alpha(dofs.BdrDofs(i,BdrID)) *
+                                  alpha(dofs.BdrDofs(j,BdrID)));
       }
    }
 }
@@ -2012,7 +1987,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    {
       int m, dofInd2, loc, it, CtrIt, ctr = 0, max_iter = 100;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct, 
+             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN,
              gamma = 1., beta = 1., tol = 1.E-8, eps = 1.E-15; //TODO dev
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
@@ -2342,8 +2317,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
          // Compute the bounds for each dof inside the loop.
          dofs.ComputeVertexBounds(x, dofInd);
 
-         uClipped(j) = min( dofs.xi_max(dofInd), max( x(dofInd) + dt*yH(dofInd),
-                                                      dofs.xi_min(dofInd) ) );
+         uClipped(j) = min(dofs.xi_max(dofInd), max(x(dofInd) + dt*yH(dofInd),
+                                                    dofs.xi_min(dofInd)) );
 
          fClipped(j) = lumpedM(dofInd) / dt
                        * ( uClipped(j) - (x(dofInd) + dt * yL(dofInd)) );
@@ -2460,8 +2435,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       }
       else if (lom.MonoType % 2 == 0)
       {
-         Vector yH, yL;
-         yH.SetSize(x.Size()); yL.SetSize(x.Size());
+         Vector yH(x.Size()), yL(x.Size());
 
          ComputeLowOrderSolution(x, yL);
          ComputeHighOrderSolution(x, yH);
@@ -2942,8 +2916,8 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
    int k1, k2;
-   int kf1 = face_dof_id % face_dof1D_cnt;
-   int kf2 = face_dof_id / face_dof1D_cnt;
+   const int kf1 = face_dof_id % face_dof1D_cnt;
+   const int kf2 = face_dof_id / face_dof1D_cnt;
    switch (loc_face_id)
    {
       case 0://BOTTOM
