@@ -629,18 +629,26 @@ private:
 
             for (i = 0; i < numBdrs; i++)
             {
-               Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
-               nbr = (Trans->Elem1No == k) ? Trans->Elem2No : Trans->Elem1No;
-
-               if (nbr < 0)
+               const int nbr_cnt = face_to_el->RowSize(bdrs[i]);
+               if (nbr_cnt == 1)
                {
-                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k,i,j) = -1; }
+                  // No neighbor element.
+                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k, i, j) = -1; }
                   continue;
                }
 
+               int el1_id, el2_id, nbr_id;
+               pmesh->GetFaceElements(bdrs[i], &el1_id, &el2_id);
+               if (el2_id < 0)
+               {
+                  // This element is in a different mpi task.
+                  el2_id = -1 - el2_id + ne;
+               }
+               nbr_id = (el1_id == k) ? el2_id : el1_id;
+
                for (j = 0; j < numFaceDofs; j++)
                {
-                  pmesh->GetElementEdges(nbr, NbrBdrs, orientation);
+                  pmesh->GetElementEdges(nbr_id, NbrBdrs, orientation);
                   // Current face's id in the neighbor element.
                   for (ind = 0; ind < numBdrs; ind++)
                   {
@@ -648,7 +656,7 @@ private:
                   }
                   // Here it is utilized that the orientations of the face for
                   // the two elements are opposite of each other.
-                  NbrDof(k,i,j) = nbr*nd + BdrDofs(numFaceDofs-1-j,ind);
+                  NbrDof(k,i,j) = nbr_id*nd + BdrDofs(numFaceDofs-1-j,ind);
                }
             }
          }
@@ -969,8 +977,10 @@ public:
 class FE_Evolution : public TimeDependentOperator
 {
 private:
-   BilinearForm &Mbf, &Kbf, &ml;
+   BilinearForm &Mbf, &ml;
+   ParBilinearForm &Kbf;
    SparseMatrix &M, &K;
+   HypreParMatrix &K_hypre;
    Vector &lumpedM;
    const GridFunction &inflow_gf;
    const Vector &b;
@@ -988,7 +998,8 @@ private:
 
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
-                Vector &_lumpedM, BilinearForm &Kbf_, SparseMatrix &_K,
+                Vector &_lumpedM,
+                ParBilinearForm &Kbf_, SparseMatrix &_K, HypreParMatrix &K_hup,
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
@@ -1304,6 +1315,8 @@ int main(int argc, char *argv[])
    k.Finalize(skip_zeros);
    b.Assemble();
 
+   HypreParMatrix *k_hypre = k.ParallelAssemble();
+
    // Store topological dof data.
    DofInfo dofs(&pfes);
 
@@ -1520,7 +1533,8 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
+   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
+                                        k, k.SpMat(), *k_hypre,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs);
 
@@ -1609,10 +1623,10 @@ int main(int argc, char *argv[])
 
    // 10. Free the used memory.
    delete ode_solver;
+   delete k_hypre;
    delete dc;
 
    delete lom.pk;
-
    if (NeedSubcells)
    {
       delete asmbl.SubFes0;
@@ -1654,17 +1668,30 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
                                      const int BdrID, const Vector &x,
                                      Vector &y, const Vector &alpha) const
 {
-   int i, j, idx, dofInd;
+   // Get the MPI neighbor values.
+   // TODO move outside.
+   ParGridFunction x_gf(Kbf.ParFESpace());
+   x_gf = x;
+   x_gf.ExchangeFaceNbrData();
+   Vector &x_nd = x_gf.FaceNbrData();
+
+   int i, j, dofInd;
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
+   const int size = x.Size();
 
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      idx = dofs.NbrDof(k, BdrID, j);
+      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
       // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
       // s.t. this value will not matter.
-      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
+      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
+      else
+      {
+         xNeighbor = (nbr_dof_id < size) ? x(nbr_dof_id)
+                                         : x_nd(nbr_dof_id - size);
+      }
       xDiff(j) = xNeighbor - x(dofInd);
    }
 
@@ -1879,7 +1906,10 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 1.;
 
-   K.Mult(x, z);
+   // K multiplies a ldofs Vector, as we're always doing DG.
+   if (lom.MonoType == None) { K_hypre.Mult(x, z); }
+   else                      { K.Mult(x, z); }
+
    z += b;
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
@@ -1895,6 +1925,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
       }
    }
 
+   // Can be done on the ldofs, as M is a DG mass matrix.
    NeumannSolve(z, y);
 }
 
@@ -1960,14 +1991,15 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 // Implementation of class FE_Evolution
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
-                           BilinearForm &Kbf_, SparseMatrix &_K,
+                           ParBilinearForm &Kbf_, SparseMatrix &_K,
+                           HypreParMatrix &K_hyp,
                            const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
+   M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
