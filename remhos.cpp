@@ -1332,17 +1332,20 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (problem_num % 10 != 6 && problem_num % 10 != 7)
+      if (MonoType != None)
       {
-         if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
-         umax = u.Max();
-         if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
-         umin = u.Min();
-      }
-      else
-      {
-         if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
-         if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+         if (problem_num % 10 != 6 && problem_num % 10 != 7)
+         {
+            if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
+            umax = u.Max();
+            if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+            umin = u.Min();
+         }
+         else
+         {
+            if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
+            if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+         }
       }
 
       if (exec_mode == 1)
@@ -1355,7 +1358,10 @@ int main(int argc, char *argv[])
 
       if (done || ti % vis_steps == 0)
       {
-         cout << "time step: " << ti << ", time: " << t << endl;
+         if (mpi.Root())
+         {
+            cout << "time step: " << ti << ", time: " << t << endl;
+         }
 
          if (visualization)
          {
@@ -1399,10 +1405,14 @@ int main(int argc, char *argv[])
       finalMass = lumpedM * u;
    }
    else { finalMass = mass * u; }
-   cout << setprecision(10)
-        << "Final mass: " << finalMass << endl
-        << "Max value:  " << u.Max() << endl << setprecision(6)
-        << "Mass loss:  " << abs(initialMass - finalMass) << endl;
+
+   if (mpi.Root())
+   {
+      cout << setprecision(10)
+           << "Final mass: " << finalMass << endl
+           << "Max value:  " << u.Max() << endl << setprecision(6)
+           << "Mass loss:  " << abs(initialMass - finalMass) << endl;
+   }
 
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
@@ -1467,7 +1477,7 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
    int i, j, dofInd;
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
-   const int size = x.Size();
+   const int size_x = x.Size();
    Vector &x_nd = x_gf.FaceNbrData();
 
    for (j = 0; j < dofs.numFaceDofs; j++)
@@ -1479,8 +1489,8 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
       if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
       else
       {
-         xNeighbor = (nbr_dof_id < size) ? x(nbr_dof_id)
-                                         : x_nd(nbr_dof_id - size);
+         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
+                                           : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
    }
