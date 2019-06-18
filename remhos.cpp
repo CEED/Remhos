@@ -305,7 +305,7 @@ public:
       // Form min/max at each CG dof, taking into account element overlaps.
       x_min =   numeric_limits<double>::infinity();
       x_max = - numeric_limits<double>::infinity();
-      for (int i = 0; i < mesh->GetNE(); i++)
+      for (int i = 0; i < pmesh->GetNE(); i++)
       {
          x_min.FESpace()->GetElementDofs(i, dofsCG);
          for (int j = 0; j < dofsCG.Size(); j++)
@@ -320,7 +320,7 @@ public:
          dynamic_cast<const TensorBasisElement *>(x_min.FESpace()->GetFE(0));
       const Array<int> &dof_map = fe_cg->GetDofMap();
       const int ndofs = dof_map.Size();
-      for (int i = 0; i < mesh->GetNE(); i++)
+      for (int i = 0; i < pmesh->GetNE(); i++)
       {
          x_min.FESpace()->GetElementDofs(i, dofsCG);
          for(int j = 0; j < dofsCG.Size(); j++)
@@ -758,6 +758,7 @@ private:
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
 
    mutable Vector z;
+   mutable ParGridFunction x_gf;
 
    double dt;
    Assembly &asmbl;
@@ -967,7 +968,7 @@ int main(int argc, char *argv[])
    // The min and max bounds are represented as CG functions of the same order
    // as the solution, thus having 1:1 dof correspondence inside each element.
    H1_FECollection fec_bounds(order, dim, BasisType::GaussLobatto);
-   FiniteElementSpace fes_bounds(mesh, &fec_bounds);
+   ParFiniteElementSpace fes_bounds(&pmesh, &fec_bounds);
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
@@ -1464,17 +1465,11 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
                                      const int BdrID, const Vector &x,
                                      Vector &y, const Vector &alpha) const
 {
-   // Get the MPI neighbor values.
-   // TODO move outside.
-   ParGridFunction x_gf(Kbf.ParFESpace());
-   x_gf = x;
-   x_gf.ExchangeFaceNbrData();
-   Vector &x_nd = x_gf.FaceNbrData();
-
    int i, j, dofInd;
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
    const int size = x.Size();
+   Vector &x_nd = x_gf.FaceNbrData();
 
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
@@ -1699,6 +1694,9 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
+   // Get the MPI neighbor values.
+   x_gf = x;
+   x_gf.ExchangeFaceNbrData();
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The face contributions have been computed in the low order scheme.
@@ -1788,7 +1786,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
-   z(_M.Size()),
+   z(_M.Size()), x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
