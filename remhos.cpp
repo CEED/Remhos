@@ -413,17 +413,16 @@ private:
                }
                nbr_id = (el1_id == k) ? el2_id : el1_id;
 
+               int el1_info, el2_info;
+               pmesh->GetFaceInfos(bdrs[i], &el1_info, &el2_info);
+               const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
+                                                          : el2_info / 64;
                for (j = 0; j < numFaceDofs; j++)
                {
-                  pmesh->GetElementEdges(nbr_id, NbrBdrs, orientation);
-                  // Current face's id in the neighbor element.
-                  for (ind = 0; ind < numBdrs; ind++)
-                  {
-                     if (NbrBdrs[ind] == bdrs[i]) { break; }
-                  }
                   // Here it is utilized that the orientations of the face for
                   // the two elements are opposite of each other.
-                  NbrDof(k,i,j) = nbr_id*nd + BdrDofs(numFaceDofs-1-j,ind);
+                  NbrDof(k,i,j) = nbr_id*nd + BdrDofs(numFaceDofs - 1 - j,
+                                                      face_id_nbr);
                }
             }
          }
