@@ -75,8 +75,8 @@ maximum value (`max`) for the runs listed below:
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
-|  1. | 0.3888354875 | 0.9304836587 |
-|  2. | 0.3888354875 | 0.941987734  |
+|  1. | 0.3888354875 | 0.9304879473 |
+|  2. | 0.3888354875 | 0.9419950611 |
 |  3. | 3.5982222    | 0.9995717563 |
 |  4. | 3.5982222    | 0.9995717563 |
 |  5. | 0.1631944444 | 0.9916942643 |
@@ -98,7 +98,7 @@ round-off distance from the above reference values.
 
 ## Contact
 
-You can reach the Laghos team by emailing remhos@llnl.gov or by leaving a
+You can reach the Remhos team by emailing remhos@llnl.gov or by leaving a
 comment in the [issue tracker](https://github.com/CEED/Remhos/issues).
 
 ## Copyright
