@@ -258,13 +258,12 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
 // Class storing information on dofs needed for the low order methods and FCT.
 class DofInfo
 {
-   ParFiniteElementSpace *pfes;
+private:
    ParMesh *pmesh;
+   ParFiniteElementSpace *pfes;
 
 public:
-
-   // For each dof the elements containing that vertex are stored.
-   mutable std::map<int, std::vector<int> > map_for_bounds;
+   GridFunction x_min, x_max;
 
    Vector xi_min, xi_max; // min/max values for each dof
    Vector xe_min, xe_max; // min/max values for each element
@@ -274,7 +273,9 @@ public:
 
    int dim, numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
-   DofInfo(ParFiniteElementSpace* _fes) : pfes(_fes), pmesh(pfes->GetParMesh())
+   DofInfo(ParFiniteElementSpace *fes_sltn, ParFiniteElementSpace *fes_bounds)
+      : pmesh(fes_sltn->GetParMesh()), pfes(fes_sltn),
+        x_min(fes_bounds), x_max(fes_bounds)
    {
       dim = pmesh->Dimension();
 
@@ -290,283 +291,49 @@ public:
       numFaceDofs = BdrDofs.Height();
       numBdrs = BdrDofs.Width();
 
-      GetVertexBoundsMap();  // Fill map_for_bounds.
       FillNeighborDofs();    // Fill NbrDof.
       FillSubcell2CellDof(); // Fill Sub2Ind.
    }
 
-   // Computes the admissible interval of values for one dof from the min and
-   // max values of all elements that feature a dof at this physical location.
-   // It is assumed that a low order method has computed the min/max values for
-   // each element.
-   void ComputeVertexBounds(const Vector& x, const int dofInd)
+   // Computes the admissible interval of values for each DG dof from the values
+   // of all elements that feature the dof at its physical location.
+   // Assumes that xe_min and xe_max are already computed.
+   void ComputeBounds()
    {
-      xi_min(dofInd) = numeric_limits<double>::infinity();
-      xi_max(dofInd) = -xi_min(dofInd);
+      Array<int> dofsCG;
 
-      for (int i = 0; i < (int)map_for_bounds[dofInd].size(); i++)
+      // Form min/max at each CG dof, taking into account element overlaps.
+      x_min =   numeric_limits<double>::infinity();
+      x_max = - numeric_limits<double>::infinity();
+      for (int i = 0; i < mesh->GetNE(); i++)
       {
-         xi_max(dofInd) = max(xi_max(dofInd),xe_max(map_for_bounds[dofInd][i]));
-         xi_min(dofInd) = min(xi_min(dofInd),xe_min(map_for_bounds[dofInd][i]));
+         x_min.FESpace()->GetElementDofs(i, dofsCG);
+         for (int j = 0; j < dofsCG.Size(); j++)
+         {
+            x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), xe_min(i));
+            x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), xe_max(i));
+         }
+      }
+
+      // Use (x_min, x_max) to fill (xi_min, xi_max) for each DG dof.
+      const TensorBasisElement *fe_cg =
+         dynamic_cast<const TensorBasisElement *>(x_min.FESpace()->GetFE(0));
+      const Array<int> &dof_map = fe_cg->GetDofMap();
+      const int ndofs = dof_map.Size();
+      for (int i = 0; i < mesh->GetNE(); i++)
+      {
+         x_min.FESpace()->GetElementDofs(i, dofsCG);
+         for(int j = 0; j < dofsCG.Size(); j++)
+         {
+            xi_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
+            xi_max(i*ndofs + j) = x_max(dofsCG[dof_map[j]]);
+         }
       }
    }
 
-   // Destructor
    ~DofInfo() { }
 
 private:
-
-   // Returns element sharing a face with both el1 and el2, but is not el.
-   // NOTE: This approach will not work for meshes with hanging nodes.
-   // NOTE: The same geometry for all elements is assumed.
-   int GetCommonElem(int el, int el1, int el2)
-   {
-      if (min(el1, el2) < 0) { return -1; }
-
-      int i, j, CmnNbr;
-      bool found = false;
-      Array<int> bdrs1, bdrs2, orientation, NbrEl1, NbrEl2;
-      FaceElementTransformations *Trans;
-
-      NbrEl1.SetSize(numBdrs); NbrEl2.SetSize(numBdrs);
-
-      if (dim==1)
-      {
-         pmesh->GetElementVertices(el1, bdrs1);
-         pmesh->GetElementVertices(el2, bdrs2);
-      }
-      else if (dim==2)
-      {
-         pmesh->GetElementEdges(el1, bdrs1, orientation);
-         pmesh->GetElementEdges(el2, bdrs2, orientation);
-      }
-      else if (dim==3)
-      {
-         pmesh->GetElementFaces(el1, bdrs1, orientation);
-         pmesh->GetElementFaces(el2, bdrs2, orientation);
-      }
-
-      // Get lists of all neighbors of el1 and el2.
-      for (i = 0; i < numBdrs; i++)
-      {
-         Trans = pmesh->GetFaceElementTransformations(bdrs1[i]);
-         NbrEl1[i] = Trans->Elem1No != el1 ? Trans->Elem1No : Trans->Elem2No;
-
-         Trans = pmesh->GetFaceElementTransformations(bdrs2[i]);
-         NbrEl2[i] = Trans->Elem1No != el2 ? Trans->Elem1No : Trans->Elem2No;
-      }
-
-      for (i = 0; i < numBdrs; i++)
-      {
-         if (NbrEl1[i] < 0) { continue; }
-         for (j = 0; j < numBdrs; j++)
-         {
-            if (NbrEl2[j] < 0) { continue; }
-
-            // add neighbor elements that share a face with el1 and el2 but are
-            // not el
-            if (NbrEl1[i] == NbrEl2[j] && NbrEl1[i] != el)
-            {
-               if (!found)
-               {
-                  CmnNbr = NbrEl1[i];
-                  found = true;
-               }
-               else { MFEM_ABORT("Found multiple common neighbor elements."); }
-            }
-         }
-      }
-      return (found == true) ? CmnNbr : -1;
-   }
-
-   // This fills the map_for_bounds according to our paper.
-   // NOTE: The mesh is assumed to consist of segments, quads or hexes.
-   // NOTE: This approach will not work for meshes with hanging nodes.
-   void GetVertexBoundsMap()
-   {
-      const FiniteElement &dummy = *pfes->GetFE(0);
-      int i, j, k, dofInd, nbr;
-      int ne = pmesh->GetNE(), nd = dummy.GetDof(), p = dummy.GetOrder();
-      Array<int> bdrs, orientation, NbrElem;
-      FaceElementTransformations *Trans;
-
-      NbrElem.SetSize(numBdrs);
-
-      for (k = 0; k < ne; k++)
-      {
-         // include the current element for all dofs of the element
-         for (i = 0; i < nd; i++)
-         {
-            dofInd = k*nd+i;
-            map_for_bounds[dofInd].push_back(k);
-         }
-
-         if (dim==1)
-         {
-            pmesh->GetElementVertices(k, bdrs);
-         }
-         else if (dim==2)
-         {
-            pmesh->GetElementEdges(k, bdrs, orientation);
-         }
-         else if (dim==3)
-         {
-            pmesh->GetElementFaces(k, bdrs, orientation);
-         }
-
-         // Include neighbors sharing a face with element k for face dofs.
-         for (i = 0; i < numBdrs; i++)
-         {
-            Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
-
-            NbrElem[i] = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-            if (NbrElem[i] < 0) { continue; }
-
-            for (j = 0; j < numFaceDofs; j++)
-            {
-               dofInd = k*nd+BdrDofs(j,i);
-               map_for_bounds[dofInd].push_back(NbrElem[i]);
-            }
-         }
-
-         // Include neighbors that have no face in common with element k.
-         if (dim==2) // Include neighbor elements for the four vertices.
-         {
-
-            nbr = GetCommonElem(k, NbrElem[3], NbrElem[0]);
-            if (nbr >= 0) { map_for_bounds[k*nd].push_back(nbr); }
-
-            nbr = GetCommonElem(k, NbrElem[0], NbrElem[1]);
-            if (nbr >= 0) { map_for_bounds[k*nd+p].push_back(nbr); }
-
-            nbr = GetCommonElem(k, NbrElem[1], NbrElem[2]);
-            if (nbr >= 0) { map_for_bounds[(k+1)*nd-1].push_back(nbr); }
-
-            nbr = GetCommonElem(k, NbrElem[2], NbrElem[3]);
-            if (nbr >= 0) { map_for_bounds[k*nd+p*(p+1)].push_back(nbr); }
-         }
-         else if (dim==3)
-         {
-            Array<int> EdgeNbrs; EdgeNbrs.SetSize(12);
-
-            EdgeNbrs[0]  = GetCommonElem(k, NbrElem[0], NbrElem[1]);
-            EdgeNbrs[1]  = GetCommonElem(k, NbrElem[0], NbrElem[2]);
-            EdgeNbrs[2]  = GetCommonElem(k, NbrElem[0], NbrElem[3]);
-            EdgeNbrs[3]  = GetCommonElem(k, NbrElem[0], NbrElem[4]);
-            EdgeNbrs[4]  = GetCommonElem(k, NbrElem[5], NbrElem[1]);
-            EdgeNbrs[5]  = GetCommonElem(k, NbrElem[5], NbrElem[2]);
-            EdgeNbrs[6]  = GetCommonElem(k, NbrElem[5], NbrElem[3]);
-            EdgeNbrs[7]  = GetCommonElem(k, NbrElem[5], NbrElem[4]);
-            EdgeNbrs[8]  = GetCommonElem(k, NbrElem[4], NbrElem[1]);
-            EdgeNbrs[9]  = GetCommonElem(k, NbrElem[1], NbrElem[2]);
-            EdgeNbrs[10] = GetCommonElem(k, NbrElem[2], NbrElem[3]);
-            EdgeNbrs[11] = GetCommonElem(k, NbrElem[3], NbrElem[4]);
-
-            // include neighbor elements for the twelve edges of a square
-            for (j = 0; j <= p; j++)
-            {
-               if (EdgeNbrs[0] >= 0)
-               {
-                  map_for_bounds[k*nd+j].push_back(EdgeNbrs[0]);
-               }
-               if (EdgeNbrs[1] >= 0)
-               {
-                  map_for_bounds[k*nd+(j+1)*(p+1)-1].push_back(EdgeNbrs[1]);
-               }
-               if (EdgeNbrs[2] >= 0)
-               {
-                  map_for_bounds[k*nd+p*(p+1)+j].push_back(EdgeNbrs[2]);
-               }
-               if (EdgeNbrs[3] >= 0)
-               {
-                  map_for_bounds[k*nd+j*(p+1)].push_back(EdgeNbrs[3]);
-               }
-               if (EdgeNbrs[4] >= 0)
-               {
-                  map_for_bounds[k*nd+(p+1)*(p+1)*p+j].push_back(EdgeNbrs[4]);
-               }
-               if (EdgeNbrs[5] >= 0)
-               {
-                  map_for_bounds[k*nd+(p+1)*(p+1)*p+(j+1)*(p+1)-1].push_back(EdgeNbrs[5]);
-               }
-               if (EdgeNbrs[6] >= 0)
-               {
-                  map_for_bounds[k*nd+(p+1)*(p+1)*p+p*(p+1)+j].push_back(EdgeNbrs[6]);
-               }
-               if (EdgeNbrs[7] >= 0)
-               {
-                  map_for_bounds[k*nd+(p+1)*(p+1)*p+j*(p+1)].push_back(EdgeNbrs[7]);
-               }
-               if (EdgeNbrs[8] >= 0)
-               {
-                  map_for_bounds[k*nd+j*(p+1)*(p+1)].push_back(EdgeNbrs[8]);
-               }
-               if (EdgeNbrs[9] >= 0)
-               {
-                  map_for_bounds[k*nd+p+j*(p+1)*(p+1)].push_back(EdgeNbrs[9]);
-               }
-               if (EdgeNbrs[10] >= 0)
-               {
-                  map_for_bounds[k*nd+(j+1)*(p+1)*(p+1)-1].push_back(EdgeNbrs[10]);
-               }
-               if (EdgeNbrs[11] >= 0)
-               {
-                  map_for_bounds[k*nd+p*(p+1)+j*(p+1)*(p+1)].push_back(EdgeNbrs[11]);
-               }
-            }
-
-            // include neighbor elements for the 8 vertices of a square
-            nbr = GetCommonElem(NbrElem[0], EdgeNbrs[0], EdgeNbrs[3]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[0], EdgeNbrs[0], EdgeNbrs[1]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+p].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[0], EdgeNbrs[2], EdgeNbrs[3]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+p*(p+1)].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[0], EdgeNbrs[1], EdgeNbrs[2]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+(p+1)*(p+1)-1].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[5], EdgeNbrs[4], EdgeNbrs[7]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+(p+1)*(p+1)*p].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[5], EdgeNbrs[4], EdgeNbrs[5]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+(p+1)*(p+1)*p+p].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[5], EdgeNbrs[6], EdgeNbrs[7]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+(p+1)*(p+1)*p+(p+1)*p].push_back(nbr);
-            }
-
-            nbr = GetCommonElem(NbrElem[5], EdgeNbrs[5], EdgeNbrs[6]);
-            if (nbr >= 0)
-            {
-               map_for_bounds[k*nd+(p+1)*(p+1)*(p+1)-1].push_back(nbr);
-            }
-         }
-      }
-   }
 
    // For each DOF on an element boundary, the global index of the DOF on the
    // opposite site is computed and stored in a list. This is needed for lumping
@@ -878,6 +645,8 @@ public:
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
+   // bdrInt - eq (32).
+   // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
@@ -1053,7 +822,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 3;
    MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
-   double t_final = 2.0;
+   double t_final = 4.0;
    double dt = 0.0025;
    bool visualization = true;
    bool visit = false;
@@ -1195,6 +964,11 @@ int main(int argc, char *argv[])
    DG_FECollection fec(order, dim, btype);
    ParFiniteElementSpace pfes(&pmesh, &fec);
 
+   // The min and max bounds are represented as CG functions of the same order
+   // as the solution, thus having 1:1 dof correspondence inside each element.
+   H1_FECollection fec_bounds(order, dim, BasisType::GaussLobatto);
+   FiniteElementSpace fes_bounds(mesh, &fec_bounds);
+
    // Check for meaningful combinations of parameters.
    bool fail = false;
    if (MonoType != None)
@@ -1318,7 +1092,7 @@ int main(int argc, char *argv[])
    HypreParMatrix *k_hypre = k.ParallelAssemble();
 
    // Store topological dof data.
-   DofInfo dofs(&pfes);
+   DofInfo dofs(&pfes, &fes_bounds);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -1542,6 +1316,9 @@ int main(int argc, char *argv[])
    adv->SetTime(t);
    ode_solver->Init(*adv);
 
+   double umax = u.Max();
+   double umin = u.Min();
+
    bool done = false;
    for (int ti = 0; !done; )
    {
@@ -1553,6 +1330,20 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(u, t, dt_real);
       ti++;
+
+      // Monotonicity check for debug purposes mainly.
+      if (problem_num % 10 != 6 && problem_num % 10 != 7)
+      {
+         if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         umax = u.Max();
+         if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+         umin = u.Min();
+      }
+      else
+      {
+         if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
+         if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+      }
 
       if (exec_mode == 1)
       {
@@ -1619,6 +1410,11 @@ int main(int argc, char *argv[])
       cout << "L1-error: " << u.ComputeLpError(1., u0) << ", L-Inf-error: "
            << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
            << "." << endl;
+   }
+   else if (problem_num == 7)
+   {
+      FunctionCoefficient u_ex(inflow_function);
+      cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
    }
 
    // 10. Free the used memory.
@@ -1716,7 +1512,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
 
-   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
+   if ( (lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT) )
    {
       // Reassemble on the new mesh (given by mesh_pos).
       if (exec_mode == 1)
@@ -1735,7 +1531,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       // Discretization and monotonicity terms.
       lom.D.Mult(x, y);
-      y += b;
+      if (!lom.OptScheme)
+      {
+         y += b; // Only use b, in case that no flux lumping is used.
+      }
 
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
@@ -1763,15 +1562,15 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)
    {
-      int m, dofInd2, loc;
+      int m, loc;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN,
-             aux, fluct, gamma = 10., eps = 1.E-15;
+             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
+             gamma = 10., eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
 
       // Discretization terms
-      y = b;
+      y = 0.;
       K.Mult(x, z);
 
       // Monotonicity terms
@@ -1794,11 +1593,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
             dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
             xSum += x(dofInd);
-            if (lom.OptScheme)
-            {
-               rhoP += max(0., z(dofInd));
-               rhoN += min(0., z(dofInd));
-            }
+            rhoP += max(0., z(dofInd));
+            rhoN += min(0., z(dofInd));
          }
 
          sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
@@ -1856,10 +1652,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                   dofInd = k*nd + loc;
                   nodalWeightsP(loc) += fluctSubcellP(m)
                                         * ((xMaxSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellP(m)); // eq. (10)
+                                           / sumWeightsSubcellP(m)); // eq. (58)
                   nodalWeightsN(loc) += fluctSubcellN(m)
                                         * ((xMinSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellN(m)); // eq. (11)
+                                           / sumWeightsSubcellN(m)); // eq. (59)
                }
             }
          }
@@ -1881,19 +1677,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
             }
 
-            for (j = 0; j < nd; j++)
-            {
-               dofInd2 = k*nd+j;
-               if (z(dofInd2) > eps)
-               {
-                  y(dofInd) += weightP * z(dofInd2);
-               }
-               else if (z(dofInd2) < -eps)
-               {
-                  y(dofInd) += weightN * z(dofInd2);
-               }
-            }
-            y(dofInd) /= lumpedM(dofInd);
+            y(dofInd) = (y(dofInd) + weightP * rhoP + weightN * rhoN)
+                        / lumpedM(dofInd);
          }
       }
    }
@@ -1912,7 +1697,8 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 
    z += b;
 
-   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS.
+   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
+   // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The face contributions have been computed in the low order scheme.
@@ -1940,6 +1726,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    double sumPos, sumNeg, eps = 1.E-15;
    Vector uClipped, fClipped;
 
+   dofs.ComputeBounds();
+
    // Monotonicity terms
    for (k = 0; k < lom.fes->GetMesh()->GetNE(); k++)
    {
@@ -1953,9 +1741,6 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
       for (j = 0; j < nd; j++)
       {
          dofInd = k*nd+j;
-
-         // Compute the bounds for each dof inside the loop.
-         dofs.ComputeVertexBounds(x, dofInd);
 
          uClipped(j) = min(dofs.xi_max(dofInd), max(x(dofInd) + dt*yH(dofInd),
                                                     dofs.xi_min(dofInd)) );
@@ -1999,7 +1784,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
+   M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
@@ -2204,12 +1989,25 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
+      case 6:
+      case 7:
+      {
+         switch (dim)
+         {
+            case 1: v(0) = 1.0; break;
+            case 2: v(0) = x(1); v(1) = -x(0); break;
+            case 3: v(0) = x(1); v(1) = -x(0); v(2) = 0.0; break;
+         }
+         break;
+      }
       case 10:
       case 11:
       case 12:
       case 13:
       case 14:
       case 15:
+      case 16:
+      case 17:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2476,6 +2274,17 @@ double u0_function(const Vector &x)
             return dom1 + 2.*dom2 + 3.*dom3;
          }
       }
+      case 6:
+      {
+         double r = x.Norml2();
+         if (r >= 0.15 && r < 0.45) { return 1.; }
+         else if (r >= 0.55 && r < 0.85)
+         {
+            return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+         }
+         else { return 0.; }
+      }
+      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
    }
    return 0.0;
 }
@@ -2511,7 +2320,21 @@ double inflow_function(const Vector &x)
    return lua_inflow_function(x);
 #endif
 
-   return 0.0;
+   double r = x.Norml2();
+   if ((problem_num % 10) == 6 && x.Size() == 2)
+   {
+      if (r >= 0.15 && r < 0.45) { return 1.; }
+      else if (r >= 0.55 && r < 0.85)
+      {
+         return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+      }
+      else { return 0.; }
+   }
+   else if ((problem_num % 10) == 7 && x.Size() == 2)
+   {
+      return exp(-100.*pow(r - 0.7, 2.));
+   }
+   else { return 0.0; }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
