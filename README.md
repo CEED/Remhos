@@ -62,27 +62,27 @@ Remhos has the following external dependencies:
 To make sure the results are correct, we verify the final mass (`mass`) and
 maximum value (`max`) for the runs listed below:
 
-1.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.01 -tf 10 -mt 2`
-2.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.01 -tf 10 -mt 4`
+1.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 2`
+2.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 4`
 3.  `./remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 2`
 4.  `./remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 4`
-5.  `./remhos -m ./data/periodic-square.mesh -p 5 -rs 4 -dt 0.002 -o 2 -tf 0.8 -mt 2`
-6.  `./remhos -m ./data/periodic-square.mesh -p 5 -rs 4 -dt 0.002 -o 2 -tf 0.8 -mt 4`
-7.  `./remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.02 -tf 8 -mt 4`
+5.  `./remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.005 -tf 0.8 -mt 2`
+6.  `./remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.002 -tf 0.8 -mt 4`
+7.  `./remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -mt 4`
 8.  `./remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.01 -tf 3 -mt 4`
 9.  `./remhos -m ./data/periodic-square.mesh -p 14 -rs 3 -dt 0.005 -tf 0.5 -mt 4`
 10. `./remhos -m ./data/periodic-cube.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.5 -mt 4`
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
-|  1. | 0.3888354875 | 0.9304879473 |
-|  2. | 0.3888354875 | 0.9419950611 |
+|  1. | 0.3888354875 | 0.9333315791 |
+|  2. | 0.3888354875 | 0.9449786245 |
 |  3. | 3.5982222    | 0.9995717563 |
 |  4. | 3.5982222    | 0.9995717563 |
-|  5. | 0.1631944444 | 0.9916942643 |
-|  6. | 0.1631944444 | 0.9501635831 |
-|  7. | 0.9607429525 | 0.763596485  |
-|  8. | 0.8087489307 | 0.9999889315 |
+|  5. | 0.1623263888 | 0.7676354393 |
+|  6. | 0.1623263888 | 0.7469836332 |
+|  7. | 0.9607429525 | 0.767823337  |
+|  8. | 0.8087330861 | 0.9999889315 |
 |  9. | 0.3725812939 | 0.9999996397 |
 | 10. | 0.9607434514 | 0.9999600963 |
 
