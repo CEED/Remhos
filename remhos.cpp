@@ -345,11 +345,12 @@ private:
    {
       // Use the first mesh element as indicator.
       const FiniteElement &dummy = *pfes->GetFE(0);
-      int i, j, k, ind, nbr, ne = pmesh->GetNE();
+      int i, j, k, nbr, ne = pmesh->GetNE();
       int nd = dummy.GetDof(), p = dummy.GetOrder();
-      Array <int> bdrs, NbrBdrs, orientation;
+      Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
+      pmesh->ExchangeFaceNbrData();
       Table *face_to_el = pmesh->GetFaceToAllElementTable();
 
       NbrDof.SetSize(ne, numBdrs, numFaceDofs);
@@ -470,38 +471,6 @@ private:
                      fdof_ids(face_or_nbr)(loc_face_dof_id, face_id_nbr);
 
                   NbrDof(k, f, j) = nbr_id*nd + nbr_dof_id;
-
-#if 0
-                  // old method
-                  Trans = mesh->GetFaceElementTransformations(bdrs[0]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-                  NbrDof(k,0,j) = nbr*nd + (p+1)*(p+1)*p+j;
-
-                  Trans = mesh->GetFaceElementTransformations(bdrs[1]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-                  NbrDof(k,1,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(p+1)*p+(j%(p+1));
-
-                  Trans = mesh->GetFaceElementTransformations(bdrs[2]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-                  NbrDof(k,2,j) = nbr*nd + j*(p+1);
-
-                  Trans = mesh->GetFaceElementTransformations(bdrs[3]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-                  NbrDof(k,3,j) = nbr*nd + (j/(p+1))*(p+1)*(p+1)+(j%(p+1));
-
-                  Trans = mesh->GetFaceElementTransformations(bdrs[4]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-                  NbrDof(k,4,j) = nbr*nd + (j+1)*(p+1)-1;
-
-                  Trans = mesh->GetFaceElementTransformations(bdrs[5]);
-                  nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-
-                  NbrDof(k,5,j) = nbr*nd + j;
-#endif
                }
             }
          }
@@ -879,10 +848,10 @@ int main(int argc, char *argv[])
    args.Parse();
    if (!args.Good())
    {
-      args.PrintUsage(cout);
+      if (mpi.Root()) { args.PrintUsage(cout); }
       return 1;
    }
-   args.PrintOptions(cout);
+   if (mpi.Root()) { args.PrintOptions(cout); }
 
    // When not using lua, exec mode is derived from problem number convention
    if (problem_num < 10)      { exec_mode = 0; }
@@ -999,16 +968,15 @@ int main(int argc, char *argv[])
       mfem_warning("For -o 1, subcell scheme is disabled.");
       OptScheme = false;
    }
+
    if (fail)
    {
       delete ode_solver;
       return 5;
    }
 
-   if (myid == 0)
-   {
-      cout << "Number of unknowns: " << pfes.GlobalTrueVSize() << endl;
-   }
+   const int prob_size = pfes.GlobalTrueVSize();
+   if (mpi.Root()) { cout << "Number of unknowns: " << prob_size << endl; }
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
@@ -1300,8 +1268,11 @@ int main(int argc, char *argv[])
    }
 
    // check for conservation
-   Vector mass(lumpedM);
-   double initialMass = lumpedM * u;
+   Vector masses(lumpedM);
+   const double initialMass_loc = lumpedM * u;
+   double initialMass;
+   MPI_Allreduce(&initialMass_loc, &initialMass, 1, MPI_DOUBLE, MPI_SUM,
+                 pmesh.GetComm());
 
    // 8. Define the time-dependent evolution operator describing the ODE
    //    right-hand side, and perform time-integration (looping over the time
@@ -1395,22 +1366,26 @@ int main(int argc, char *argv[])
       u.Save(sltn);
    }
 
-   // check for conservation
-   double finalMass;
+   // Check for mass conservation.
+   double finalMass_loc;
    if (exec_mode == 1)
    {
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       ml.SpMat().GetDiag(lumpedM);
-      finalMass = lumpedM * u;
+      finalMass_loc = lumpedM * u;
    }
-   else { finalMass = mass * u; }
-
+   else { finalMass_loc = masses * u; }
+   double finalMass;
+   MPI_Allreduce(&finalMass_loc, &finalMass, 1, MPI_DOUBLE, MPI_SUM,
+                 pmesh.GetComm());
+   const double umax_loc = u.Max();
+   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
    if (mpi.Root())
    {
       cout << setprecision(10)
            << "Final mass: " << finalMass << endl
-           << "Max value:  " << u.Max() << endl << setprecision(6)
+           << "Max value:  " << umax << endl << setprecision(6)
            << "Mass loss:  " << abs(initialMass - finalMass) << endl;
    }
 
@@ -1449,7 +1424,7 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
-   const double abs_tol = 1.e-4;
+   const double abs_tol = 1.e-6;
 
    x = 0.;
 
