@@ -2227,7 +2227,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              alpha0(nd);
 
       bool UseMassLim = (problem_num != 6) && (problem_num != 7);
-      bool UseSmi = false;
+      bool UseSmi = true;
       double* Mij = M.GetData();
       
       
