@@ -1355,8 +1355,15 @@ int main(int argc, char *argv[])
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
+   L2_FECollection l2_fec(order, dim);
+   FiniteElementSpace l2_fes(mesh, &l2_fec);
+   GridFunction l2_inflow(&l2_fes);
+   l2_inflow.ProjectCoefficient(inflow);
    GridFunction inflow_gf(&fes);
-   inflow_gf.ProjectCoefficient(inflow);
+
+  //inflow_gf.ProjectCoefficient(inflow);
+
+  inflow_gf.ProjectGridFunction(l2_inflow);
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
@@ -1818,10 +1825,12 @@ int main(int argc, char *argv[])
          res /= dt;
          residual = 0.;
          for (int i = 0; i < res.Size(); i++)
-            residual += lumpedM(i) * res(i);
+         {
+            residual += abs(lumpedM(i) * res(i));
+         }
          
-         residual = abs(residual);
-         if (residual < 1.e-10) { done = true; }
+//          residual = sqrt(residual); // TODO
+         if (residual < 1.e-10 && t > 1.) { done = true; }
          else { res = u; }
       }
 
@@ -1926,9 +1935,9 @@ int main(int argc, char *argv[])
 
 void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
-   int i, iter, n = f.Size(), max_iter = 20;
+   int i, iter, n = f.Size(), max_iter = 1; // TODO
    Vector y(n);
-   const double abs_tol = 1.e-4;
+   const double abs_tol = 1.e-10;
 
    x = 0.;
 
@@ -2218,7 +2227,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              alpha0(nd);
 
       bool UseMassLim = (problem_num != 6) && (problem_num != 7);
-      bool UseSmi = true;
+      bool UseSmi = false;
       double* Mij = M.GetData();
       
       
@@ -3103,17 +3112,17 @@ double u0_function(const Vector &x)
             return dom1 + 2.*dom2 + 3.*dom3;
          }
       }
-//       case 6:
-//       {
-//          double r = x.Norml2();
-//          if (r >= 0.15 && r < 0.45) { return 1.; }
-//          else if (r >= 0.55 && r < 0.85)
-//          {
-//             return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
-//          }
-//          else { return 0.; }
-//       }
-//       case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      case 6:
+      {
+         double r = x.Norml2();
+         if (r >= 0.15 && r < 0.45) { return 1.; }
+         else if (r >= 0.55 && r < 0.85)
+         {
+            return pow(cos(10.*M_PI * (r - 0.7) / 3.), 2.);
+         }
+         else { return 0.; }
+      }
+      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
    }
    return 0.0;
 }
