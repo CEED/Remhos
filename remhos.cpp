@@ -1829,7 +1829,7 @@ int main(int argc, char *argv[])
             residual += lumpedM(i) * res(i) * lumpedM(i) * res(i);
          }
          
-         reisdual = sqrt(residual);
+         residual = sqrt(residual);
          if (residual < 1.e-10 && t > 1.) { done = true; }
          else { res = u; }
       }
