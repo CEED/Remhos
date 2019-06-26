@@ -1826,10 +1826,10 @@ int main(int argc, char *argv[])
          residual = 0.;
          for (int i = 0; i < res.Size(); i++)
          {
-            residual += abs(lumpedM(i) * res(i));
+            residual += lumpedM(i) * res(i) * lumpedM(i) * res(i);
          }
          
-//          residual = sqrt(residual); // TODO
+         reisdual = sqrt(residual);
          if (residual < 1.e-10 && t > 1.) { done = true; }
          else { res = u; }
       }
@@ -2229,7 +2229,6 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       bool UseMassLim = (problem_num != 6) && (problem_num != 7);
       bool UseSmi = true;
       double* Mij = M.GetData();
-      
       
       if (!UseMassLim) { max_iter = -1; }
       alpha1 = 1.;
