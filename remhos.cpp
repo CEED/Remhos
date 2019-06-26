@@ -2521,7 +2521,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    Vector uClipped, fClipped, f, g, g_min, g_max, smi_val;
    
    //Smoothness indicator.
-   bool UseSmi = false;
+   bool UseSmi = true;
    
    if (UseSmi)
    {
