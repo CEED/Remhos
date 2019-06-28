@@ -1424,7 +1424,7 @@ int main(int argc, char *argv[])
    b.AddBdrFaceIntegrator(
       new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
 
-   // Compute the lumped mass matrix algebraically
+   // Compute the lumped mass matrix.
    Vector lumpedM;
    BilinearForm ml(&fes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
@@ -1578,9 +1578,17 @@ int main(int argc, char *argv[])
    }
    
    // Initial condition.
-   GridFunction u(&fes);
+//   GridFunction u(&fes);
    FunctionCoefficient u0(u0_function);
+//   u.ProjectCoefficient(u0);
+
+   GridFunction u(&l2_fes);
    u.ProjectCoefficient(u0);
+   //GridFunction inflow_gf(&fes);
+
+   ////inflow_gf.ProjectCoefficient(inflow);
+
+   //inflow_gf.ProjectGridFunction(l2_inflow);
    
    // Smoothness indicator. TODO every step for remap
    SmoothnessIndicator smi;
@@ -1830,7 +1838,7 @@ int main(int argc, char *argv[])
          }
          
          residual = sqrt(residual);
-         if (residual < 1.e-10 && t > 1.) { done = true; }
+         if (residual < 1.e-10 && t >= 1.) { done = true; }
          else { res = u; }
       }
 
@@ -3167,7 +3175,7 @@ double inflow_function(const Vector &x)
       }
       else { return 0.; }
    }
-   else if ((problem_num % 10) == 7 && x.Size() == 2)
+   else if ((problem_num % 10) == 7)
    {
       return exp(-100. * (r - 0.7)*(r - 0.7));
    }
