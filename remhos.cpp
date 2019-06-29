@@ -1578,17 +1578,17 @@ int main(int argc, char *argv[])
    }
    
    // Initial condition.
-//   GridFunction u(&fes);
+   GridFunction u(&fes);
    FunctionCoefficient u0(u0_function);
-//   u.ProjectCoefficient(u0);
-
-   GridFunction u(&l2_fes);
    u.ProjectCoefficient(u0);
-   //GridFunction inflow_gf(&fes);
 
-   ////inflow_gf.ProjectCoefficient(inflow);
+//   GridFunction u(&l2_fes);
+//   u.ProjectCoefficient(u0);
+//   //GridFunction inflow_gf(&fes);
+//
+//   ////inflow_gf.ProjectCoefficient(inflow);
 
-   //inflow_gf.ProjectGridFunction(l2_inflow);
+//   //inflow_gf.ProjectGridFunction(l2_inflow);
    
    // Smoothness indicator. TODO every step for remap
    SmoothnessIndicator smi;
