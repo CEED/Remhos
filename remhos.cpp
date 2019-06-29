@@ -1193,7 +1193,7 @@ int main(int argc, char *argv[])
    bool binary = false;
    int vis_steps = 100;
 
-   int precision = 12;
+   int precision = 8;
    cout.precision(precision);
 
    OptionsParser args(argc, argv);
