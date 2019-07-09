@@ -158,7 +158,7 @@ struct LowOrderMethod
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;
    SparseMatrix D;
-   BilinearForm* pk;
+   ParBilinearForm* pk;
    VectorCoefficient* coef;
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
@@ -1086,7 +1086,7 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lom.pk = new BilinearForm(&pfes);
+         lom.pk = new ParBilinearForm(&pfes);
          if (exec_mode == 0)
          {
             lom.pk->AddDomainIntegrator(
@@ -1124,7 +1124,7 @@ int main(int argc, char *argv[])
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
    FiniteElementCollection *fec_sub;
-   ParFiniteElementSpace *fes_sub;
+   ParFiniteElementSpace *pfes_sub;
    ParGridFunction *xsub;
    ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
@@ -1148,8 +1148,8 @@ int main(int argc, char *argv[])
          // Standard non-periodic mesh.
          // Note that the fine mesh is always linear.
          fec_sub = new H1_FECollection(1, dim, BasisType::ClosedUniform);
-         fes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
-         xsub = new ParGridFunction(fes_sub);
+         pfes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         xsub = new ParGridFunction(pfes_sub);
          lom.subcell_mesh->SetCurvature(1);
          lom.subcell_mesh->SetNodalGridFunction(xsub);
       }
@@ -1162,12 +1162,12 @@ int main(int argc, char *argv[])
          lom.subcell_mesh->SetCurvature(1, disc_nodes);
 
          fec_sub = new L2_FECollection(1, dim, BasisType::ClosedUniform);
-         fes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
-         xsub = new ParGridFunction(fes_sub);
+         pfes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         xsub = new ParGridFunction(pfes_sub);
          lom.subcell_mesh->SetNodalGridFunction(xsub);
 
          GridFunction *coarse = pmesh.GetNodes();
-         InterpolationGridTransfer transf(*coarse->FESpace(), *fes_sub);
+         InterpolationGridTransfer transf(*coarse->FESpace(), *pfes_sub);
          transf.ForwardOperator().Mult(*coarse, *xsub);
       }
 
@@ -1175,7 +1175,7 @@ int main(int argc, char *argv[])
       lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, &fec1);
 
       // Submesh velocity.
-      v_sub_gf.SetSpace(fes_sub);
+      v_sub_gf.SetSpace(pfes_sub);
       v_sub_gf.ProjectCoefficient(velocity);
       if (lom.subcell_mesh->bdr_attributes.Size() > 0)
       {
@@ -1306,19 +1306,19 @@ int main(int argc, char *argv[])
       // Monotonicity check for debug purposes mainly.
       if (MonoType != None)
       {
+         double umin_new, umax_new;
+         GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
-            double umin_new, umax_new;
-            GetMinMax(u, umin_new, umax_new);
-            if (umin_new < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+            MFEM_VERIFY(umin_new > umin - 1e-12, "Undershoot");
+            MFEM_VERIFY(umax_new < umax + 1e-12, "Overshoot");
             umin = umin_new;
-            if (umax_new > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
             umax = umax_new;
          }
          else
          {
-            if (u.Max() > 1. + 1.E-12) { MFEM_ABORT("Overshoot"); }
-            if (u.Min() < 0. - 1.E-12) { MFEM_ABORT("Undershoot"); }
+            MFEM_VERIFY(umin_new > 0.0 - 1e-12, "Undershoot");
+            MFEM_VERIFY(umax_new < 1.0 + 1e-12, "Overshoot");
          }
       }
 
