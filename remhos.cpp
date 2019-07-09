@@ -147,6 +147,7 @@ Vector bb_min, bb_max;
 
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
+void GetMinMax(const ParGridFunction &g, double &min, double &max);
 
 enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT };
 
@@ -170,8 +171,7 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 {
    // Assuming that A is finalized
    const int *I = A.GetI(), *J = A.GetJ(), n = A.Size();
-   Array<int> smap;
-   smap.SetSize(I[n]);
+   Array<int> smap(I[n]);
 
    for (int row = 0, j = 0; row < n; row++)
    {
@@ -181,16 +181,9 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
          // Find the offset, _j, of the (col,row) entry and store it in smap[j].
          for (int _j = I[col], _end = I[col+1]; true; _j++)
          {
-            if (_j == _end)
-            {
-               mfem_error("SparseMatrix_Build_smap");
-            }
+            MFEM_VERIFY(_j != _end, "Can't find the symmetric entry!");
 
-            if (J[_j] == row)
-            {
-               smap[j] = _j;
-               break;
-            }
+            if (J[_j] == row) { smap[j] = _j; break; }
          }
       }
    }
@@ -263,7 +256,7 @@ private:
    ParFiniteElementSpace *pfes;
 
 public:
-   GridFunction x_min, x_max;
+   ParGridFunction x_min, x_max;
 
    Vector xi_min, xi_max; // min/max values for each dof
    Vector xe_min, xe_max; // min/max values for each element
@@ -300,9 +293,11 @@ public:
    // Assumes that xe_min and xe_max are already computed.
    void ComputeBounds()
    {
+      ParFiniteElementSpace *pfesCG = x_min.ParFESpace();
+      GroupCommunicator &gcomm = pfesCG->GroupComm();
       Array<int> dofsCG;
 
-      // Form min/max at each CG dof, taking into account element overlaps.
+      // Form min/max at each CG dof, considering element overlaps.
       x_min =   numeric_limits<double>::infinity();
       x_max = - numeric_limits<double>::infinity();
       for (int i = 0; i < pmesh->GetNE(); i++)
@@ -314,10 +309,16 @@ public:
             x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), xe_max(i));
          }
       }
+      Array<double> minvals(x_min.GetData(), x_min.Size()),
+                    maxvals(x_max.GetData(), x_max.Size());
+      gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
+      gcomm.Bcast(minvals);
+      gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
+      gcomm.Bcast(maxvals);
 
       // Use (x_min, x_max) to fill (xi_min, xi_max) for each DG dof.
       const TensorBasisElement *fe_cg =
-         dynamic_cast<const TensorBasisElement *>(x_min.FESpace()->GetFE(0));
+         dynamic_cast<const TensorBasisElement *>(pfesCG->GetFE(0));
       const Array<int> &dof_map = fe_cg->GetDofMap();
       const int ndofs = dof_map.Size();
       for (int i = 0; i < pmesh->GetNE(); i++)
@@ -848,10 +849,10 @@ int main(int argc, char *argv[])
    args.Parse();
    if (!args.Good())
    {
-      if (mpi.Root()) { args.PrintUsage(cout); }
+      if (myid == 0) { args.PrintUsage(cout); }
       return 1;
    }
-   if (mpi.Root()) { args.PrintOptions(cout); }
+   if (myid == 0) { args.PrintOptions(cout); }
 
    // When not using lua, exec mode is derived from problem number convention
    if (problem_num < 10)      { exec_mode = 0; }
@@ -936,7 +937,7 @@ int main(int argc, char *argv[])
    // The min and max bounds are represented as CG functions of the same order
    // as the solution, thus having 1:1 dof correspondence inside each element.
    H1_FECollection fec_bounds(order, dim, BasisType::GaussLobatto);
-   ParFiniteElementSpace fes_bounds(&pmesh, &fec_bounds);
+   ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
@@ -976,7 +977,7 @@ int main(int argc, char *argv[])
    }
 
    const int prob_size = pfes.GlobalTrueVSize();
-   if (mpi.Root()) { cout << "Number of unknowns: " << prob_size << endl; }
+   if (myid == 0) { cout << "Number of unknowns: " << prob_size << endl; }
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
@@ -1060,7 +1061,7 @@ int main(int argc, char *argv[])
    HypreParMatrix *k_hypre = k.ParallelAssemble();
 
    // Store topological dof data.
-   DofInfo dofs(&pfes, &fes_bounds);
+   DofInfo dofs(&pfes, &pfes_bounds);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -1071,7 +1072,7 @@ int main(int argc, char *argv[])
    lom.fes = &pfes;
 
    lom.pk = NULL;
-   if ((lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT))
+   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
       if (!lom.OptScheme)
       {
@@ -1287,8 +1288,8 @@ int main(int argc, char *argv[])
    adv->SetTime(t);
    ode_solver->Init(*adv);
 
-   double umax = u.Max();
-   double umin = u.Min();
+   double umin, umax;
+   GetMinMax(u, umin, umax);
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1307,10 +1308,12 @@ int main(int argc, char *argv[])
       {
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
-            if (u.Max() > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
-            umax = u.Max();
-            if (u.Min() < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
-            umin = u.Min();
+            double umin_new, umax_new;
+            GetMinMax(u, umin_new, umax_new);
+            if (umin_new < umin - 1.E-12) { MFEM_ABORT("Undershoot"); }
+            umin = umin_new;
+            if (umax_new > umax + 1.E-12) { MFEM_ABORT("Overshoot"); }
+            umax = umax_new;
          }
          else
          {
@@ -1329,7 +1332,7 @@ int main(int argc, char *argv[])
 
       if (done || ti % vis_steps == 0)
       {
-         if (mpi.Root())
+         if (myid == 0)
          {
             cout << "time step: " << ti << ", time: " << t << endl;
          }
@@ -1381,7 +1384,7 @@ int main(int argc, char *argv[])
                  pmesh.GetComm());
    const double umax_loc = u.Max();
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
-   if (mpi.Root())
+   if (myid == 0)
    {
       cout << setprecision(10)
            << "Final mass: " << finalMass << endl
@@ -1428,16 +1431,17 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 
    x = 0.;
 
-   double resid = f.Norml2();
    for (iter = 1; iter <= max_iter; iter++)
    {
       M.Mult(x, y);
       y -= f;
-      resid = y.Norml2();
-      if (resid <= abs_tol)
-      {
-         return;
-      }
+
+      double resid_loc = y.Norml2(); resid_loc *= resid_loc;
+      double resid;
+      MPI_Allreduce(&resid_loc, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      resid = std::sqrt(resid);
+      if (resid <= abs_tol) { return; }
+
       for (i = 0; i < n; i++)
       {
          x(i) -= y(i) / lumpedM(i);
@@ -1491,7 +1495,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
 
-   if ( (lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT) )
+   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
       // Reassemble on the new mesh (given by mesh_pos).
       if (exec_mode == 1)
@@ -1527,9 +1531,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             }
          }
 
+         // Compute min / max over elements (needed for FCT).
          dofs.xe_min(k) = numeric_limits<double>::infinity();
          dofs.xe_max(k) = -dofs.xe_min(k);
-
          for (j = 0; j < nd; j++)
          {
             dofInd = k*nd+j;
@@ -1679,8 +1683,6 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    // Get the MPI neighbor values.
-   x_gf = x;
-   x_gf.ExchangeFaceNbrData();
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The face contributions have been computed in the low order scheme.
@@ -1830,6 +1832,8 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       }
    }
 
+   x_gf = x;
+   x_gf.ExchangeFaceNbrData();
    if (lom.MonoType == 0)
    {
       ComputeHighOrderSolution(x, y);
@@ -2595,4 +2599,11 @@ int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                                        face_dof_id, face_dof1D_cnt);
       default: MFEM_ABORT("Dimension too high!"); return 0;
    }
+}
+
+void GetMinMax(const ParGridFunction &g, double &min, double &max)
+{
+   double min_loc = g.Min(), max_loc = g.Max();
+   MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 }
