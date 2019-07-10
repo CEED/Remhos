@@ -155,7 +155,7 @@ struct LowOrderMethod
 {
    MONOTYPE MonoType;
    bool OptScheme;
-   FiniteElementSpace *fes, *SubFes0, *SubFes1;
+   ParFiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;
    SparseMatrix D;
    ParBilinearForm* pk;
@@ -1427,7 +1427,7 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
-   const double abs_tol = 1.e-6;
+   const double abs_tol = 1.e-4;
 
    x = 0.;
 
@@ -1566,8 +1566,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
 
          // Element contributions
-         dofs.xe_min(k) = numeric_limits<double>::infinity();
-         dofs.xe_max(k) = -dofs.xe_min(k);
+         dofs.xe_min(k) =   numeric_limits<double>::infinity();
+         dofs.xe_max(k) = - numeric_limits<double>::infinity();
          rhoP = rhoN = xSum = 0.;
 
          for (j = 0; j < nd; j++)
@@ -1599,8 +1599,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             // compute min-/max-values and the fluctuation for subcells
             for (m = 0; m < dofs.numSubcells; m++)
             {
-               xMinSubcell(m) = numeric_limits<double>::infinity();
-               xMaxSubcell(m) = -xMinSubcell(m);
+               xMinSubcell(m) =   numeric_limits<double>::infinity();
+               xMaxSubcell(m) = - numeric_limits<double>::infinity();;
                fluct = xSum = 0.;
 
                if (exec_mode == 1)
