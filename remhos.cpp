@@ -63,10 +63,10 @@
 //               for persistent visualization of a time-evolving solution. The
 //               saving of time-dependent data files for external visualization
 //               with VisIt (visit.llnl.gov) is also illustrated.
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
-#include <algorithm>
 
 using namespace std;
 using namespace mfem;
@@ -155,7 +155,7 @@ struct LowOrderMethod
 {
    MONOTYPE MonoType;
    bool OptScheme;
-   ParFiniteElementSpace *fes, *SubFes0, *SubFes1;
+   FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;
    SparseMatrix D;
    ParBilinearForm* pk;
@@ -195,12 +195,10 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
                                     Array<int> smap, SparseMatrix& D)
 {
-   const int n = K.Size();
-   int* Ip = K.GetI();
-   int* Jp = K.GetJ();
-   double* Kp = K.GetData();
+   const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
+   const double *Kp = K.GetData();
 
-   double* Dp = D.GetData();
+   double *Dp = D.GetData();
 
    for (int i = 0, k = 0; i < n; i++)
    {
@@ -232,6 +230,7 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
    for (i = 0; i < mesh->GetNumFaces(); i++)
    {
       Trans = mesh->GetFaceElementTransformations(i);
+      // TODO this resets the value and the loop is useless.
       qOrdF = Trans->Elem1->OrderW();
       if (Trans->Elem2No >= 0)
       {
@@ -242,8 +241,7 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
       }
    }
    // Use the first mesh element as indicator.
-   const FiniteElement &dummy = *fes->GetFE(0);
-   qOrdF += 2*dummy.GetOrder();
+   qOrdF += 2 * fes->GetFE(0)->GetOrder();
 
    return &IntRules.Get(Trans->FaceGeom, qOrdF);
 }
@@ -1291,14 +1289,14 @@ int main(int argc, char *argv[])
    double umin, umax;
    GetMinMax(u, umin, umax);
 
+   if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
+
    bool done = false;
    for (int ti = 0; !done; )
    {
       double dt_real = min(dt, t_final - t);
 
       adv->SetDt(dt_real);
-
-      if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
 
       ode_solver->Step(u, t, dt_real);
       ti++;
@@ -1810,18 +1808,9 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
          for (int k = 0; k < ne; k++)
          {
-            if (dim==1)
-            {
-               mesh->GetElementVertices(k, bdrs);
-            }
-            else if (dim==2)
-            {
-               mesh->GetElementEdges(k, bdrs, orientation);
-            }
-            else if (dim==3)
-            {
-               mesh->GetElementFaces(k, bdrs, orientation);
-            }
+            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
             for (int i = 0; i < dofs.numBdrs; i++)
             {
