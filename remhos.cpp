@@ -214,7 +214,10 @@ Mesh* GetSubcellMesh(Mesh *mesh, int p)
    }
    else
    {
-      // TODO generalize to arbitrary 1D segments (different length than 1).
+      // TODO this is currently not working.
+		// The code relies on certain numbering of submesh to mesh elements:
+		// First subcell index in a submesh must have the same number as
+		// the element in the HO mesh that it belongs to.
       subcell_mesh = new Mesh(mesh->GetNE() * p, 1.);
       subcell_mesh->SetCurvature(1);
    }
@@ -1014,14 +1017,14 @@ void ComputeVariationalMatrix(SmoothnessIndicator &smi, const int ne,
          {
             tr_vdofs[4] = k*nd + dofs.Sub2Ind(m, 4);
             tr_vdofs[5] = k*nd + dofs.Sub2Ind(m, 5);
-            tr_vdofs[7] = k*nd + dofs.Sub2Ind(m, 7);
-            tr_vdofs[6] = k*nd + dofs.Sub2Ind(m, 6);
+            tr_vdofs[6] = k*nd + dofs.Sub2Ind(m, 7);
+            tr_vdofs[7] = k*nd + dofs.Sub2Ind(m, 6);
          }
          
          smi.LaplaceOp->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
       }
    }
-   smi.LaplaceOp->Finalize();   
+   smi.LaplaceOp->Finalize();
 }
 
 void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
@@ -1035,17 +1038,19 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
    eldofs.SetSize(nd);
    y.SetSize(N); y = 0.;
    
-   for (k = 0; k < ne; k++)
-   {
-      for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
-      
-      x.GetSubVector(eldofs, xDofs);
-      smi.ShapeEval.Mult(xDofs, tmp);
-      xEval.SetSubVector(eldofs, tmp);
-   }
-   
+	// TODO point of attack!
+//    for (k = 0; k < ne; k++)
+//    {
+//       for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
+//       
+//       x.GetSubVector(eldofs, xDofs);
+//       smi.ShapeEval.Mult(xDofs, tmp);
+//       xEval.SetSubVector(eldofs, tmp);
+//    }
+
+// 	smi.LaplaceOp->Mult(x, y);
    smi.LaplaceOp->Mult(xEval, y);
-   
+
    if (UseConsistentProj)
    {
       int iter, max_iter = 20;
@@ -1581,6 +1586,8 @@ int main(int argc, char *argv[])
    GridFunction u(&fes);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
+	
+	u.Print();
 
 //   GridFunction u(&l2_fes);
 //   u.ProjectCoefficient(u0);
@@ -1661,7 +1668,7 @@ int main(int argc, char *argv[])
          }
       }
    }
-   
+
    ComputeVariationalMatrix(smi, ne, nd, dofs);
    
    IntegrationRule *ir;
@@ -1676,32 +1683,33 @@ int main(int argc, char *argv[])
    
    smi.ShapeEval.SetSize(nd, nd); // nd == ir->GetNPoints().
    
-   for (i = 0; i < nd; i++)
+   for (i = 0; i < ir->GetNPoints(); i++)
    {
       const IntegrationPoint &ip = ir->IntPoint(i);
       fes.GetFE(0)->CalcShape(ip, shape);
       smi.ShapeEval.SetCol(i, shape);
    }
    smi.ShapeEval.Transpose();
-   
+
    GridFunction g(smi.fesH1), smi_val(smi.fesH1);
    ApproximateLaplacian(smi, ne, nd, dofs, u, g);
    
    const int N = g.Size();
+
    g_min.SetSize(N); g_max.SetSize(N);
    ComputeFromSparsity(smi.Mmat, g, g_min, g_max);
-   
+
    for (int e = 0; e < N; e++)
    {
-      smi_val(e) = 1. - pow(abs(g_min(e) - g_max(e)) /
-      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q);
+      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e))) /
+      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
    // Print the values of the smoothness indicator.
    {
       ofstream smi("smi_init_lump.gf");
       smi.precision(precision);
-      smi_val.Save(smi);
+      g.Save(smi); //TODO laplacian instead of smi
    }
 
    // Print the starting meshes and initial condition.
@@ -1906,8 +1914,8 @@ int main(int argc, char *argv[])
    
    for (int e = 0; e < g.Size(); e++)
    {
-      smi_val(e) = 1. - pow(abs(g_min(e) - g_max(e)) /
-      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q);
+      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-15) /
+      (abs(g_min(e)) + abs(g_max(e)) + 1.E-15), q );
    }
    
    // Print the values of the smoothness indicator.
@@ -1943,7 +1951,7 @@ int main(int argc, char *argv[])
 
 void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
-   int i, iter, n = f.Size(), max_iter = 1; // TODO
+   int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
    const double abs_tol = 1.e-10;
 
@@ -2235,7 +2243,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              alpha0(nd);
 
       bool UseMassLim = (problem_num != 6) && (problem_num != 7);
-      bool UseSmi = true;
+      bool UseSmi = false; // TODO
       double* Mij = M.GetData();
       
       if (!UseMassLim) { max_iter = -1; }
@@ -2263,8 +2271,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow(abs(g_min(k) - g_max(k)) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q);
+         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-15) /
+                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-15), q );
       }
 
       // Discretization terms.
@@ -2288,7 +2296,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             {
                alphaGlob = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.) // TODO global bounds
                                         / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-               tmp = smi.DG2CG(dofInd) < 0 ? 0 : smi_val(smi.DG2CG(dofInd));
+               tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
             }
             
@@ -2431,7 +2439,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                tmp = 0.;
                if (UseSmi)
                {
-                  tmp = smi.DG2CG(dofInd) < 0 ? 0 : smi_val(smi.DG2CG(dofInd));
+                  tmp = smi.DG2CG(dofInd) < 0. ? 0. : smi_val(smi.DG2CG(dofInd));
                }
                m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
                         * diff; // eq. (27) - (29)
@@ -2450,7 +2458,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                {
                   alphaGlob = min( 1., beta * lom.scale(k) * min(1. - x(dofInd), x(dofInd) - 0.) // TODO global bounds
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-                  tmp = smi.DG2CG(dofInd) < 0 ? 0 : smi_val(smi.DG2CG(dofInd));
+                  tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
                }
 
@@ -2541,8 +2549,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow(abs(g_min(k) - g_max(k)) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q);
+         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-15) /
+                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-15), q );
       }
    }
 
@@ -2577,7 +2585,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
             tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
             alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
             
-            tmp = smi.DG2CG(dofInd) < 0 ? 0 : smi_val(smi.DG2CG(dofInd));
+            tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
             alpha = min(max(tmp, alpha), alphaGlob);
             
             fClipped(j) = alpha * f(j);
