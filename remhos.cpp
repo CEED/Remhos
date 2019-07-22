@@ -1676,8 +1676,6 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    if (lom.MonoType == None) { K_hypre.Mult(x, z); }
    else                      { K.Mult(x, z); }
 
-   z += b;
-
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    // Get the MPI neighbor values.
