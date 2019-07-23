@@ -46,7 +46,7 @@ ordinary differential equations (ODEs) for the ...
 
 Remhos has the following external dependencies:
 
-- MFEM - serial build of the matrix-free-FCT branch
+- MFEM - parallel build of the matrix-free-FCT branch
   <br> https://github.com/mfem/mfem.
 
 ## Running
@@ -62,16 +62,16 @@ Remhos has the following external dependencies:
 To make sure the results are correct, we verify the final mass (`mass`) and
 maximum value (`max`) for the runs listed below:
 
-1.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.005 -tf 10 -mt 2`
-2.  `./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.005 -tf 10 -mt 4`
-3.  `./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 3 -mt 2`
-4.  `./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 3 -mt 4`
-5.  `./remhos -m ./data/periodic-square.mesh -p 5 -r 3 -dt 0.005 -tf 0.8 -mt 2`
-6.  `./remhos -m ./data/periodic-square.mesh -p 5 -r 3 -dt 0.002 -tf 0.8 -mt 4`
-7.  `./remhos -m ./data/periodic-cube.mesh -p 0 -r 1 -o 2 -dt 0.014 -tf 8 -mt 4`
-8.  `./remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -r 1 -dt 0.02 -tf 3 -mt 4`
-9.  `./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4`
-10. `./remhos -m ./data/periodic-cube.mesh -p 10 -r 1 -o 2 -dt 0.02 -tf 0.5 -mt 4`
+1.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 2`
+2.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 4`
+3.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 2`
+4.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 4`
+5.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.005 -tf 0.8 -mt 2`
+6.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.002 -tf 0.8 -mt 4`
+7.  `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -mt 4`
+8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -mt 4`
+9.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 14 -rs 3 -dt 0.005 -tf 0.5 -mt 4`
+10. `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.5 -mt 4`
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
