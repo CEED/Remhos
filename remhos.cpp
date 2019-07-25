@@ -962,7 +962,7 @@ struct SmoothnessIndicator
 {
    FiniteElementSpace *fesH1;
    BilinearFormIntegrator *bfi_dom, *bfi_bdr;
-   SparseMatrix Mmat, Mmixed, *LaplaceOp;
+   SparseMatrix Mmat, *LaplaceOp;
    Vector lumpedMH1, DG2CG;
    DenseMatrix ShapeEval;
 };
@@ -1037,18 +1037,16 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
    
    eldofs.SetSize(nd);
    y.SetSize(N); y = 0.;
-   
-	// TODO point of attack!
-//    for (k = 0; k < ne; k++)
-//    {
-//       for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
-//       
-//       x.GetSubVector(eldofs, xDofs);
-//       smi.ShapeEval.Mult(xDofs, tmp);
-//       xEval.SetSubVector(eldofs, tmp);
-//    }
 
-// 	smi.LaplaceOp->Mult(x, y);
+   for (k = 0; k < ne; k++)
+   {
+      for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
+      
+      x.GetSubVector(eldofs, xDofs);
+      smi.ShapeEval.Mult(xDofs, tmp);
+      xEval.SetSubVector(eldofs, tmp);
+   }
+
    smi.LaplaceOp->Mult(xEval, y);
 
    if (UseConsistentProj)
@@ -1367,7 +1365,6 @@ int main(int argc, char *argv[])
    GridFunction inflow_gf(&fes);
 
   //inflow_gf.ProjectCoefficient(inflow);
-
   inflow_gf.ProjectGridFunction(l2_inflow);
 
    // Velocity for the problem. Depending on the execution mode, this is the
@@ -1583,20 +1580,71 @@ int main(int argc, char *argv[])
    }
    
    // Initial condition.
-   GridFunction u(&fes);
    FunctionCoefficient u0(u0_function);
+   GridFunction u(&fes);
    u.ProjectCoefficient(u0);
-	
-	u.Print();
-
-//   GridFunction u(&l2_fes);
-//   u.ProjectCoefficient(u0);
-//   //GridFunction inflow_gf(&fes);
-//
-//   ////inflow_gf.ProjectCoefficient(inflow);
-
-//   //inflow_gf.ProjectGridFunction(l2_inflow);
    
+	// Project to get Lagrange coeffs, compute corresponding Bernstein coeffs.
+// 	const int Lagrange = BasisType::ClosedUniform;
+//    L2_FECollection fecLagr(order, dim, Lagrange);
+//    FiniteElementSpace fes_lagr(mesh, &fecLagr);
+//    GridFunction w(&fes_lagr);
+//    w.ProjectCoefficient(u0); // w in Lagrange basis coefs.
+// 	
+// // 	cout << w.Min() << " " << w.Max() << endl;
+// 	
+// 	// Change values of u.
+// 	MixedBilinearForm Mmixed(&fes, &fes_lagr);
+// 	Mmixed.AddDomainIntegrator(new MassIntegrator);
+// 	Mmixed.Assemble();
+// 	Mmixed.Finalize();
+// 	
+// 	BilinearForm M_Lagr(&fes_lagr);
+// 	M_Lagr.AddDomainIntegrator(new MassIntegrator);
+// 	M_Lagr.Assemble();
+// 	M_Lagr.Finalize();
+// 	
+// 	Vector v(w.Size());
+// 	M_Lagr.SpMat().Mult(w, v);
+// 		
+// 	DSmoother M_prec;
+// 	GMRESSolver M_solver;
+// 	M_solver.SetPreconditioner(M_prec);
+//    M_solver.SetOperator(Mmixed.SpMat());
+// 
+//    M_solver.iterative_mode = false;
+//    M_solver.SetRelTol(1e-14);
+//    M_solver.SetAbsTol(0.0);
+//    M_solver.SetMaxIter(10000);
+//    M_solver.SetPrintLevel(0);
+// 	
+// 	M_solver.Mult(v, w);
+// 	
+// 	GridFunction u(&fes);
+// 	for (int e = 0; e < u.Size(); e++) { u(e) = w(e); }
+	
+// 	// test
+// 
+// 	cout << u.Min() << " " << u.Max() << endl;
+// 	
+// 	
+// 	Mmixed.SpMat().Mult(w, u);
+// 	
+// 	w.ProjectCoefficient(u0);
+// 	M_Lagr.SpMat().Mult(w, v);
+// 	
+// 	u -= v;
+// 	cout << u.Norml2() << endl;
+// 	
+// 	
+// 	
+// 	if (problem_num == 4)
+// 	{
+// 		for (int e = 0; e < u.Size(); e++) { u(e) = min(1., max(0., u(e))); }
+// 	}
+// 	u.Print();
+
+
    // Smoothness indicator. TODO every step for remap
    SmoothnessIndicator smi;
    Vector g_min, g_max;
@@ -1701,7 +1749,7 @@ int main(int argc, char *argv[])
 
    for (int e = 0; e < N; e++)
    {
-      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e))) /
+      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
       (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
@@ -1709,7 +1757,7 @@ int main(int argc, char *argv[])
    {
       ofstream smi("smi_init_lump.gf");
       smi.precision(precision);
-      g.Save(smi); //TODO laplacian instead of smi
+      smi_val.Save(smi); // TODO smi_val
    }
 
    // Print the starting meshes and initial condition.
@@ -1831,7 +1879,7 @@ int main(int argc, char *argv[])
          if (NeedSubcells) { add(x0_sub, t, v_sub_gf, *xsub); }
       }
 
-      if (problem_num != 6 && problem_num != 7)
+      if (problem_num != 6 && problem_num != 7 && problem_num != 8)
       {
          done = (t >= t_final - 1.e-8*dt);
       }
@@ -1903,7 +1951,7 @@ int main(int argc, char *argv[])
            << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
            << "." << endl;
    }
-   else if (problem_num == 7)
+   else if (problem_num == 7 || problem_num == 8)
    {
       cout << "L2-error: " << u.ComputeLpError(2., inflow) << endl;
    }
@@ -1914,8 +1962,8 @@ int main(int argc, char *argv[])
    
    for (int e = 0; e < g.Size(); e++)
    {
-      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-15) /
-      (abs(g_min(e)) + abs(g_max(e)) + 1.E-15), q );
+      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
+      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
    // Print the values of the smoothness indicator.
@@ -2242,7 +2290,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              g_min, g_max, smi_val, m_it(nd), uDot(nd), res(nd), alpha1(nd),
              alpha0(nd);
 
-      bool UseMassLim = (problem_num != 6) && (problem_num != 7);
+      bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8;
       bool UseSmi = false; // TODO
       double* Mij = M.GetData();
       
@@ -2271,8 +2319,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-15) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-15), q );
+         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
       }
 
       // Discretization terms.
@@ -2289,9 +2337,11 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             // Compute the bounds for each dof inside the loop.
             dofs.ComputeVertexBounds(x, dofInd);
             
-            alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
+//             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
+//                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+            alpha(j) = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.) // TODO!
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-            
+
             if (UseSmi)
             {
                alphaGlob = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.) // TODO global bounds
@@ -2549,8 +2599,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-15) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-15), q );
+         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
       }
    }
 
@@ -2853,6 +2903,7 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
+		case 8: { v(0) = 0.; v(1) = -1.; break; }
       case 10:
       case 11:
       case 12:
@@ -3138,6 +3189,7 @@ double u0_function(const Vector &x)
          else { return 0.; }
       }
       case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+		case 8: { return 0.; }
    }
    return 0.0;
 }
@@ -3186,6 +3238,10 @@ double inflow_function(const Vector &x)
    else if ((problem_num % 10) == 7)
    {
       return exp(-100. * (r - 0.7)*(r - 0.7));
+   }
+   else if ((problem_num % 10) == 8)
+   {
+      return exp(-1.*pow(x(0) - 4., 2.));
    }
    else { return 0.0; }
 }
