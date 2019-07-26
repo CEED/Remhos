@@ -3188,7 +3188,7 @@ double u0_function(const Vector &x)
          }
          else { return 0.; }
       }
-      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      case 7: { return 0.; /*return exp(-100.*pow(x.Norml2() - 0.7, 2.));*/ }
 		case 8: { return 0.; }
    }
    return 0.0;
