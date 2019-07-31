@@ -903,9 +903,9 @@ int main(int argc, char *argv[])
    }
 
    // Check if the input mesh is periodic.
-   const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
-                                    (pmesh.GetNodes()->FESpace()->FEColl());
-   const bool periodic = (L2_coll != NULL);
+   const bool periodic = pmesh.GetNodes() != NULL &&
+                         dynamic_cast<const L2_FECollection *>
+                         (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh.SetCurvature(mesh_order, periodic);
 
    FiniteElementCollection *mesh_fec;
