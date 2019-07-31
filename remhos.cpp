@@ -2286,7 +2286,6 @@ double lua_inflow_function(const Vector& x)
 }
 #endif
 
-// Inflow boundary condition (zero for the problems considered in this example)
 double inflow_function(const Vector &x)
 {
 #ifdef USE_LUA
