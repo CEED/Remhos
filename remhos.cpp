@@ -65,6 +65,7 @@
 //               with VisIt (visit.llnl.gov) is also illustrated.
 
 #include "mfem.hpp"
+#include "remhos_fct.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -733,6 +734,8 @@ private:
    LowOrderMethod &lom;
    DofInfo &dofs;
 
+   MHCSolver *mhc_solver;
+
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM,
@@ -740,7 +743,8 @@ public:
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
-                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
+                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
+                MHCSolver *mhcs);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1277,10 +1281,12 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
+   MHCSolver *mhc_solver = NULL;
+
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
                                         k, k.SpMat(), *k_hypre,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs);
+                                        asmbl, lom, dofs, mhc_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1762,14 +1768,16 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
-                           LowOrderMethod &_lom, DofInfo &_dofs) :
+                           LowOrderMethod &_lom, DofInfo &_dofs,
+                           MHCSolver *mhc) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
+   asmbl(_asmbl), lom(_lom), dofs(_dofs),
+   mhc_solver(mhc) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
