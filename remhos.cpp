@@ -2284,6 +2284,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp,
+				 XMIN = x.Min(), XMAX = x.Max(),
              q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d, g,
@@ -2291,7 +2292,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              alpha0(nd);
 
       bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8;
-      bool UseSmi = false; // TODO
+      bool UseSmi = true; // TODO
       double* Mij = M.GetData();
       
       if (!UseMassLim) { max_iter = -1; }
@@ -2337,14 +2338,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             // Compute the bounds for each dof inside the loop.
             dofs.ComputeVertexBounds(x, dofInd);
             
-//             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
-//                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-            alpha(j) = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.) // TODO!
+            alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+//             alpha(j) = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.)
+//                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
 
             if (UseSmi)
             {
-               alphaGlob = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.) // TODO global bounds
+               alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO global bounds
                                         / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
                tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
