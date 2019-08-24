@@ -148,6 +148,7 @@ Vector bb_min, bb_max;
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 void GetMinMax(const ParGridFunction &g, double &min, double &max);
+void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs);
 
 enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT };
 
@@ -246,6 +247,88 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
    return &IntRules.Get(Trans->FaceGeom, qOrdF);
 }
 
+// Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped
+// and consistent mass matrices and K is the convection matrix. The spaces are
+// assumed to be L2 conforming.
+class PrecondConvectionIntegrator: public BilinearFormIntegrator
+{
+private:
+#ifndef MFEM_THREAD_SAFE
+   DenseMatrix dshape, adjJ, Q_ir;
+   Vector shape, vec2, BdFidxT;
+#endif
+   VectorCoefficient &Q;
+   double alpha;
+
+public:
+   PrecondConvectionIntegrator(VectorCoefficient &q, double a = 1.0)
+      : Q(q) { alpha = a; }
+   virtual void AssembleElementMatrix(const FiniteElement &,
+                                      ElementTransformation &,
+                                      DenseMatrix &);
+};
+
+// alpha (q . grad u, v)
+class MixedConvectionIntegrator : public BilinearFormIntegrator
+{
+private:
+#ifndef MFEM_THREAD_SAFE
+   DenseMatrix dshape, adjJ, Q_ir;
+   Vector shape, vec2, BdFidxT;
+#endif
+   VectorCoefficient &Q;
+   double alpha;
+
+public:
+   MixedConvectionIntegrator(VectorCoefficient &q, double a = 1.0)
+      : Q(q) { alpha = a; }
+   virtual void AssembleElementMatrix2(const FiniteElement &tr_el,
+                                       const FiniteElement &te_el,
+                                       ElementTransformation &Trans,
+                                       DenseMatrix &elmat)
+   {
+      int tr_nd = tr_el.GetDof();
+      int te_nd = te_el.GetDof();
+      int dim = te_el.GetDim(); // Using test geometry.
+
+#ifdef MFEM_THREAD_SAFE
+      DenseMatrix dshape, adjJ, Q_ir;
+      Vector shape, vec2, BdFidxT;
+#endif
+      elmat.SetSize(te_nd, tr_nd);
+      dshape.SetSize(tr_nd,dim);
+      adjJ.SetSize(dim);
+      shape.SetSize(te_nd);
+      vec2.SetSize(dim);
+      BdFidxT.SetSize(tr_nd);
+
+      Vector vec1;
+
+      // Using midpoint rule and test geometry.
+      const IntegrationRule *ir = &IntRules.Get(te_el.GetGeomType(), 1);
+
+      Q.Eval(Q_ir, Trans, *ir);
+
+      elmat = 0.0;
+      for (int i = 0; i < ir->GetNPoints(); i++)
+      {
+         const IntegrationPoint &ip = ir->IntPoint(i);
+         tr_el.CalcDShape(ip, dshape);
+         te_el.CalcShape(ip, shape);
+
+         Trans.SetIntPoint(&ip);
+         CalcAdjugate(Trans.Jacobian(), adjJ);
+         Q_ir.GetColumnReference(i, vec1);
+         vec1 *= alpha * ip.weight;
+
+         adjJ.Mult(vec1, vec2);
+         dshape.Mult(vec2, BdFidxT);
+
+         AddMultVWt(shape, BdFidxT, elmat);
+      }
+   }
+};
+
 // Class storing information on dofs needed for the low order methods and FCT.
 class DofInfo
 {
@@ -278,7 +361,9 @@ public:
       xe_min.SetSize(ne);
       xe_max.SetSize(ne);
 
-      pfes->GetFE(0)->ExtractBdrDofs(BdrDofs);
+      ExtractBdrDofs(pfes->GetFE(0)->GetOrder(),
+                     pfes->GetFE(0)->GetGeomType(), BdrDofs);
+      //pfes->GetFE(0)->ExtractBdrDofs(BdrDofs);
       numFaceDofs = BdrDofs.Height();
       numBdrs = BdrDofs.Width();
 
@@ -2309,6 +2394,64 @@ double inflow_function(const Vector &x)
    else { return 0.0; }
 }
 
+void PrecondConvectionIntegrator::AssembleElementMatrix(
+   const FiniteElement &el, ElementTransformation &Trans, DenseMatrix &elmat)
+{
+   int i, nd = el.GetDof(), dim = el.GetDim();
+
+#ifdef MFEM_THREAD_SAFE
+   DenseMatrix dshape, adjJ, Q_ir;
+   Vector shape, vec2, BdFidxT;
+#endif
+   elmat.SetSize(nd);
+   dshape.SetSize(nd,dim);
+   adjJ.SetSize(dim);
+   shape.SetSize(nd);
+   vec2.SetSize(dim);
+   BdFidxT.SetSize(nd);
+
+   double w;
+   Vector vec1;
+   DenseMatrix mass(nd,nd), conv(nd,nd), lumpedM(nd,nd), tmp(nd,nd);
+
+   const IntegrationRule *ir = IntRule;
+   if (ir == NULL)
+   {
+      int order = Trans.OrderGrad(&el) + Trans.Order() + el.GetOrder();
+      order = max(order, 2 * el.GetOrder() + Trans.OrderW());
+      ir = &IntRules.Get(el.GetGeomType(), order);
+   }
+
+   Q.Eval(Q_ir, Trans, *ir);
+
+   conv = mass = 0.0;
+   for (i = 0; i < ir->GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir->IntPoint(i);
+      el.CalcDShape(ip, dshape);
+      el.CalcShape(ip, shape);
+
+      Trans.SetIntPoint(&ip);
+      CalcAdjugate(Trans.Jacobian(), adjJ);
+      Q_ir.GetColumnReference(i, vec1);
+      vec1 *= alpha * ip.weight;
+
+      adjJ.Mult(vec1, vec2);
+      dshape.Mult(vec2, BdFidxT);
+
+      AddMultVWt(shape, BdFidxT, conv);
+
+      w = Trans.Weight() * ip.weight;
+      AddMult_a_VVt(w, shape, mass);
+   }
+   lumpedM = mass;
+   lumpedM.Lump();
+   mass.Invert();
+
+   MultABt(mass, lumpedM, tmp);
+   MultAtB(tmp, conv, elmat); // using symmetry of mass matrix
+}
+
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
@@ -2592,4 +2735,75 @@ void GetMinMax(const ParGridFunction &g, double &min, double &max)
    double min_loc = g.Min(), max_loc = g.Max();
    MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+}
+
+// Assuming L2 elements.
+void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
+{
+   switch (gtype)
+   {
+      case Geometry::SQUARE:
+      {
+         dofs.SetSize(p+1,4);
+         for (int i = 0; i <= p; i++)
+         {
+            dofs(i,0) = i;
+            dofs(i,1) = i*(p+1) + p;
+            dofs(i,2) = (p+1)*(p+1) - 1 - i;
+            dofs(i,3) = (p-i)*(p+1);
+         }
+         break;
+      }
+      case Geometry::CUBE:
+      {
+         dofs.SetSize((p+1)*(p+1), 6);
+         for (int bdrID = 0; bdrID < 6; bdrID++)
+         {
+            int o(0);
+            switch (bdrID)
+            {
+               case 0:
+                  for (int i = 0; i < (p+1)*(p+1); i++)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
+               case 1:
+                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
+                     for (int j = 0; j < p+1; j++)
+                     {
+                        dofs(o++,bdrID) = i+j;
+                     }
+                  break;
+               case 2:
+                  for (int i = p; i < (p+1)*(p+1)*(p+1); i+=p+1)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
+               case 3:
+                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
+                     for (int j = p*(p+1); j < (p+1)*(p+1); j++)
+                     {
+                        dofs(o++,bdrID) = i+j;
+                     }
+                  break;
+               case 4:
+                  for (int i = 0; i <= (p+1)*((p+1)*(p+1)-1); i+=p+1)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
+               case 5:
+                  for (int i = p*(p+1)*(p+1); i < (p+1)*(p+1)*(p+1); i++)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
+            }
+         }
+         break;
+      }
+      default: MFEM_ABORT("Geometry not implemented.");
+   }
 }
