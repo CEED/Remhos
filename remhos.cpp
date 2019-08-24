@@ -1212,6 +1212,7 @@ int main(int argc, char *argv[])
    ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
+
    if (NeedSubcells)
    {
       // The mesh corresponding to Bezier subcells of order p is constructed.
@@ -1260,16 +1261,18 @@ int main(int argc, char *argv[])
       // Submesh velocity.
       v_sub_gf.SetSpace(pfes_sub);
       v_sub_gf.ProjectCoefficient(velocity);
+
+      // Zero it out on boundaries (not moving boundaries).
+      Array<int> ess_bdr, ess_vdofs;
       if (lom.subcell_mesh->bdr_attributes.Size() > 0)
       {
-         // Zero it out on boundaries (not moving boundaries).
-         Array<int> ess_bdr(lom.subcell_mesh->bdr_attributes.Max()), ess_vdofs;
-         ess_bdr = 1;
-         xsub->FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-         for (int i = 0; i < v_sub_gf.Size(); i++)
-         {
-            if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
-         }
+         ess_bdr.SetSize(lom.subcell_mesh->bdr_attributes.Max());
+      }
+      ess_bdr = 1;
+      xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
+      for (int i = 0; i < ess_vdofs.Size(); i++)
+      {
+         if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
       }
       v_sub_coef.SetGridFunction(&v_sub_gf);
 
