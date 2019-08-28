@@ -2340,12 +2340,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             
             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-//             alpha(j) = min( 1., beta * min(1. - x(dofInd), x(dofInd) - 0.)
-//                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
 
             if (UseSmi)
             {
-               alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO global bounds
+               alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
                                         / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
                tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
@@ -2507,7 +2505,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                
                if (UseSmi)
                {
-                  alphaGlob = min( 1., beta * lom.scale(k) * min(1. - x(dofInd), x(dofInd) - 0.) // TODO global bounds
+                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN)
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                   tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
@@ -2584,10 +2582,11 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 {
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
-   double sumP, sumN, uH, uL, tmp, alpha, alphaGlob, q = 5., eps = 1.E-15;
+   double sumP, sumN, uH, uL, tmp, alpha, alphaGlob, 
+			 XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;
    Vector uClipped, fClipped, f, g, g_min, g_max, smi_val;
    
-   //Smoothness indicator.
+   // Smoothness indicator.
    bool UseSmi = true;
    
    if (UseSmi)
@@ -2632,7 +2631,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
             alpha = abs(f(j)) < eps ? 1. : fClipped(j) / f(j);
             
             // Global correction factors.
-            uClipped(j) = min(1., max(uH, 0.));
+            uClipped(j) = min(XMAX, max(uH, XMIN));
             tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
             alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
             
