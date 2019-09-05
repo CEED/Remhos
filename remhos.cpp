@@ -80,6 +80,8 @@ lua_State* L;
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
 
+bool UseSI;
+
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
 int exec_mode;
@@ -215,9 +217,9 @@ Mesh* GetSubcellMesh(Mesh *mesh, int p)
    else
    {
       // TODO this is currently not working.
-		// The code relies on certain numbering of submesh to mesh elements:
-		// First subcell index in a submesh must have the same number as
-		// the element in the HO mesh that it belongs to.
+      // The code relies on certain numbering of submesh to mesh elements:
+      // First subcell index in a submesh must have the same number as
+      // the element in the HO mesh that it belongs to.
       subcell_mesh = new Mesh(mesh->GetNE() * p, 1.);
       subcell_mesh->SetCurvature(1);
    }
@@ -967,10 +969,10 @@ struct SmoothnessIndicator
    DenseMatrix ShapeEval;
 };
 
-void ComputeVariationalMatrix(SmoothnessIndicator &smi, const int ne,
+void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
                               const int nd, DofInfo dofs)
 {
-   Mesh* subcell_mesh = smi.fesH1->GetMesh();
+   Mesh* subcell_mesh = si.fesH1->GetMesh();
    
    int k, i, j, l, m, e_id, dim = subcell_mesh->Dimension();
    DenseMatrix elmat1, elmat2;
@@ -985,10 +987,10 @@ void ComputeVariationalMatrix(SmoothnessIndicator &smi, const int ne,
       for (m = 0; m < dofs.numSubcells; m++)
       {
          e_id = k*dofs.numSubcells + m;
-         const FiniteElement *el = smi.fesH1->GetFE(e_id);
+         const FiniteElement *el = si.fesH1->GetFE(e_id);
          ElementTransformation *tr = subcell_mesh->GetElementTransformation(e_id);
-         smi.bfi_dom->AssembleElementMatrix(*el, *tr, elmat1);
-         smi.fesH1->GetElementVDofs(e_id, te_vdofs);
+         si.bfi_dom->AssembleElementMatrix(*el, *tr, elmat1);
+         si.fesH1->GetElementVDofs(e_id, te_vdofs);
          
          if (dim==1)      { subcell_mesh->GetElementVertices(e_id, bdrs); }
          else if (dim==2) { subcell_mesh->GetElementEdges(e_id, bdrs, orientation); }
@@ -1000,7 +1002,7 @@ void ComputeVariationalMatrix(SmoothnessIndicator &smi, const int ne,
             if (Trans->Elem2No < 0)
             {
                const FiniteElement *el2 = el;
-               smi.bfi_bdr->AssembleFaceMatrix (*el, *el2, *Trans, elmat2);
+               si.bfi_bdr->AssembleFaceMatrix (*el, *el2, *Trans, elmat2);
                elmat1 += elmat2;
             }
          }
@@ -1021,16 +1023,16 @@ void ComputeVariationalMatrix(SmoothnessIndicator &smi, const int ne,
             tr_vdofs[7] = k*nd + dofs.Sub2Ind(m, 6);
          }
          
-         smi.LaplaceOp->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
+         si.LaplaceOp->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
       }
    }
-   smi.LaplaceOp->Finalize();
+   si.LaplaceOp->Finalize();
 }
 
-void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
+void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
                           DofInfo dofs, const Vector &x, Vector &y)
 {
-   int k, i, j, m, e_id, dofInd, N = smi.lumpedMH1.Size();
+   int k, i, j, m, e_id, dofInd, N = si.lumpedMH1.Size();
    Array<int> vdofs, eldofs;
    bool UseConsistentProj = false;
    Vector xDofs(nd), tmp(nd), xEval(ne*nd);
@@ -1043,11 +1045,11 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
       for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
       
       x.GetSubVector(eldofs, xDofs);
-      smi.ShapeEval.Mult(xDofs, tmp);
+      si.ShapeEval.Mult(xDofs, tmp);
       xEval.SetSubVector(eldofs, tmp);
    }
 
-   smi.LaplaceOp->Mult(xEval, y);
+   si.LaplaceOp->Mult(xEval, y);
 
    if (UseConsistentProj)
    {
@@ -1060,7 +1062,7 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
       double resid = y.Norml2();
       for (iter = 1; iter <= max_iter; iter++)
       {
-         smi.Mmat.Mult(z1, z2);
+         si.Mmat.Mult(z1, z2);
          z2 -= y;
          resid = z2.Norml2();
          if (resid <= abs_tol)
@@ -1069,7 +1071,7 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
          }
          for (i = 0; i < N; i++)
          {
-            z1(i) -= z2(i) / smi.lumpedMH1(i);
+            z1(i) -= z2(i) / si.lumpedMH1(i);
          }
       }
       y = z1;
@@ -1078,7 +1080,7 @@ void ApproximateLaplacian(SmoothnessIndicator &smi, const int ne, const int nd,
    {
       for (k = 0; k < N; k++)
       {
-         y(k) /= smi.lumpedMH1(k);
+         y(k) /= si.lumpedMH1(k);
       }
    }
 }
@@ -1130,7 +1132,7 @@ private:
    CGSolver M_solver; // TODO dev
 
    LowOrderMethod &lom;
-   SmoothnessIndicator &smi;
+   SmoothnessIndicator &si;
    DofInfo &dofs;
 
 public:
@@ -1139,7 +1141,7 @@ public:
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel, Assembly &_asmbl,
-                LowOrderMethod &_lom, DofInfo &_dofs, SmoothnessIndicator &smi_);
+                LowOrderMethod &_lom, DofInfo &_dofs, SmoothnessIndicator &si_);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1189,6 +1191,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 1;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
+   UseSI = true;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
@@ -1225,8 +1228,10 @@ int main(int argc, char *argv[])
                   "                     3 - residual distribution - LO,\n\t"
                   "                     4 - residual distribution - FCT,n\t"
                   "                     5 - residual distribution - monolithic.");
-   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element (basic)",
-                  "Optimized scheme: PDU / subcell (optimized).");
+   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
+                  "Optimized low order scheme: PDU / RDS VS DU / RD.");
+   args.AddOption(&UseSI, "-si", "--si-on", "-no-si", "--si-off",
+                  "Enable/disable smoothness indicator.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
@@ -1298,9 +1303,9 @@ int main(int argc, char *argv[])
    // Refine the mesh and set the required curvature.
    for (int lev = 0; lev < ref_levels; lev++) { mesh->UniformRefinement(); }
    // Check if the input mesh is periodic.
-   const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
-                                    (mesh->GetNodes()->FESpace()->FEColl());
-   const bool periodic = (L2_coll != NULL);
+   const bool periodic = mesh->GetNodes() != NULL &&
+                         dynamic_cast<const L2_FECollection *>
+                         (mesh->GetNodes()->FESpace()->FEColl()) != NULL;
    mesh->SetCurvature(mesh_order, periodic);
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
@@ -1584,32 +1589,32 @@ int main(int argc, char *argv[])
    GridFunction u(&fes);
    u.ProjectCoefficient(u0);
    
-	// Project to get Lagrange coeffs, compute corresponding Bernstein coeffs.
-// 	const int Lagrange = BasisType::ClosedUniform;
+   // Project to get Lagrange coeffs, compute corresponding Bernstein coeffs.
+//    const int Lagrange = BasisType::ClosedUniform;
 //    L2_FECollection fecLagr(order, dim, Lagrange);
 //    FiniteElementSpace fes_lagr(mesh, &fecLagr);
 //    GridFunction w(&fes_lagr);
 //    w.ProjectCoefficient(u0); // w in Lagrange basis coefs.
-// 	
-// // 	cout << w.Min() << " " << w.Max() << endl;
-// 	
-// 	// Change values of u.
-// 	MixedBilinearForm Mmixed(&fes, &fes_lagr);
-// 	Mmixed.AddDomainIntegrator(new MassIntegrator);
-// 	Mmixed.Assemble();
-// 	Mmixed.Finalize();
-// 	
-// 	BilinearForm M_Lagr(&fes_lagr);
-// 	M_Lagr.AddDomainIntegrator(new MassIntegrator);
-// 	M_Lagr.Assemble();
-// 	M_Lagr.Finalize();
-// 	
-// 	Vector v(w.Size());
-// 	M_Lagr.SpMat().Mult(w, v);
-// 		
-// 	DSmoother M_prec;
-// 	GMRESSolver M_solver;
-// 	M_solver.SetPreconditioner(M_prec);
+//    
+// //    cout << w.Min() << " " << w.Max() << endl;
+//    
+//    // Change values of u.
+//    MixedBilinearForm Mmixed(&fes, &fes_lagr);
+//    Mmixed.AddDomainIntegrator(new MassIntegrator);
+//    Mmixed.Assemble();
+//    Mmixed.Finalize();
+//    
+//    BilinearForm M_Lagr(&fes_lagr);
+//    M_Lagr.AddDomainIntegrator(new MassIntegrator);
+//    M_Lagr.Assemble();
+//    M_Lagr.Finalize();
+//    
+//    Vector v(w.Size());
+//    M_Lagr.SpMat().Mult(w, v);
+//       
+//    DSmoother M_prec;
+//    GMRESSolver M_solver;
+//    M_solver.SetPreconditioner(M_prec);
 //    M_solver.SetOperator(Mmixed.SpMat());
 // 
 //    M_solver.iterative_mode = false;
@@ -1617,66 +1622,66 @@ int main(int argc, char *argv[])
 //    M_solver.SetAbsTol(0.0);
 //    M_solver.SetMaxIter(10000);
 //    M_solver.SetPrintLevel(0);
-// 	
-// 	M_solver.Mult(v, w);
-// 	
-// 	GridFunction u(&fes);
-// 	for (int e = 0; e < u.Size(); e++) { u(e) = w(e); }
-	
-// 	// test
+//    
+//    M_solver.Mult(v, w);
+//    
+//    GridFunction u(&fes);
+//    for (int e = 0; e < u.Size(); e++) { u(e) = w(e); }
+   
+//    // test
 // 
-// 	cout << u.Min() << " " << u.Max() << endl;
-// 	
-// 	
-// 	Mmixed.SpMat().Mult(w, u);
-// 	
-// 	w.ProjectCoefficient(u0);
-// 	M_Lagr.SpMat().Mult(w, v);
-// 	
-// 	u -= v;
-// 	cout << u.Norml2() << endl;
-// 	
-// 	
-// 	
-// 	if (problem_num == 4)
-// 	{
-// 		for (int e = 0; e < u.Size(); e++) { u(e) = min(1., max(0., u(e))); }
-// 	}
-// 	u.Print();
+//    cout << u.Min() << " " << u.Max() << endl;
+//    
+//    
+//    Mmixed.SpMat().Mult(w, u);
+//    
+//    w.ProjectCoefficient(u0);
+//    M_Lagr.SpMat().Mult(w, v);
+//    
+//    u -= v;
+//    cout << u.Norml2() << endl;
+//    
+//    
+//    
+//    if (problem_num == 4)
+//    {
+//       for (int e = 0; e < u.Size(); e++) { u(e) = min(1., max(0., u(e))); }
+//    }
+//    u.Print();
 
 
    // Smoothness indicator. TODO every step for remap
-   SmoothnessIndicator smi;
+   SmoothnessIndicator si;
    Vector g_min, g_max;
    double q = 5.;
    
    H1_FECollection H1fec(1, dim, btype);
    Array<int> ess_tdof_list; // this list remains empty for pure Neumann b.c.
    
-   smi.fesH1 = new FiniteElementSpace(lom.subcell_mesh, &H1fec);
+   si.fesH1 = new FiniteElementSpace(lom.subcell_mesh, &H1fec);
    
-   BilinearForm massH1(smi.fesH1);
+   BilinearForm massH1(si.fesH1);
    massH1.AddDomainIntegrator(new MassIntegrator);
    massH1.Assemble();
-   massH1.FormSystemMatrix(ess_tdof_list, smi.Mmat);
+   massH1.FormSystemMatrix(ess_tdof_list, si.Mmat);
    
-   BilinearForm mlH1(smi.fesH1);
+   BilinearForm mlH1(si.fesH1);
    mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
    mlH1.Assemble();
    
    SparseMatrix MLmat;
    mlH1.FormSystemMatrix(ess_tdof_list, MLmat);
-   MLmat.GetDiag(smi.lumpedMH1);
+   MLmat.GetDiag(si.lumpedMH1);
    
    ConstantCoefficient neg_one(-1.);
-   smi.bfi_dom = new DiffusionIntegrator(neg_one);
-   smi.bfi_bdr = new DGDiffusionIntegrator(neg_one, 0., 0.);
+   si.bfi_dom = new DiffusionIntegrator(neg_one);
+   si.bfi_bdr = new DGDiffusionIntegrator(neg_one, 0., 0.);
    
-   smi.LaplaceOp = new SparseMatrix(smi.fesH1->GetVSize(), fes.GetVSize());
+   si.LaplaceOp = new SparseMatrix(si.fesH1->GetVSize(), fes.GetVSize());
    
    // Stores the index for the dof of H1-conforming for each node.
    // If the node is on the boundary, the entry is -1.
-   smi.DG2CG.SetSize(ne*nd);
+   si.DG2CG.SetSize(ne*nd);
    Array<int> vdofs;
    int e, i, j, e_id;
    
@@ -1685,22 +1690,22 @@ int main(int argc, char *argv[])
       for (i = 0; i < dofs.numSubcells; i++)
       {
          e_id = e*dofs.numSubcells + i;
-         smi.fesH1->GetElementVDofs(e_id, vdofs);
+         si.fesH1->GetElementVDofs(e_id, vdofs);
          
          // Switchero - numbering CG vs DG.
-         smi.DG2CG(e*nd + dofs.Sub2Ind(i, 0)) = vdofs[0];
-         smi.DG2CG(e*nd + dofs.Sub2Ind(i, 1)) = vdofs[1];
+         si.DG2CG(e*nd + dofs.Sub2Ind(i, 0)) = vdofs[0];
+         si.DG2CG(e*nd + dofs.Sub2Ind(i, 1)) = vdofs[1];
          if (dim > 1)
          {
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 2)) = vdofs[3];
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 3)) = vdofs[2];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 2)) = vdofs[3];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 3)) = vdofs[2];
          }
          if (dim == 3)
          {
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 4)) = vdofs[4];
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 5)) = vdofs[5];
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 6)) = vdofs[7];
-            smi.DG2CG(e*nd + dofs.Sub2Ind(i, 7)) = vdofs[6];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 4)) = vdofs[4];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 5)) = vdofs[5];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 6)) = vdofs[7];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 7)) = vdofs[6];
          }
       }
       
@@ -1711,13 +1716,13 @@ int main(int argc, char *argv[])
          {
             if (dofs.NbrDof(e,i,j) < 0)
             {
-               smi.DG2CG(e*nd+dofs.BdrDofs(j,i)) = -1;
+               si.DG2CG(e*nd+dofs.BdrDofs(j,i)) = -1;
             }
          }
       }
    }
 
-   ComputeVariationalMatrix(smi, ne, nd, dofs);
+   ComputeVariationalMatrix(si, ne, nd, dofs);
    
    IntegrationRule *ir;
    IntegrationRule irX;
@@ -1729,35 +1734,35 @@ int main(int argc, char *argv[])
    if (dim == 2) { ir = new IntegrationRule(irX, irX); }
    if (dim == 3) { ir = new IntegrationRule(irX, irX, irX); }
    
-   smi.ShapeEval.SetSize(nd, nd); // nd == ir->GetNPoints().
+   si.ShapeEval.SetSize(nd, nd); // nd == ir->GetNPoints().
    
    for (i = 0; i < ir->GetNPoints(); i++)
    {
       const IntegrationPoint &ip = ir->IntPoint(i);
       fes.GetFE(0)->CalcShape(ip, shape);
-      smi.ShapeEval.SetCol(i, shape);
+      si.ShapeEval.SetCol(i, shape);
    }
-   smi.ShapeEval.Transpose();
+   si.ShapeEval.Transpose();
 
-   GridFunction g(smi.fesH1), smi_val(smi.fesH1);
-   ApproximateLaplacian(smi, ne, nd, dofs, u, g);
+   GridFunction g(si.fesH1), si_val(si.fesH1);
+   ApproximateLaplacian(si, ne, nd, dofs, u, g);
    
    const int N = g.Size();
 
    g_min.SetSize(N); g_max.SetSize(N);
-   ComputeFromSparsity(smi.Mmat, g, g_min, g_max);
+   ComputeFromSparsity(si.Mmat, g, g_min, g_max);
 
    for (int e = 0; e < N; e++)
    {
-      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
+      si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
       (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
    // Print the values of the smoothness indicator.
    {
-      ofstream smi("smi_init_lump.gf");
-      smi.precision(precision);
-      smi_val.Save(smi); // TODO smi_val
+      ofstream si("si_init_lump.gf");
+      si.precision(precision);
+      si_val.Save(si);
    }
 
    // Print the starting meshes and initial condition.
@@ -1834,7 +1839,7 @@ int main(int argc, char *argv[])
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
                                         b, inflow_gf, *x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, smi);
+                                        asmbl, lom, dofs, si);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1885,16 +1890,16 @@ int main(int argc, char *argv[])
       }
       else
       {
-         res -= u;
-         res /= dt;
+//          res -= u; // TODO cleanup
+//          res /= dt;
          residual = 0.;
          for (int i = 0; i < res.Size(); i++)
          {
-            residual += lumpedM(i) * res(i) * lumpedM(i) * res(i);
+            residual += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
          }
          
          residual = sqrt(residual);
-         if (residual < 1.e-10 && t >= 1.) { done = true; }
+         if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
          else { res = u; }
       }
 
@@ -1954,23 +1959,41 @@ int main(int argc, char *argv[])
    else if (problem_num == 7 || problem_num == 8)
    {
       cout << "L2-error: " << u.ComputeLpError(2., inflow) << endl;
+
+      // write output
+      ofstream file("errors.txt", ios_base::app);
+   
+      if (!file)
+      {
+         mfem_error(".");
+         return 0;
+      }
+      else
+      {
+         ostringstream strs;
+         strs << "order=" << order << " N=" << sqrt(mesh->GetNE()) << " SI=" << UseSI << "\n";
+         strs << u.ComputeLpError(2., inflow) << " " << u.ComputeLpError(1., inflow) << " " << u.ComputeLpError(numeric_limits<double>::infinity(), inflow) << "\n";
+         string str = strs.str();
+         file << str;
+         file.close();
+      }
    }
 
-   ApproximateLaplacian(smi, ne, nd, dofs, u, g);
+   ApproximateLaplacian(si, ne, nd, dofs, u, g);
    
-   ComputeFromSparsity(smi.Mmat, g, g_min, g_max);
+   ComputeFromSparsity(si.Mmat, g, g_min, g_max);
    
    for (int e = 0; e < g.Size(); e++)
    {
-      smi_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
+      si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
       (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
    // Print the values of the smoothness indicator.
    {
-      ofstream smi("smi_final_lump.gf");
-      smi.precision(precision);
-      smi_val.Save(smi);
+      ofstream si("si_final_lump.gf");
+      si.precision(precision);
+      si_val.Save(si);
    }
 
    // 10. Free the used memory.
@@ -1979,10 +2002,10 @@ int main(int argc, char *argv[])
    delete dc;
 
    delete lom.pk;
-   delete smi.fesH1;
-   delete smi.bfi_dom;
-   delete smi.bfi_bdr;
-   delete smi.LaplaceOp;
+   delete si.fesH1;
+   delete si.bfi_dom;
+   delete si.bfi_bdr;
+   delete si.LaplaceOp;
 
    if (order > 1) { delete lom.subcell_mesh; }
    
@@ -2284,20 +2307,18 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp,
-				 XMIN = x.Min(), XMAX = x.Max(),
+             XMIN = x.Min(), XMAX = x.Max(),
              q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d, g,
-             g_min, g_max, smi_val, m_it(nd), uDot(nd), res(nd), alpha1(nd),
-             alpha0(nd);
+             g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
 
       bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8;
-      bool UseSmi = true; // TODO
       double* Mij = M.GetData();
+      bool UseAlphaGlob = false;
       
       if (!UseMassLim) { max_iter = -1; }
       alpha1 = 1.;
-      alpha0 = 0.; //TODO dev
       for (k = 0; k < ne; k++)
       {
          dofs.xe_min(k) = numeric_limits<double>::infinity();
@@ -2311,16 +2332,16 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
       }
       
-      //Smoothness indicator.
-      ApproximateLaplacian(smi, ne, nd, dofs, x, g);
+      // Smoothness indicator.
+      ApproximateLaplacian(si, ne, nd, dofs, x, g);
       
       N = g.Size();
-      g_min.SetSize(N); g_max.SetSize(N); smi_val.SetSize(N);
-      ComputeFromSparsity(smi.Mmat, g, g_min, g_max);
+      g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
+      ComputeFromSparsity(si.Mmat, g, g_min, g_max);
       
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+         si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
                               (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
       }
 
@@ -2341,11 +2362,16 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
 
-            if (UseSmi)
+            if (UseSI)
             {
-               alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
-                                        / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-               tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
+               alphaGlob = 1.;
+               if (UseAlphaGlob)
+               {
+                  alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
+                                           / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+               }
+
+               tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
             }
             
@@ -2486,9 +2512,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                diff = d(dofInd) - y(dofInd);
                
                tmp = 0.;
-               if (UseSmi)
+               if (UseSI)
                {
-                  tmp = smi.DG2CG(dofInd) < 0. ? 0. : smi_val(smi.DG2CG(dofInd));
+                  tmp = si.DG2CG(dofInd) < 0. ? 0. : si_val(si.DG2CG(dofInd));
                }
                m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
                         * diff; // eq. (27) - (29)
@@ -2503,11 +2529,11 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                                      / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                
-               if (UseSmi)
+               if (UseSI)
                {
                   alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN)
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-                  tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
+                  tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
                }
 
@@ -2570,7 +2596,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    }
 
    NeumannSolve(z, y);
-//    M_solver.Mult(z, y); // TODO convergence test
+//    M_solver.Mult(z, y); // TODO convergence test, rm
 }
 
 // High order reconstruction that yields an updated admissible solution by means
@@ -2583,23 +2609,21 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
    double sumP, sumN, uH, uL, tmp, alpha, alphaGlob, 
-			 XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;
-   Vector uClipped, fClipped, f, g, g_min, g_max, smi_val;
+          XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;
+   Vector uClipped, fClipped, f, g, g_min, g_max, si_val;
    
    // Smoothness indicator.
-   bool UseSmi = true;
-   
-   if (UseSmi)
+   if (UseSI)
    {
-      ApproximateLaplacian(smi, ne, nd, dofs, x, g);
+      ApproximateLaplacian(si, ne, nd, dofs, x, g);
 
       N = g.Size();
-      g_min.SetSize(N); g_max.SetSize(N); smi_val.SetSize(N);
-      ComputeFromSparsity(smi.Mmat, g, g_min, g_max);
+      g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
+      ComputeFromSparsity(si.Mmat, g, g_min, g_max);
 
       for (k = 0; k < N; k++)
       {
-         smi_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+         si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
                               (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
       }
    }
@@ -2626,7 +2650,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
          uClipped(j) = min( dofs.xi_max(dofInd), max(uH, dofs.xi_min(dofInd)) );
          fClipped(j) = lumpedM(dofInd) / dt * (uClipped(j) - uL);
          
-         if (UseSmi)
+         if (UseSI)
          {
             alpha = abs(f(j)) < eps ? 1. : fClipped(j) / f(j);
             
@@ -2635,7 +2659,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
             tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
             alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
             
-            tmp = smi.DG2CG(dofInd) < 0. ? 1. : smi_val(smi.DG2CG(dofInd));
+            tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
             alpha = min(max(tmp, alpha), alphaGlob);
             
             fClipped(j) = alpha * f(j);
@@ -2674,14 +2698,14 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl, LowOrderMethod &_lom,
-                           DofInfo &_dofs, SmoothnessIndicator &smi_) :
+                           DofInfo &_dofs, SmoothnessIndicator &si_) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs), smi(smi_)
+   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_)
 {
    M_solver.SetPreconditioner(M_prec);
    M_solver.SetOperator(M);
@@ -2903,7 +2927,6 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-		case 8: { v(0) = 0.; v(1) = -1.; break; }
       case 10:
       case 11:
       case 12:
@@ -2912,13 +2935,13 @@ void velocity_function(const Vector &x, Vector &v)
       case 15:
       case 16:
       case 17:
+      case 18:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
 
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
-
          if (dim == 1) { MFEM_ABORT("Not implemented."); }
          v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
          v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
@@ -3088,8 +3111,7 @@ double u0_function(const Vector &x)
       }
       case 3:
       {
-         const double f = M_PI;
-         return .5*(sin(f*X(0))*sin(f*X(1)) + 1.); // modified by Hennes
+         return .5*(sin(M_PI*X(0))*sin(M_PI*X(1)) + 1.);
       }
       case 4:
       {
@@ -3188,8 +3210,8 @@ double u0_function(const Vector &x)
          }
          else { return 0.; }
       }
-      case 7: { return 0.; /*return exp(-100.*pow(x.Norml2() - 0.7, 2.));*/ }
-		case 8: { return 0.; }
+      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      case 8: { return .5*(cos(M_PI*X(0))*cos(M_PI*X(1)) + 1.); }
    }
    return 0.0;
 }
@@ -3237,11 +3259,7 @@ double inflow_function(const Vector &x)
    }
    else if ((problem_num % 10) == 7)
    {
-      return exp(-100. * (r - 0.7)*(r - 0.7));
-   }
-   else if ((problem_num % 10) == 8)
-   {
-      return exp(-1.*pow(x(0) - 4., 2.));
+      return exp(-100. * pow(r - 0.7, 2.));
    }
    else { return 0.0; }
 }
