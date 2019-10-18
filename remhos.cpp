@@ -1605,7 +1605,7 @@ int main(int argc, char *argv[])
       
       for (int e = 0; e < ne; e++)
       {
-         const FiniteElement* el = fes.GetFE(0);
+         const FiniteElement* el = fes.GetFE(e);
          DenseMatrix velEval;
          Vector vval;
          double vmax = 0.;
