@@ -1,4 +1,4 @@
-git checkout use-mfem-master && cd ../ &&
+cd ../ &&
 wget https://computing.llnl.gov/projects/hypre-scalable-linear-solvers-multigrid-methods/download/hypre-2.10.0b.tar.gz &&
 tar -zxvf hypre-2.10.0b.tar.gz &&
 mv hypre-2.10.0b hypre &&
