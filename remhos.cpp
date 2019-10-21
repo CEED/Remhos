@@ -827,6 +827,7 @@ public:
          SubFes1 = lom.SubFes1;
          subcell_mesh = lom.subcell_mesh;
       }
+      else { SubFes1 = fes; } // TODO dev
 
       // Initialization for transport mode.
       if (exec_mode == 0 && (NeedBdr || NeedSubcells))
@@ -963,10 +964,11 @@ public:
 struct SmoothnessIndicator
 {
    FiniteElementSpace *fesH1;
-   BilinearFormIntegrator *bfi_dom, *bfi_bdr;
-   SparseMatrix Mmat, *LaplaceOp;
+   BilinearFormIntegrator *bfi_dom, *bfi_bdr, *MassInt;
+   SparseMatrix Mmat, LaplaceOp, *MassMixed;
    Vector lumpedMH1, DG2CG;
    DenseMatrix ShapeEval;
+	CGSolver M_solver;
 };
 
 void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
@@ -989,24 +991,26 @@ void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
          e_id = k*dofs.numSubcells + m;
          const FiniteElement *el = si.fesH1->GetFE(e_id);
          ElementTransformation *tr = subcell_mesh->GetElementTransformation(e_id);
-         si.bfi_dom->AssembleElementMatrix(*el, *tr, elmat1);
+			si.MassInt->AssembleElementMatrix(*el, *tr, elmat1);
          si.fesH1->GetElementVDofs(e_id, te_vdofs);
-         
-         if (dim==1)      { subcell_mesh->GetElementVertices(e_id, bdrs); }
-         else if (dim==2) { subcell_mesh->GetElementEdges(e_id, bdrs, orientation); }
-         else if (dim==3) { subcell_mesh->GetElementFaces(e_id, bdrs, orientation); }
-         
-         for (l = 0; l < dofs.numBdrs; l++)
-         {
-            Trans = subcell_mesh->GetFaceElementTransformations(bdrs[l]);
-            if (Trans->Elem2No < 0)
-            {
-               const FiniteElement *el2 = el;
-               si.bfi_bdr->AssembleFaceMatrix (*el, *el2, *Trans, elmat2);
-               elmat1 += elmat2;
-            }
-         }
-         
+			
+//          si.bfi_dom->AssembleElementMatrix(*el, *tr, elmat1);
+//          
+//          if (dim==1)      { subcell_mesh->GetElementVertices(e_id, bdrs); }
+//          else if (dim==2) { subcell_mesh->GetElementEdges(e_id, bdrs, orientation); }
+//          else if (dim==3) { subcell_mesh->GetElementFaces(e_id, bdrs, orientation); }
+//          
+//          for (l = 0; l < dofs.numBdrs; l++)
+//          {
+//             Trans = subcell_mesh->GetFaceElementTransformations(bdrs[l]);
+//             if (Trans->Elem2No < 0)
+//             {
+//                const FiniteElement *el2 = el;
+//                si.bfi_bdr->AssembleFaceMatrix (*el, *el2, *Trans, elmat2);
+//                elmat1 += elmat2;
+//             }
+//          }
+//          
          // Switchero - numbering CG vs DG.
          tr_vdofs[0] = k*nd + dofs.Sub2Ind(m, 0);
          tr_vdofs[1] = k*nd + dofs.Sub2Ind(m, 1);
@@ -1022,11 +1026,12 @@ void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
             tr_vdofs[6] = k*nd + dofs.Sub2Ind(m, 7);
             tr_vdofs[7] = k*nd + dofs.Sub2Ind(m, 6);
          }
-         
-         si.LaplaceOp->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
+			si.MassMixed->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
+//          si.LaplaceOp->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
       }
    }
-   si.LaplaceOp->Finalize();
+   si.MassMixed->Finalize();
+//    si.LaplaceOp->Finalize();
 }
 
 void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
@@ -1034,12 +1039,18 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 {
    int k, i, j, m, e_id, dofInd, N = si.lumpedMH1.Size();
    Array<int> vdofs, eldofs;
-   bool UseConsistentProj = false;
+   bool UseConsistentProj = true; // TODO debug
    Vector xDofs(nd), tmp(nd), xEval(ne*nd);
-   
+	
    eldofs.SetSize(nd);
-   y.SetSize(N); y = 0.;
+   y.SetSize(N); // y = 0.; TODO unneccessary
+	Vector z1(N), z2(N);
+	
+   int iter, max_iter = 2; // TODO
+   const double abs_tol = 1.e-10; // TODO
+   double resid;
 
+// 	xEval = x; // TODO xEval vs x Bernstein
    for (k = 0; k < ne; k++)
    {
       for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
@@ -1048,41 +1059,69 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
       si.ShapeEval.Mult(xDofs, tmp);
       xEval.SetSubVector(eldofs, tmp);
    }
+	
+	si.MassMixed->Mult(xEval, z1); // 	si.M_solver.Mult(z1, y);
+	
+// 	// Lumped Projection.
+// 	for (i = 0; i < N; i++)
+//    {
+//       y(i) = z1(i) / si.lumpedMH1(i);
+//    }
 
-   si.LaplaceOp->Mult(xEval, y);
-
-   if (UseConsistentProj)
-   {
-      int iter, max_iter = 20;
-      Vector z1(N), z2(N);
-      const double abs_tol = 1.e-4;
+      y = 0.;
       
-      z1 = 0.;
-      
-      double resid = y.Norml2();
       for (iter = 1; iter <= max_iter; iter++)
       {
-         si.Mmat.Mult(z1, z2);
-         z2 -= y;
+         si.Mmat.Mult(y, z2);
+         z2 -= z1;
          resid = z2.Norml2();
          if (resid <= abs_tol)
          {
-            return;
+            break;
          }
          for (i = 0; i < N; i++)
          {
-            z1(i) -= z2(i) / si.lumpedMH1(i);
+            y(i) -= z2(i) / si.lumpedMH1(i);
          }
       }
-      y = z1;
-   }
-   else // Lumped approximation.
-   {
-      for (k = 0; k < N; k++)
+   
+
+   si.LaplaceOp.Mult(y, z1);
+
+// 	for (i = 0; i < N; i++)
+//    {
+//       y(i) = z1(i) / si.lumpedMH1(i);
+//    }
+	
+	
+	y = 0.;
+      
+      for (iter = 1; iter <= max_iter; iter++)
       {
-         y(k) /= si.lumpedMH1(k);
+         si.Mmat.Mult(y, z2);
+         z2 -= z1;
+         resid = z2.Norml2();
+         if (resid <= abs_tol)
+         {
+            break;
+         }
+         for (i = 0; i < N; i++)
+         {
+            y(i) -= z2(i) / si.lumpedMH1(i);
+         }
       }
-   }
+
+//    if (UseConsistentProj)
+//    {
+//       
+//    }
+//    else // Lumped approximation.
+//    {
+//       for (k = 0; k < N; k++)
+//       {
+//          y(k) /= si.lumpedMH1(k);
+//       }
+//    }
 }
 
 void ComputeFromSparsity(const SparseMatrix& K, const Vector& x, Vector &x_min, 
@@ -1369,8 +1408,8 @@ int main(int argc, char *argv[])
    l2_inflow.ProjectCoefficient(inflow);
    GridFunction inflow_gf(&fes);
 
-  //inflow_gf.ProjectCoefficient(inflow);
-  inflow_gf.ProjectGridFunction(l2_inflow);
+//   inflow_gf.ProjectCoefficient(inflow);
+  inflow_gf.ProjectGridFunction(l2_inflow); // TODO
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
@@ -1566,7 +1605,7 @@ int main(int argc, char *argv[])
       
       for (int e = 0; e < ne; e++)
       {
-         const FiniteElement* el = fes.GetFE(0);
+         const FiniteElement* el = fes.GetFE(e);
          DenseMatrix velEval;
          Vector vval;
          double vmax = 0.;
@@ -1653,7 +1692,6 @@ int main(int argc, char *argv[])
    // Smoothness indicator. TODO every step for remap
    SmoothnessIndicator si;
    Vector g_min, g_max;
-   double q = 5.;
    
    H1_FECollection H1fec(1, dim, btype);
    Array<int> ess_tdof_list; // this list remains empty for pure Neumann b.c.
@@ -1664,6 +1702,16 @@ int main(int argc, char *argv[])
    massH1.AddDomainIntegrator(new MassIntegrator);
    massH1.Assemble();
    massH1.FormSystemMatrix(ess_tdof_list, si.Mmat);
+	
+	DSmoother M_prec;
+	si.M_solver.SetPreconditioner(M_prec);
+   si.M_solver.SetOperator(si.Mmat);
+
+   si.M_solver.iterative_mode = false;
+   si.M_solver.SetRelTol(1.e-12);
+   si.M_solver.SetAbsTol(0.0);
+   si.M_solver.SetMaxIter(100);
+   si.M_solver.SetPrintLevel(0);
    
    BilinearForm mlH1(si.fesH1);
    mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
@@ -1673,11 +1721,29 @@ int main(int argc, char *argv[])
    mlH1.FormSystemMatrix(ess_tdof_list, MLmat);
    MLmat.GetDiag(si.lumpedMH1);
    
+	// new
+// 	MixedBilinearForm MassMixed(asmbl.SubFes1, si.fesH1);
+// 	MassMixed.AddDomainIntegrator(new MassIntegrator);
+// 	MassMixed.Assemble();
+// 	MassMixed.Finalize();
+// 	si.MassMixed = MassMixed.SpMat();
+// 	cout << asmbl.SubFes1->GetVSize() << endl; // TODO!
+// 	
+	si.MassMixed = new SparseMatrix(si.fesH1->GetVSize(), fes.GetVSize());
+	si.MassInt = new MassIntegrator;
+	
    ConstantCoefficient neg_one(-1.);
-   si.bfi_dom = new DiffusionIntegrator(neg_one);
-   si.bfi_bdr = new DGDiffusionIntegrator(neg_one, 0., 0.);
-   
-   si.LaplaceOp = new SparseMatrix(si.fesH1->GetVSize(), fes.GetVSize());
+	BilinearForm lap(si.fesH1);
+	lap.AddDomainIntegrator(new DiffusionIntegrator(neg_one));
+	lap.AddBdrFaceIntegrator(new DGDiffusionIntegrator(neg_one, 0., 0.));
+	lap.Assemble();
+	lap.Finalize();
+	si.LaplaceOp = lap.SpMat();
+	
+//    si.bfi_dom = new DiffusionIntegrator(neg_one);
+//    si.bfi_bdr = new DGDiffusionIntegrator(neg_one, 0., 0.);
+//    
+//    si.LaplaceOp = new SparseMatrix(si.fesH1->GetVSize(), fes.GetVSize());
    
    // Stores the index for the dof of H1-conforming for each node.
    // If the node is on the boundary, the entry is -1.
@@ -1723,6 +1789,9 @@ int main(int argc, char *argv[])
    }
 
    ComputeVariationalMatrix(si, ne, nd, dofs);
+	
+// 	si.MassMixed->Print();
+// 	cout << si.MassMixed->Height() << " " << si.MassMixed->Width() << endl;
    
    IntegrationRule *ir;
    IntegrationRule irX;
@@ -1734,7 +1803,7 @@ int main(int argc, char *argv[])
    if (dim == 2) { ir = new IntegrationRule(irX, irX); }
    if (dim == 3) { ir = new IntegrationRule(irX, irX, irX); }
    
-   si.ShapeEval.SetSize(nd, nd); // nd == ir->GetNPoints().
+   si.ShapeEval.SetSize(nd, nd); // nd equals ir->GetNPoints().
    
    for (i = 0; i < ir->GetNPoints(); i++)
    {
@@ -1748,6 +1817,7 @@ int main(int argc, char *argv[])
    ApproximateLaplacian(si, ne, nd, dofs, u, g);
    
    const int N = g.Size();
+	const double q = 5.; // TODO
 
    g_min.SetSize(N); g_max.SetSize(N);
    ComputeFromSparsity(si.Mmat, g, g_min, g_max);
@@ -1755,14 +1825,14 @@ int main(int argc, char *argv[])
    for (int e = 0; e < N; e++)
    {
       si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
-      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
+						(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
    }
    
    // Print the values of the smoothness indicator.
    {
-      ofstream si("si_init_lump.gf");
+      ofstream si("si_init.gf");
       si.precision(precision);
-      si_val.Save(si);
+      si_val.Save(si); // TODO
    }
 
    // Print the starting meshes and initial condition.
@@ -1958,21 +2028,20 @@ int main(int argc, char *argv[])
    }
    else if (problem_num == 7 || problem_num == 8)
    {
-      cout << "L2-error: " << u.ComputeLpError(2., inflow) << endl;
+      cout << "L1-error: " << u.ComputeLpError(1., inflow) << endl;
 
       // write output
       ofstream file("errors.txt", ios_base::app);
    
       if (!file)
       {
-         mfem_error(".");
-         return 0;
+         MFEM_ABORT("Error opening file.");
       }
       else
       {
          ostringstream strs;
          strs << "order=" << order << " N=" << sqrt(mesh->GetNE()) << " SI=" << UseSI << "\n";
-         strs << u.ComputeLpError(2., inflow) << " " << u.ComputeLpError(1., inflow) << " " << u.ComputeLpError(numeric_limits<double>::infinity(), inflow) << "\n";
+         strs << u.ComputeLpError(1., inflow) << " " << u.ComputeLpError(2., inflow) << " " << u.ComputeLpError(numeric_limits<double>::infinity(), inflow) << "\n";
          string str = strs.str();
          file << str;
          file.close();
@@ -1991,21 +2060,20 @@ int main(int argc, char *argv[])
    
    // Print the values of the smoothness indicator.
    {
-      ofstream si("si_final_lump.gf");
+      ofstream si("si_final.gf");
       si.precision(precision);
       si_val.Save(si);
    }
 
-   // 10. Free the used memory.
+   // 10. Free the used memory. //TODO
    delete mesh;
    delete ode_solver;
    delete dc;
 
    delete lom.pk;
    delete si.fesH1;
-   delete si.bfi_dom;
-   delete si.bfi_bdr;
-   delete si.LaplaceOp;
+//    delete si.bfi_dom;
+//    delete si.bfi_bdr;
 
    if (order > 1) { delete lom.subcell_mesh; }
    
@@ -2024,7 +2092,7 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
-   const double abs_tol = 1.e-10;
+   const double abs_tol = 1.e-10; // TODO
 
    x = 0.;
 
@@ -2307,13 +2375,13 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp,
-             XMIN = x.Min(), XMAX = x.Max(),
-             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
+             XMIN = x.Min(), XMAX = x.Max(), // TODO q
+             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15; 
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d, g,
              g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
 
-      bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8;
+      bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8; // TODO problem_num 8 wrsl weg
       double* Mij = M.GetData();
       bool UseAlphaGlob = false;
       
@@ -2514,7 +2582,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                tmp = 0.;
                if (UseSI)
                {
-                  tmp = si.DG2CG(dofInd) < 0. ? 0. : si_val(si.DG2CG(dofInd));
+                  tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                }
                m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
                         * diff; // eq. (27) - (29)
@@ -2609,8 +2677,9 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
    double sumP, sumN, uH, uL, tmp, alpha, alphaGlob, 
-          XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;
-   Vector uClipped, fClipped, f, g, g_min, g_max, si_val;
+          XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;  // TODO q
+   Vector uClipped(nd), fClipped(nd), f(nd), g, g_min, g_max, si_val;
+	bool UseAlphaGlob = false; // TODO
    
    // Smoothness indicator.
    if (UseSI)
@@ -2631,10 +2700,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    // Monotonicity terms
    for (k = 0; k < ne; k++)
    {
-      uClipped.SetSize(nd); uClipped = 0.;
-      fClipped.SetSize(nd); fClipped = 0.;
-      f.SetSize(nd);
-      sumP = sumN = 0.;
+      uClipped = fClipped = sumP = sumN = 0.;
 
       for (j = 0; j < nd; j++)
       {
@@ -2645,7 +2711,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 
          uH = x(dofInd) + dt * yH(dofInd);
          uL = x(dofInd) + dt * yL(dofInd);
-         f(j) = lumpedM(dofInd) / dt * (uH - uL);
+         //f(j) = lumpedM(dofInd) / dt * (uH - uL);
+			f(j) = lumpedM(dofInd) * (yH(dofInd) - yL(dofInd));
          
          uClipped(j) = min( dofs.xi_max(dofInd), max(uH, dofs.xi_min(dofInd)) );
          fClipped(j) = lumpedM(dofInd) / dt * (uClipped(j) - uL);
@@ -2655,9 +2722,13 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
             alpha = abs(f(j)) < eps ? 1. : fClipped(j) / f(j);
             
             // Global correction factors.
-            uClipped(j) = min(XMAX, max(uH, XMIN));
-            tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
-            alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
+				alphaGlob = 1.;
+				if (UseAlphaGlob)
+				{
+					uClipped(j) = min(XMAX, max(uH, XMIN));
+					tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
+					alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
+				}
             
             tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
             alpha = min(max(tmp, alpha), alphaGlob);
