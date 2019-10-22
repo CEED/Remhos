@@ -2694,10 +2694,10 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 {
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
-   double sumP, sumN, uH, uL, tmp, alpha, alphaGlob, 
+   double sumP, sumN, uH, uL, tmp, umax, umin, mass,
           XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;  // TODO q
-   Vector uClipped(nd), fClipped(nd), f(nd), g, g_min, g_max, si_val;
-	bool UseAlphaGlob = false; // TODO
+   Vector AntiDiff(nd), g, g_min, g_max, si_val;
+	bool UseAlphaGlob = true; // TODO
    
    // Smoothness indicator.
    if (UseSI)
@@ -2718,8 +2718,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    // Monotonicity terms
    for (k = 0; k < ne; k++)
    {
-      uClipped = fClipped = sumP = sumN = 0.;
-
+		sumP = sumN = 0.;
       for (j = 0; j < nd; j++)
       {
          dofInd = k*nd+j;
@@ -2729,51 +2728,53 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 
          uH = x(dofInd) + dt * yH(dofInd);
          uL = x(dofInd) + dt * yL(dofInd);
-         //f(j) = lumpedM(dofInd) / dt * (uH - uL);
-			f(j) = lumpedM(dofInd) * (yH(dofInd) - yL(dofInd));
-         
-         uClipped(j) = min( dofs.xi_max(dofInd), max(uH, dofs.xi_min(dofInd)) );
-         fClipped(j) = lumpedM(dofInd) / dt * (uClipped(j) - uL);
          
          if (UseSI)
-         {
-            alpha = abs(f(j)) < eps ? 1. : fClipped(j) / f(j);
-            
-            // Global correction factors.
-				alphaGlob = 1.;
+			{
+            tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+				umin = tmp * uH + (1. - tmp) * dofs.xi_min(dofInd);
+            umax = tmp * uH + (1. - tmp) * dofs.xi_max(dofInd);
+				
 				if (UseAlphaGlob)
 				{
-					uClipped(j) = min(XMAX, max(uH, XMIN));
-					tmp = lumpedM(dofInd) / dt * (uClipped(j) - uL);
-					alphaGlob = abs(f(j)) < eps ? 1. : tmp / f(j);
+					umin = max(umin, 0.);
+					umax = min(umax, 1.);
 				}
-            
-            tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
-            alpha = min(max(tmp, alpha), alphaGlob);
-            
-            fClipped(j) = alpha * f(j);
          }
+         else
+			{
+				umin = dofs.xi_min(dofInd);
+				umax = dofs.xi_max(dofInd);
+			}
+         
+         umin = lumpedM(dofInd) / dt * (umin - uL);
+			umax = lumpedM(dofInd) / dt * (umax - uL);
+         
+         AntiDiff(j) = lumpedM(dofInd) * (yH(dofInd) - yL(dofInd));
+			AntiDiff(j) = min(umax, max(umin, AntiDiff(j)));
 
-         sumP += max(fClipped(j), 0.);
-         sumN += min(fClipped(j), 0.);
+			sumN += min(AntiDiff(j), 0.);
+         sumP += max(AntiDiff(j), 0.);
       }
+      
+      mass = sumN + sumP;
       
       for (j = 0; j < nd; j++)
       {
-         if (sumP + sumN > eps)
+         if (mass > eps)
          {
-            fClipped(j) = min(0., fClipped(j)) - max(0., fClipped(j)) * sumN / sumP;
+            AntiDiff(j) = min(0., AntiDiff(j)) - max(0., AntiDiff(j)) * sumN / sumP;
          }
-         else if (sumP + sumN < -eps)
+         else if (mass < -eps)
          {
-            fClipped(j) = max(0., fClipped(j)) - min(0., fClipped(j)) * sumP / sumN;
+            AntiDiff(j) = max(0., AntiDiff(j)) - min(0., AntiDiff(j)) * sumP / sumN;
          }
          
          // Set y to the discrete time derivative featuring the high order anti-
          // diffusive reconstruction that leads to an forward Euler updated
          // admissible solution.
          dofInd = k*nd+j;
-         y(dofInd) = yL(dofInd) + fClipped(j) / lumpedM(dofInd);
+         y(dofInd) = yL(dofInd) + AntiDiff(j) / lumpedM(dofInd);
       }
    }
 }
