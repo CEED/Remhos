@@ -1408,8 +1408,8 @@ int main(int argc, char *argv[])
    l2_inflow.ProjectCoefficient(inflow);
    GridFunction inflow_gf(&fes);
 
-//   inflow_gf.ProjectCoefficient(inflow);
-  inflow_gf.ProjectGridFunction(l2_inflow); // TODO
+  inflow_gf.ProjectCoefficient(inflow);
+//   inflow_gf.ProjectGridFunction(l2_inflow); // TODO
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
@@ -2040,7 +2040,6 @@ int main(int argc, char *argv[])
       else
       {
          ostringstream strs;
-         strs << "order=" << order << " N=" << sqrt(mesh->GetNE()) << " SI=" << UseSI << "\n";
          strs << u.ComputeLpError(1., inflow) << " " << u.ComputeLpError(2., inflow) << " " << u.ComputeLpError(numeric_limits<double>::infinity(), inflow) << "\n";
          string str = strs.str();
          file << str;
@@ -2383,7 +2382,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8; // TODO problem_num 8 wrsl weg
       double* Mij = M.GetData();
-      bool UseAlphaGlob = false;
+      bool UseAlphaGlob = true;
       
       if (!UseMassLim) { max_iter = -1; }
       alpha1 = 1.;
@@ -2432,15 +2431,34 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
             if (UseSI)
             {
-               alphaGlob = 1.;
-               if (UseAlphaGlob)
+					tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+					double bndN = tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) + (1.-tmp) * dofs.xi_min(dofInd);
+					double bndP = tmp * (2.*x(dofInd) - dofs.xi_min(dofInd)) + (1.-tmp) * dofs.xi_max(dofInd);
+					
+					if (UseAlphaGlob)
                {
-                  alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
-                                           / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-               }
-
-               tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
-               alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
+						bndN = max(0., bndN);
+						bndP = min(1., bndP);
+					}
+					
+               if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd))
+					{
+						alpha(j) = min(1., beta*(x(dofInd) - bndN) / (dofs.xi_max(dofInd) - x(dofInd) + eps));
+					}
+					else
+					{
+						alpha(j) = min(1., beta*(bndP - x(dofInd)) / (x(dofInd) - dofs.xi_min(dofInd) + eps));
+					}
+					
+// 					alphaGlob = 1.;
+//                if (UseAlphaGlob)
+//                {
+//                   alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
+//                                            / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+//                }
+// 
+//                tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+//                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
             }
             
             // Splitting for volume term.
@@ -2599,7 +2617,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                
                if (UseSI)
                {
-                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN)
+                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
