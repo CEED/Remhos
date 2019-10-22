@@ -1408,8 +1408,8 @@ int main(int argc, char *argv[])
    l2_inflow.ProjectCoefficient(inflow);
    GridFunction inflow_gf(&fes);
 
-  inflow_gf.ProjectCoefficient(inflow);
-//   inflow_gf.ProjectGridFunction(l2_inflow); // TODO
+//   inflow_gf.ProjectCoefficient(inflow);
+  inflow_gf.ProjectGridFunction(l2_inflow); // TODO
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
