@@ -912,8 +912,8 @@ int main(int argc, char *argv[])
                   "                     2 - discrete upwinding - FCT,\n\t"
                   "                     3 - residual distribution - LO,\n\t"
                   "                     4 - residual distribution - FCT.");
-   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element (basic)",
-                  "Optimized scheme: PDU / subcell (optimized).");
+   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
+                  "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
@@ -1126,7 +1126,7 @@ int main(int argc, char *argv[])
    b.AddBdrFaceIntegrator(
       new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
 
-   // Compute the lumped mass matrix algebraically
+   // Compute the lumped mass matrix.
    Vector lumpedM;
    ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
@@ -2245,8 +2245,7 @@ double u0_function(const Vector &x)
       }
       case 3:
       {
-         const double f = M_PI;
-         return .5*(sin(f*X(0))*sin(f*X(1)) + 1.); // modified by Hennes
+         return .5*(sin(M_PI*X(0))*sin(M_PI*X(1)) + 1.);
       }
       case 4:
       {
