@@ -3281,7 +3281,12 @@ double u0_function(const Vector &x)
          }
          else { return 0.; }
       }
-      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      case 7: 
+		{
+			double r = x.Norml2();
+			double a = 0.5, b = 3.e-2, c = 0.1;  
+			return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+		}
       case 8: { return .5*(cos(M_PI*X(0))*cos(M_PI*X(1)) + 1.); }
    }
    return 0.0;
@@ -3330,7 +3335,8 @@ double inflow_function(const Vector &x)
    }
    else if ((problem_num % 10) == 7)
    {
-      return exp(-100. * pow(r - 0.7, 2.));
+      double a = 0.5, b = 3.e-2, c = 0.1;  
+		return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
    }
    else { return 0.0; }
 }
