@@ -1481,14 +1481,14 @@ int main(int argc, char *argv[])
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
    {
-      cout << "L1-error: " << u.ComputeLpError(1., u0) << ", L-Inf-error: "
-           << u.ComputeLpError(numeric_limits<double>::infinity(), u0)
-           << "." << endl;
+      double err = u.ComputeLpError(1., u0);
+      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
    }
    else if (problem_num == 7)
    {
       FunctionCoefficient u_ex(inflow_function);
-      cout << "L2-error: " << u.ComputeLpError(2., u_ex) << endl;
+      double err = u.ComputeLpError(1., u_ex);
+      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
    }
 
    // 10. Free the used memory.
