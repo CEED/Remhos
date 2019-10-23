@@ -1007,9 +1007,45 @@ int main(int argc, char *argv[])
    ParGridFunction x(&mesh_pfes);
    pmesh.SetNodalGridFunction(&x);
 
+
    // Store initial mesh positions.
    Vector x0(x.Size());
    x0 = x;
+
+   // Velocity for the problem. Depending on the execution mode, this is the
+   // advective velocity (transport) or mesh velocity (remap).
+   VectorFunctionCoefficient velocity(dim, velocity_function);
+
+   // Mesh velocity.
+   GridFunction v_gf(x.FESpace());
+   VectorGridFunctionCoefficient v_coef(&v_gf);
+
+   // If remap is on, obtain the mesh velocity by moving the mesh to the final
+   // mesh positions, and taking the displacement vector.
+   // The mesh motion resembles a time-dependent deformation, e.g., similar to
+   // a deformation that is obtained by a Lagrangian simulation.
+   if (exec_mode == 1)
+   {
+      ParGridFunction v(&mesh_pfes);
+      VectorFunctionCoefficient vcoeff(dim, velocity_function);
+      v.ProjectCoefficient(vcoeff);
+
+      double t = 0.0;
+      while(t < t_final)
+      {
+         t += dt;
+         // Move the mesh nodes.
+         x.Add(std::min(dt, t_final-t), v);
+         // Update the node velocities.
+         v.ProjectCoefficient(vcoeff);
+      }
+
+      // Pseudotime velocity.
+      add(x, -1.0, x0, v_gf);
+
+      // Return the mesh to the initial configuration.
+      x = x0;
+   }
 
    // 5. Define the discontinuous DG finite element space of the given
    //    polynomial order on the refined mesh.
@@ -1066,27 +1102,6 @@ int main(int argc, char *argv[])
    FunctionCoefficient inflow(inflow_function);
    ParGridFunction inflow_gf(&pfes);
    inflow_gf.ProjectCoefficient(inflow);
-
-   // Velocity for the problem. Depending on the execution mode, this is the
-   // advective velocity (transport) or mesh velocity (remap).
-   VectorFunctionCoefficient velocity(dim, velocity_function);
-
-   // Mesh velocity. Note that the resulting coefficient will be evaluated in
-   // logical space.
-   GridFunction v_gf(x.FESpace());
-   v_gf.ProjectCoefficient(velocity);
-   if (pmesh.bdr_attributes.Size() > 0)
-   {
-      // Zero it out on boundaries (not moving boundaries).
-      Array<int> ess_bdr(pmesh.bdr_attributes.Max()), ess_vdofs;
-      ess_bdr = 1;
-      x.FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-      for (int i = 0; i < v_gf.Size(); i++)
-      {
-         if (ess_vdofs[i] == -1) { v_gf(i) = 0.0; }
-      }
-   }
-   VectorGridFunctionCoefficient v_coef(&v_gf);
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
@@ -1301,12 +1316,12 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_init.mesh");
       meshHO.precision(precision);
-      pmesh.Print(meshHO);
+      pmesh.PrintAsOne(meshHO);
       if (lom.subcell_mesh)
       {
          ofstream meshLO("meshLO_init.mesh");
          meshLO.precision(precision);
-         lom.subcell_mesh->Print(meshLO);
+         lom.subcell_mesh->PrintAsOne(meshLO);
       }
       ofstream sltn("sltn_init.gf");
       sltn.precision(precision);
@@ -1377,7 +1392,13 @@ int main(int argc, char *argv[])
    double umin, umax;
    GetMinMax(u, umin, umax);
 
-   if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
+   if (exec_mode == 1)
+   {
+      adv->SetRemapStartPos(x0, x0_sub);
+
+      // For remap, the pseudotime always evolves from 0 to 1.
+      t_final = 1.0;
+   }
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1443,7 +1464,7 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_final.mesh");
       meshHO.precision(precision);
-      pmesh.Print(meshHO);
+      pmesh.PrintAsOne(meshHO);
       if (asmbl.subcell_mesh)
       {
          ofstream meshLO("meshLO_final.mesh");
@@ -2061,17 +2082,33 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 10:
       case 11:
+      {
+         // Gresho deformation used for mesh motion in remap tests.
+
+         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
+         if (r < 0.2)
+         {
+            v(0) =  5.0 * x(1);
+            v(1) = -5.0 * x(0);
+         }
+         else if (r < 0.4)
+         {
+            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
+            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
+         }
+         else { v = 0.0; }
+         break;
+      }
       case 12:
       case 13:
       case 14:
       case 15:
       case 16:
+      case 10:
       case 17:
       {
-         // Taylor-Green velocity, used for mesh motion in remap tests used for
-         // all possible initial conditions.
+         // Taylor-Green deformation used for mesh motion in remap tests.
 
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
