@@ -124,8 +124,7 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 {
    // Assuming that A is finalized
    const int *I = A.GetI(), *J = A.GetJ(), n = A.Size();
-   Array<int> smap;
-   smap.SetSize(I[n]);
+   Array<int> smap(I[n]);
 
    for (int row = 0, j = 0; row < n; row++)
    {
@@ -135,16 +134,9 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
          // Find the offset, _j, of the (col,row) entry and store it in smap[j].
          for (int _j = I[col], _end = I[col+1]; true; _j++)
          {
-            if (_j == _end)
-            {
-               mfem_error("SparseMatrix_Build_smap");
-            }
+            MFEM_VERIFY(_j != _end, "Can't find the symmetric entry!");
 
-            if (J[_j] == row)
-            {
-               smap[j] = _j;
-               break;
-            }
+            if (J[_j] == row) { smap[j] = _j; break; }
          }
       }
    }
@@ -156,12 +148,10 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
                                     Array<int> smap, SparseMatrix& D)
 {
-   const int n = K.Size();
-   int* Ip = K.GetI();
-   int* Jp = K.GetJ();
-   double* Kp = K.GetData();
+   const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
+   const double *Kp = K.GetData();
 
-   double* Dp = D.GetData();
+   double *Dp = D.GetData();
 
    for (int i = 0, k = 0; i < n; i++)
    {
@@ -1319,7 +1309,6 @@ int main(int argc, char *argv[])
    // 2. Read the mesh from the given mesh file. We can handle geometrically
    //    periodic meshes in this code.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
-
    const int dim = mesh->Dimension();
 
 
@@ -1391,6 +1380,7 @@ int main(int argc, char *argv[])
       mfem_warning("For -o 1, subcell scheme is disabled.");
       OptScheme = false;
    }
+
    if (fail)
    {
       delete mesh;
@@ -1546,8 +1536,6 @@ int main(int argc, char *argv[])
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
                                                lom.MonoType == ResDist_FCT ||
                                                lom.MonoType == ResDist_Monolithic);
-   // Create the low order refined submesh.
-   
    lom.subcell_mesh = GetSubcellMesh(mesh, order);
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
@@ -2102,10 +2090,8 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
       M.Mult(x, y);
       y -= f;
       resid = y.Norml2();
-      if (resid <= abs_tol)
-      {
-         return;
-      }
+      if (resid <= abs_tol) { return; }
+
       for (i = 0; i < n; i++)
       {
          x(i) -= y(i) / lumpedM(i);
