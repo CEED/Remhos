@@ -150,7 +150,7 @@ int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
 void GetMinMax(const ParGridFunction &g, double &min, double &max);
 void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs);
 
-enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT };
+enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT, ResDist_Monolithic };
 
 struct LowOrderMethod
 {
@@ -164,6 +164,7 @@ struct LowOrderMethod
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
    ParMesh* subcell_mesh;
+   Vector scale;
 };
 
 // Utility function to build a map to the offset of the symmetric entry in a
@@ -641,7 +642,8 @@ public:
                                              lom.MonoType != DiscUpw_FCT);
 
       const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
-                                                  lom.MonoType == ResDist_FCT);
+                                                  lom.MonoType == ResDist_FCT
+                                     || lom.MonoType == ResDist_Monolithic );
 
       if (NeedBdr)
       {
@@ -842,6 +844,10 @@ public:
    virtual void LinearFluxLumping(const int k, const int nd,
                                   const int BdrID, const Vector &x,
                                   Vector &y, const Vector &alpha) const;
+   
+   virtual void NonlinFluxLumping(const int k, const int nd,
+                                  const int BdrID, const Vector &x,
+                                  Vector &y, const Vector &alpha) const;
 
    virtual void ComputeHighOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
@@ -867,20 +873,20 @@ int main(int argc, char *argv[])
 #else
    problem_num = 4;
 #endif
-   const char *mesh_file = "./data/unit-square.mesh";
+   const char *mesh_file = "data/periodic-square.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
-   int mesh_order = 2;
-   int ode_solver_type = 3;
-   MONOTYPE MonoType = ResDist_FCT;
+   int mesh_order = 1;
+   int ode_solver_type = 1;
+   MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
    double t_final = 4.0;
-   double dt = 0.0025;
+   double dt = 0.005;
    bool visualization = true;
    bool visit = false;
    bool binary = false;
-   int vis_steps = 20;
+   int vis_steps = 100;
 
    int precision = 8;
    cout.precision(precision);
@@ -911,7 +917,8 @@ int main(int argc, char *argv[])
                   "                     1 - discrete upwinding - LO,\n\t"
                   "                     2 - discrete upwinding - FCT,\n\t"
                   "                     3 - residual distribution - LO,\n\t"
-                  "                     4 - residual distribution - FCT.");
+                  "                     4 - residual distribution - FCT,n\t"
+                  "                     5 - residual distribution - monolithic.");
    args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
                   "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&t_final, "-tf", "--t-final",
@@ -1026,7 +1033,7 @@ int main(int argc, char *argv[])
    bool fail = false;
    if (MonoType != None)
    {
-      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 4))
+      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
       {
          cout << "Unsupported option for monotonicity treatment." << endl;
          fail = true;
@@ -1064,8 +1071,14 @@ int main(int argc, char *argv[])
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
+   L2_FECollection l2_fec(order, dim);
+   ParFiniteElementSpace l2_fes(&pmesh, &l2_fec);
+   ParGridFunction l2_inflow(&l2_fes);
+   l2_inflow.ProjectCoefficient(inflow);
    ParGridFunction inflow_gf(&pfes);
-   inflow_gf.ProjectCoefficient(inflow);
+
+//   inflow_gf.ProjectCoefficient(inflow);
+  inflow_gf.ProjectGridFunction(l2_inflow); // TODO
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
@@ -1202,7 +1215,10 @@ int main(int argc, char *argv[])
 
    // For linear elements, Opt scheme has already been disabled.
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
-                                               lom.MonoType == ResDist_FCT);
+                                               lom.MonoType == ResDist_FCT ||
+                                               lom.MonoType == ResDist_Monolithic);
+   // Create the low order refined submesh.
+   
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
@@ -1423,7 +1439,7 @@ int main(int argc, char *argv[])
             cout << "time step: " << ti << ", time: " << t << endl;
          }
 
-         if (visualization)
+                  if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
@@ -1484,11 +1500,32 @@ int main(int argc, char *argv[])
       double err = u.ComputeLpError(1., u0);
       if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
    }
-   else if (problem_num == 7)
+   else if (problem_num == 7 || problem_num == 8)
    {
       FunctionCoefficient u_ex(inflow_function);
-      double err = u.ComputeLpError(1., u_ex);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      double e1 = u.ComputeLpError(1., u_ex);
+      double e2 = u.ComputeLpError(2., u_ex);
+      double eInf = u.ComputeLpError(numeric_limits<double>::infinity(), u_ex);
+      if (myid == 0)
+      {
+         cout << "L1-error: " << e1 << "." << endl;
+
+         // write output
+         ofstream file("errors.txt", ios_base::app);
+
+         if (!file)
+         {
+            MFEM_ABORT("Error opening file.");
+         }
+         else
+         {
+            ostringstream strs;
+            strs << e1 << " " << e2 << " " << eInf << "\n";
+            string str = strs.str();
+            file << str;
+            file.close();
+         }
+      }
    }
 
    // 10. Free the used memory.
@@ -1513,7 +1550,7 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
-   const double abs_tol = 1.e-4;
+   const double abs_tol = 1.e-10; // TODO
 
    x = 0.;
 
@@ -1575,6 +1612,53 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
    }
 }
 
+void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
+                                     const int BdrID, const Vector &x,
+                                     Vector &y, const Vector &alpha) const
+{
+   int i, j, idx, dofInd;
+   double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
+   Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
+   BdrTermCorr = 0.;
+
+   for (j = 0; j < dofs.numFaceDofs; j++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+      idx = dofs.NbrDof(k, BdrID, j);
+      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+      // s.t. this value will not matter.
+      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
+      xDiff(j) = xNeighbor - x(dofInd);
+   }
+
+   for (i = 0; i < dofs.numFaceDofs; i++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+      for (j = 0; j < dofs.numFaceDofs; j++)
+      {
+         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
+         BdrTermCorr(i) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
+      }
+      BdrTermCorr(i) *= alpha(dofs.BdrDofs(i,BdrID));
+      SumCorrP += max(0., BdrTermCorr(i));
+      SumCorrN += min(0., BdrTermCorr(i));
+   }
+   
+   for (i = 0; i < dofs.numFaceDofs; i++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+      if (SumCorrP + SumCorrN > eps)
+      {
+         BdrTermCorr(i) = min(0., BdrTermCorr(i)) - max(0., BdrTermCorr(i)) * SumCorrN / SumCorrP;
+      }
+      else if (SumCorrP + SumCorrN < -eps)
+      {
+         BdrTermCorr(i) = max(0., BdrTermCorr(i)) - min(0., BdrTermCorr(i)) * SumCorrP / SumCorrN;
+      }
+      y(dofInd) += BdrTermCorr(i);
+   }
+}
+
 void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 {
    const FiniteElement* dummy = lom.fes->GetFE(0);
@@ -1629,7 +1713,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
       }
    }
-   else // RD(S)
+   else if (lom.MonoType == ResDist || lom.MonoType == ResDist_FCT) // RD(S)
    {
       int m, loc;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
@@ -1917,6 +2001,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    {
       if (lom.MonoType % 2 == 1)
       {
+         // NOTE: Right now this is called for monolithic limiting.
          ComputeLowOrderSolution(x, y);
       }
       else if (lom.MonoType % 2 == 0)
@@ -2069,6 +2154,7 @@ void velocity_function(const Vector &x, Vector &v)
       case 15:
       case 16:
       case 17:
+      case 18:
       {
          // Taylor-Green velocity, used for mesh motion in remap tests used for
          // all possible initial conditions.
@@ -2344,7 +2430,13 @@ double u0_function(const Vector &x)
          }
          else { return 0.; }
       }
-      case 7: { return exp(-100.*pow(x.Norml2() - 0.7, 2.)); }
+      case 7: 
+		{
+			double r = x.Norml2();
+			double a = 0.5, b = 3.e-2, c = 0.1;  
+			return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+		}
+      case 8: { return .5*(cos(M_PI*X(0))*cos(M_PI*X(1)) + 1.); }
    }
    return 0.0;
 }
@@ -2389,9 +2481,10 @@ double inflow_function(const Vector &x)
       }
       else { return 0.; }
    }
-   else if ((problem_num % 10) == 7 && x.Size() == 2)
+   else if ((problem_num % 10) == 7)
    {
-      return exp(-100.*pow(r - 0.7, 2.));
+      double a = 0.5, b = 3.e-2, c = 0.1;  
+		return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
    }
    else { return 0.0; }
 }
