@@ -63,10 +63,10 @@
 //               for persistent visualization of a time-evolving solution. The
 //               saving of time-dependent data files for external visualization
 //               with VisIt (visit.llnl.gov) is also illustrated.
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
-#include <algorithm>
 
 using namespace std;
 using namespace mfem;
@@ -239,6 +239,7 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
    for (i = 0; i < mesh->GetNumFaces(); i++)
    {
       Trans = mesh->GetFaceElementTransformations(i);
+      // TODO this resets the value and the loop is useless.
       qOrdF = Trans->Elem1->OrderW();
       if (Trans->Elem2No >= 0)
       {
@@ -249,8 +250,7 @@ const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
       }
    }
    // Use the first mesh element as indicator.
-   const FiniteElement &dummy = *fes->GetFE(0);
-   qOrdF += 2*dummy.GetOrder();
+   qOrdF += 2 * fes->GetFE(0)->GetOrder();
 
    return &IntRules.Get(Trans->FaceGeom, qOrdF);
 }
@@ -1448,7 +1448,7 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
-   if (((MonoType == DiscUpw) || (MonoType == DiscUpw_FCT)) && (!OptScheme))
+   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && (!OptScheme))
    {
       if (exec_mode == 0)
       {
@@ -1497,7 +1497,7 @@ int main(int argc, char *argv[])
    lom.fes = &fes;
 
    lom.pk = NULL;
-   if ((lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT))
+   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
       if (!lom.OptScheme)
       {
@@ -1555,6 +1555,7 @@ int main(int argc, char *argv[])
    GridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
+
    if (NeedSubcells)
    {
       lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, &fec0);
@@ -2004,7 +2005,7 @@ int main(int argc, char *argv[])
       u.Save(sltn);
    }
 
-   // check for conservation
+   // Check for mass conservation.
    double finalMass;
    if (exec_mode == 1)
    {
@@ -2198,7 +2199,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
 
-   if ( (lom.MonoType == DiscUpw) || (lom.MonoType == DiscUpw_FCT) )
+   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
       // Reassemble on the new mesh (given by mesh_pos).
       if (exec_mode == 1)
@@ -2234,9 +2235,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             }
          }
 
+         // Compute min / max over elements (needed for FCT).
          dofs.xe_min(k) = numeric_limits<double>::infinity();
          dofs.xe_max(k) = -dofs.xe_min(k);
-
          for (j = 0; j < nd; j++)
          {
             dofInd = k*nd+j;
@@ -2246,7 +2247,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
       }
    }
-   else if ( (lom.MonoType == ResDist) || (lom.MonoType == ResDist_FCT) ) // RD(S)
+   else if (lom.MonoType == ResDist || lom.MonoType == ResDist_FCT) // RD(S)
    {
       int m, loc;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
@@ -2269,8 +2270,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
 
          // Element contributions
-         dofs.xe_min(k) = numeric_limits<double>::infinity();
-         dofs.xe_max(k) = -dofs.xe_min(k);
+         dofs.xe_min(k) =   numeric_limits<double>::infinity();
+         dofs.xe_max(k) = - numeric_limits<double>::infinity();
          rhoP = rhoN = xSum = 0.;
 
          for (j = 0; j < nd; j++)
@@ -2302,8 +2303,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             // compute min-/max-values and the fluctuation for subcells
             for (m = 0; m < dofs.numSubcells; m++)
             {
-               xMinSubcell(m) = numeric_limits<double>::infinity();
-               xMaxSubcell(m) = -xMinSubcell(m);
+               xMinSubcell(m) =   numeric_limits<double>::infinity();
+               xMaxSubcell(m) = - numeric_limits<double>::infinity();;
                fluct = xSum = 0.;
 
                if (exec_mode == 1)
@@ -2671,7 +2672,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
-      // The boundary contributions have been computed in the low order scheme.
+      // The face contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
       {
          for (i = 0; i < dofs.numBdrs; i++)
@@ -2681,6 +2682,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
       }
    }
 
+   // Can be done on the ldofs, as M is a DG mass matrix.
    NeumannSolve(z, y);
 //    M_solver.Mult(z, y); // TODO convergence test, rm
 }
@@ -2842,18 +2844,9 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
          for (int k = 0; k < ne; k++)
          {
-            if (dim==1)
-            {
-               mesh->GetElementVertices(k, bdrs);
-            }
-            else if (dim==2)
-            {
-               mesh->GetElementEdges(k, bdrs, orientation);
-            }
-            else if (dim==3)
-            {
-               mesh->GetElementFaces(k, bdrs, orientation);
-            }
+            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
             for (int i = 0; i < dofs.numBdrs; i++)
             {
@@ -3032,6 +3025,7 @@ void velocity_function(const Vector &x, Vector &v)
 
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
+
          if (dim == 1) { MFEM_ABORT("Not implemented."); }
          v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
          v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
@@ -3335,7 +3329,6 @@ double lua_inflow_function(const Vector& x)
 }
 #endif
 
-// Inflow boundary condition (zero for the problems considered in this example)
 double inflow_function(const Vector &x)
 {
 #ifdef USE_LUA
