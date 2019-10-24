@@ -1307,6 +1307,34 @@ int main(int argc, char *argv[])
    }
 
    Assembly asmbl(dofs, lom);
+   const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof(); // TODO ne
+   
+   // Monolithic limiting correction factors.
+   if (lom.MonoType == ResDist_Monolithic)
+   {
+      lom.scale.SetSize(ne);
+      
+      double h = sqrt(dim) * 2. / (3. * pow(2., rs_levels)); // TODO generalize
+      
+      for (int e = 0; e < ne; e++)
+      {
+         const FiniteElement* el = pfes.GetFE(e);
+         DenseMatrix velEval;
+         Vector vval;
+         double vmax = 0.;
+         ElementTransformation *tr = pmesh.GetElementTransformation(e);
+         int qOrdE = tr->OrderW() + 2*el->GetOrder() + 2*max(tr->OrderGrad(el), 0);
+         const IntegrationRule *irE = &IntRules.Get(el->GetGeomType(), qOrdE);
+         velocity.Eval(velEval, *tr, *irE);
+         
+         for (int l = 0; l < irE->GetNPoints(); l++)
+         {
+            velEval.GetColumnReference(l, vval);
+            vmax = max(vmax, vval.Norml2());
+         }
+         lom.scale(e) = vmax / (2. * (h / order));
+      }
+   }
 
    // Initial condition.
    ParGridFunction u(&pfes);
@@ -1528,7 +1556,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   // 10. Free the used memory.
+   // 10. Free the used memory. //TODO
    delete ode_solver;
    delete k_hypre;
    delete dc;
@@ -1616,18 +1644,25 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
                                      const int BdrID, const Vector &x,
                                      Vector &y, const Vector &alpha) const
 {
-   int i, j, idx, dofInd;
+   int i, j, dofInd;
    double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
+   const int size_x = x.Size();
+   Vector &x_nd = x_gf.FaceNbrData();
    Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
    BdrTermCorr = 0.;
 
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      idx = dofs.NbrDof(k, BdrID, j);
+      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
       // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
       // s.t. this value will not matter.
-      xNeighbor = (idx < 0) ? inflow_gf(dofInd) : x(idx);
+      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
+      else
+      {
+         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
+                                           : x_nd(nbr_dof_id - size_x);
+      }
       xDiff(j) = xNeighbor - x(dofInd);
    }
 
@@ -1832,6 +1867,293 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
             y(dofInd) = (y(dofInd) + weightP * rhoP + weightN * rhoN)
                         / lumpedM(dofInd);
+         }
+      }
+   }
+   else // RD(S)-Monolithic
+   {
+      int N, I, m, dofInd2, loc, it, CtrIt, ctr = 0, max_iter = 100;
+      double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
+             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
+             uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp,
+             XMIN = x.Min(), XMAX = x.Max(), // TODO q
+             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15; 
+      Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
+             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d, g,
+             g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
+
+      bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8; // TODO problem_num 8 wrsl weg
+      double* Mij = M.GetData();
+      bool UseAlphaGlob = true;
+
+      if (!UseMassLim) { max_iter = -1; }
+      alpha1 = 1.;
+      for (k = 0; k < ne; k++)
+      {
+         dofs.xe_min(k) = numeric_limits<double>::infinity();
+         dofs.xe_max(k) = -dofs.xe_min(k);
+
+         for (i = 0; i < nd; i++)
+         {
+            dofInd = k*nd+i;
+            dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
+            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
+         }
+      }
+
+      dofs.ComputeBounds();
+      
+      // Smoothness indicator.
+//       ApproximateLaplacian(si, ne, nd, dofs, x, g);
+//       
+//       N = g.Size();
+//       g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
+//       ComputeFromSparsity(si.Mmat, g, g_min, g_max);
+//       
+//       for (k = 0; k < N; k++)
+//       {
+//          si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+//                               (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+//       }
+
+      // Discretization terms.
+      y = 0.;
+      K.Mult(x, z);
+      d = z;
+
+      // Monotonicity terms
+      for (k = 0; k < ne; k++)
+      {
+         for (j = 0; j < nd; j++)
+         {
+            dofInd = k*nd+j;
+            alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
+                                    / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+
+//             if (UseSI)
+//             {
+// 					tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+// 					double bndN = tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) + (1.-tmp) * dofs.xi_min(dofInd);
+// 					double bndP = tmp * (2.*x(dofInd) - dofs.xi_min(dofInd)) + (1.-tmp) * dofs.xi_max(dofInd);
+// 					
+// 					if (UseAlphaGlob)
+//                {
+// 						bndN = max(0., bndN);
+// 						bndP = min(1., bndP);
+// 					}
+// 					
+//                if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd))
+// 					{
+// 						alpha(j) = min(1., beta*(x(dofInd) - bndN) / (dofs.xi_max(dofInd) - x(dofInd) + eps));
+// 					}
+// 					else
+// 					{
+// 						alpha(j) = min(1., beta*(bndP - x(dofInd)) / (x(dofInd) - dofs.xi_min(dofInd) + eps));
+// 					}
+// 					
+// // 					alphaGlob = 1.;
+// //                if (UseAlphaGlob)
+// //                {
+// //                   alphaGlob = min( 1., beta * min(XMAX - x(dofInd), x(dofInd) - XMIN)
+// //                                            / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
+// //                }
+// // 
+// //                tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+// //                alpha(j) = min(max(tmp, alpha(j)), alphaGlob);
+//             }
+            
+            // Splitting for volume term.
+            y(dofInd) += alpha(j) * z(dofInd);
+            z(dofInd) -= alpha(j) * z(dofInd);
+         }
+         
+         // Boundary contributions
+         for (i = 0; i < dofs.numBdrs; i++)
+         {
+            NonlinFluxLumping(k, nd, i, x, y, alpha);
+            NonlinFluxLumping(k, nd, i, x, d, alpha1);
+         }
+
+         // Element contributions
+         rhoP = rhoN = xSum = 0.;
+
+         for (j = 0; j < nd; j++)
+         {
+            dofInd = k*nd+j;
+            xSum += x(dofInd);
+            rhoP += max(0., z(dofInd));
+            rhoN += min(0., z(dofInd));
+         }
+
+         sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
+         sumWeightsN = nd*dofs.xe_min(k) - xSum - eps;
+
+         if (lom.OptScheme)
+         {
+            fluctSubcellP.SetSize(dofs.numSubcells);
+            fluctSubcellN.SetSize(dofs.numSubcells);
+            xMaxSubcell.SetSize(dofs.numSubcells);
+            xMinSubcell.SetSize(dofs.numSubcells);
+            sumWeightsSubcellP.SetSize(dofs.numSubcells);
+            sumWeightsSubcellN.SetSize(dofs.numSubcells);
+            nodalWeightsP.SetSize(nd);
+            nodalWeightsN.SetSize(nd);
+            sumFluctSubcellP = sumFluctSubcellN = 0.;
+            nodalWeightsP = 0.; nodalWeightsN = 0.;
+
+            // compute min-/max-values and the fluctuation for subcells
+            for (m = 0; m < dofs.numSubcells; m++)
+            {
+               xMinSubcell(m) = numeric_limits<double>::infinity();
+               xMaxSubcell(m) = -xMinSubcell(m);
+               fluct = xSum = 0.;
+
+               if (exec_mode == 1)
+               {
+                  asmbl.ComputeSubcellWeights(k, m);
+               }
+
+               for (i = 0; i < dofs.numDofsSubcell; i++)
+               {
+                  dofInd = k*nd + dofs.Sub2Ind(m, i);
+                  fluct += asmbl.SubcellWeights(k)(m,i) * x(dofInd);
+                  xMaxSubcell(m) = max(xMaxSubcell(m), x(dofInd));
+                  xMinSubcell(m) = min(xMinSubcell(m), x(dofInd));
+                  xSum += x(dofInd);
+               }
+               sumWeightsSubcellP(m) = dofs.numDofsSubcell
+                                       * xMaxSubcell(m) - xSum + eps;
+               sumWeightsSubcellN(m) = dofs.numDofsSubcell
+                                       * xMinSubcell(m) - xSum - eps;
+
+               fluctSubcellP(m) = max(0., fluct);
+               fluctSubcellN(m) = min(0., fluct);
+               sumFluctSubcellP += fluctSubcellP(m);
+               sumFluctSubcellN += fluctSubcellN(m);
+            }
+
+            for (m = 0; m < dofs.numSubcells; m++)
+            {
+               for (i = 0; i < dofs.numDofsSubcell; i++)
+               {
+                  loc = dofs.Sub2Ind(m, i);
+                  dofInd = k*nd + loc;
+                  nodalWeightsP(loc) += fluctSubcellP(m)
+                                        * ((xMaxSubcell(m) - x(dofInd))
+                                           / sumWeightsSubcellP(m)); // eq. (58)
+                  nodalWeightsN(loc) += fluctSubcellN(m)
+                                        * ((xMinSubcell(m) - x(dofInd))
+                                           / sumWeightsSubcellN(m)); // eq. (59)
+               }
+            }
+         }
+
+         for (i = 0; i < nd; i++)
+         {
+            dofInd = k*nd+i;
+            weightP = (dofs.xe_max(k) - x(dofInd)) / sumWeightsP;
+            weightN = (dofs.xe_min(k) - x(dofInd)) / sumWeightsN;
+
+            if (lom.OptScheme)
+            {
+               aux = gamma / (rhoP + eps);
+               weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
+               weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP(i);
+
+               aux = gamma / (rhoN - eps);
+               weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
+               weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
+            }
+            
+            y(dofInd) += weightP * rhoP + weightN * rhoN;
+         }
+         
+         // Time derivative and mass matrix, if UseMassLim = false, max_iter has
+         // been set to -1, and the iteration loop is not entered.
+         m_it = uDot = 0.;
+         for (it = 0; it <= max_iter; it++)
+         {
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               uDot(i) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
+            }
+            
+            CtrIt = ctr;
+            
+            uDotMin = numeric_limits<double>::infinity();
+            uDotMax = -uDotMin;
+            
+            for (i = 0; i < nd; i++) // eq. (28)
+            {
+               uDotMin = min(uDotMin, uDot(i));
+               uDotMax = max(uDotMax, uDot(i));
+               
+               dofInd = k*nd+i;
+               m_it(i) = 0.;
+               for (j = nd-1; j >= 0; j--) // run backwards through columns
+               {
+                  m_it(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
+                  ctr++;
+               }
+               diff = d(dofInd) - y(dofInd);
+               
+               tmp = 0.;
+//                if (UseSI)
+//                {
+//                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+//                }
+               m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
+                        * diff; // eq. (27) - (29)
+            }
+            
+            ctr = CtrIt;
+            MassP = MassN = 0.;
+            
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
+                                                     / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
+               
+//                if (UseSI)
+//                {
+//                   alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO
+//                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
+//                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+//                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
+//                }
+
+               m_it(i) *= alpha(i);
+               MassP += max(0., m_it(i));
+               MassN += min(0., m_it(i));
+            }
+            
+            for (i = 0; i < nd; i++)
+            {
+               if (MassP + MassN > eps)
+               {
+                  m_it(i) = min(0., m_it(i)) - max(0., m_it(i)) * MassN / MassP;
+               }
+               else if (MassP + MassN < -eps)
+               {
+                  m_it(i) = max(0., m_it(i)) - min(0., m_it(i)) * MassP / MassN;
+               }
+            }
+            
+            for (i = 0; i < nd; i++)
+            {
+               dofInd = k*nd+i;
+               res(i) = m_it(i) + y(dofInd) - lumpedM(dofInd) * uDot(i);
+            }
+            
+            if (res.Norml2() <= tol) { break; }
+         }
+         
+         for (i = 0; i < nd; i++)
+         {
+            dofInd = k*nd+i;
+            y(dofInd) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
          }
       }
    }
