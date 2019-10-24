@@ -332,6 +332,7 @@ public:
 // Class storing information on dofs needed for the low order methods and FCT.
 class DofInfo
 {
+private:
    Mesh* mesh;
    FiniteElementSpace* fes;
 
@@ -1249,11 +1250,13 @@ private:
 
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
-                Vector &_lumpedM, BilinearForm &Kbf_, SparseMatrix &_K,
+                Vector &_lumpedM,
+                BilinearForm &Kbf_, SparseMatrix &_K,
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
-                GridFunction &vel, GridFunction &sub_vel, Assembly &_asmbl,
-                LowOrderMethod &_lom, DofInfo &_dofs, SmoothnessIndicator &si_);
+                GridFunction &vel, GridFunction &sub_vel,
+                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
+                SmoothnessIndicator &si_);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1289,6 +1292,7 @@ int main(int argc, char *argv[])
 {
    // 1. Parse command-line options.
 
+   // Parse command-line options.
 #ifdef USE_LUA
    L = luaL_newstate();
    luaL_openlibs(L);
@@ -1389,8 +1393,8 @@ int main(int argc, char *argv[])
    exec_mode = (int)lua_tonumber(L, -1);
 #endif
 
-   // 2. Read the mesh from the given mesh file. We can handle geometrically
-   //    periodic meshes in this code.
+   // Read the serial mesh from the given mesh file on all processors.
+   // Refine the mesh in serial to increase the resolution.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
    const int dim = mesh->Dimension();
 
@@ -1948,6 +1952,8 @@ int main(int argc, char *argv[])
    }
 
    socketstream sout;
+   char vishost[] = "localhost";
+   int  visport   = 19916;
    if (visualization)
    {
       char vishost[] = "localhost";
@@ -1979,7 +1985,8 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM, k, k.SpMat(),
+   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
+                                        k, k.SpMat(),
                                         b, inflow_gf, *x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, si);
 
@@ -2739,6 +2746,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
+   // Get the MPI neighbor values.
    if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The face contributions have been computed in the low order scheme.
@@ -2858,10 +2866,11 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
-                           Assembly &_asmbl, LowOrderMethod &_lom,
-                           DofInfo &_dofs, SmoothnessIndicator &si_) :
+                           Assembly &_asmbl,
+                           LowOrderMethod &_lom, DofInfo &_dofs,
+                           SmoothnessIndicator &si_) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), lumpedM(_lumpedM), b(_b), inflow_gf(inflow),
+   M(_M), K(_K), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
