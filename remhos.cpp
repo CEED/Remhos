@@ -1323,14 +1323,12 @@ int main(int argc, char *argv[])
    }
 
    Assembly asmbl(dofs, lom);
-   const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof(); // TODO ne
+   const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof();
    
    // Monolithic limiting correction factors.
    if (lom.MonoType == ResDist_Monolithic)
    {
       lom.scale.SetSize(ne);
-      
-      double h = sqrt(dim) * 2. / (3. * pow(2., rs_levels)); // TODO generalize
       
       for (int e = 0; e < ne; e++)
       {
@@ -1348,7 +1346,7 @@ int main(int argc, char *argv[])
             velEval.GetColumnReference(l, vval);
             vmax = max(vmax, vval.Norml2());
          }
-         lom.scale(e) = vmax / (2. * (h / order));
+         lom.scale(e) = vmax / (2. * (sqrt(dim) * pmesh.GetElementSize(e) / order));
       }
    }
 
