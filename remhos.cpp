@@ -129,6 +129,8 @@ lua_State* L;
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
 
+bool UseSI;
+
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
 int exec_mode;
@@ -792,6 +794,15 @@ public:
 };
 
 
+struct SmoothnessIndicator
+{
+   FiniteElementSpace *fesH1;
+   BilinearFormIntegrator *bfi_dom, *bfi_bdr, *MassInt;
+   SparseMatrix Mmat, LaplaceOp, *MassMixed;
+   Vector lumpedMH1, DG2CG;
+   DenseMatrix ShapeEval;
+	CGSolver M_solver;
+};
 /** A time-dependent operator for the right-hand side of the ODE. The DG weak
     form of du/dt = -v.grad(u) is M du/dt = K u + b, where M and K are the mass
     and advection matrices, and b describes the flow on the boundary. This can
@@ -818,6 +829,7 @@ private:
    Assembly &asmbl;
 
    LowOrderMethod &lom;
+   SmoothnessIndicator &si;
    DofInfo &dofs;
 
 public:
@@ -827,7 +839,8 @@ public:
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
-                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
+                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
+                SmoothnessIndicator &si_);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -881,6 +894,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 1;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
+   UseSI = true;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
@@ -921,6 +935,8 @@ int main(int argc, char *argv[])
                   "                     5 - residual distribution - monolithic.");
    args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
                   "Optimized low order scheme: PDU / RDS VS DU / RD.");
+   args.AddOption(&UseSI, "-si", "--si-on", "-no-si", "--si-off",
+                  "Enable/disable smoothness indicator.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
@@ -1341,6 +1357,9 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
+
+   // Smoothness indicator. TODO every step for remap
+   SmoothnessIndicator si;
    // Print the starting meshes and initial condition.
    {
       ofstream meshHO("meshHO_init.mesh");
@@ -1412,7 +1431,7 @@ int main(int argc, char *argv[])
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
                                         k, k.SpMat(), *k_hypre,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs);
+                                        asmbl, lom, dofs, si);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -2312,14 +2331,15 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
-                           LowOrderMethod &_lom, DofInfo &_dofs) :
+                           LowOrderMethod &_lom, DofInfo &_dofs,
+                           SmoothnessIndicator &si_) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs) { }
+   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
