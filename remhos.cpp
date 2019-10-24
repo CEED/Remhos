@@ -1422,6 +1422,10 @@ int main(int argc, char *argv[])
    GetMinMax(u, umin, umax);
 
    if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
+   
+   ParGridFunction res = u;
+   bool converged = false;
+   double residual;
 
    bool done = false;
    for (int ti = 0; !done; )
@@ -1458,13 +1462,30 @@ int main(int argc, char *argv[])
          if (NeedSubcells) { add(x0_sub, t, v_sub_gf, *xsub); }
       }
 
-      done = (t >= t_final - 1.e-8*dt);
+      if (problem_num != 6 && problem_num != 7 && problem_num != 8)
+      {
+         done = (t >= t_final - 1.e-8*dt);
+      }
+      else
+      {
+         double res_loc = 0.;
+         for (int i = 0; i < res.Size(); i++)
+         {
+            res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
+         }
+         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+         
+         residual = sqrt(residual);
+         if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
+         else { res = u; }
+      }
 
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
          {
-            cout << "time step: " << ti << ", time: " << t << endl;
+            cout << "time step: " << ti << ", time: " << t << ", residual: "
+                 << residual << endl;
          }
 
                   if (visualization)
