@@ -1874,52 +1874,87 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
 void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
                                       const Vector &yL, Vector &y) const
 {
-   int j, k, nd, dofInd;
-   double sumPos, sumNeg, eps = 1.E-15;
-   Vector uClipped, fClipped;
+   int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
+       nd = lom.fes->GetFE(0)->GetDof();
+   double sumP, sumN, uH, uL, tmp, umax, umin, mass,
+          XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;  // TODO q
+   Vector AntiDiff(nd), g, g_min, g_max, si_val;
+	bool UseAlphaGlob = true; // TODO
 
    dofs.ComputeBounds();
+   
+   // Smoothness indicator.
+//    if (UseSI)
+//    {
+//       ApproximateLaplacian(si, ne, nd, dofs, x, g);
+// 
+//       N = g.Size();
+//       g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
+//       ComputeFromSparsity(si.Mmat, g, g_min, g_max);
+// 
+//       for (k = 0; k < N; k++)
+//       {
+//          si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+//                               (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+//       }
+//    }
 
    // Monotonicity terms
-   for (k = 0; k < lom.fes->GetMesh()->GetNE(); k++)
+   for (k = 0; k < ne; k++)
    {
-      const FiniteElement* el = lom.fes->GetFE(k);
-      nd = el->GetDof();
-
-      uClipped.SetSize(nd); uClipped = 0.;
-      fClipped.SetSize(nd); fClipped = 0.;
-      sumPos = sumNeg = 0.;
-
+		sumP = sumN = 0.;
       for (j = 0; j < nd; j++)
       {
          dofInd = k*nd+j;
+         uH = x(dofInd) + dt * yH(dofInd);
+         uL = x(dofInd) + dt * yL(dofInd);
+         
+//          if (UseSI)
+// 			{
+//             tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
+// 				umin = tmp * uH + (1. - tmp) * dofs.xi_min(dofInd);
+//             umax = tmp * uH + (1. - tmp) * dofs.xi_max(dofInd);
+// 				
+// 				if (UseAlphaGlob)
+// 				{
+// 					umin = max(umin, 0.);
+// 					umax = min(umax, 1.);
+// 				}
+//          }
+//          else
+// 			{
+				umin = dofs.xi_min(dofInd);
+				umax = dofs.xi_max(dofInd);
+// 			}
+         
+         umin = lumpedM(dofInd) / dt * (umin - uL);
+			umax = lumpedM(dofInd) / dt * (umax - uL);
+         
+         AntiDiff(j) = lumpedM(dofInd) * (yH(dofInd) - yL(dofInd));
+			AntiDiff(j) = min(umax, max(umin, AntiDiff(j)));
 
-         uClipped(j) = min(dofs.xi_max(dofInd), max(x(dofInd) + dt*yH(dofInd),
-                                                    dofs.xi_min(dofInd)) );
-
-         fClipped(j) = lumpedM(dofInd) / dt
-                       * ( uClipped(j) - (x(dofInd) + dt * yL(dofInd)) );
-
-         sumPos += max(fClipped(j), 0.);
-         sumNeg += min(fClipped(j), 0.);
+			sumN += min(AntiDiff(j), 0.);
+         sumP += max(AntiDiff(j), 0.);
       }
-
+      
+      mass = sumN + sumP;
+      
       for (j = 0; j < nd; j++)
       {
-         if ((sumPos + sumNeg > eps) && (fClipped(j) > eps))
+         if (mass > eps)
          {
-            fClipped(j) *= - sumNeg / sumPos;
+            AntiDiff(j) = min(0., AntiDiff(j)) - max(0., AntiDiff(j)) * sumN / sumP;
          }
-         if ((sumPos + sumNeg < -eps) && (fClipped(j) < -eps))
+         else if (mass < -eps)
          {
-            fClipped(j) *= - sumPos / sumNeg;
+            AntiDiff(j) = max(0., AntiDiff(j)) - min(0., AntiDiff(j)) * sumP / sumN;
          }
-
+         
          // Set y to the discrete time derivative featuring the high order anti-
          // diffusive reconstruction that leads to an forward Euler updated
          // admissible solution.
          dofInd = k*nd+j;
-         y(dofInd) = yL(dofInd) + fClipped(j) / lumpedM(dofInd);
+         y(dofInd) = yL(dofInd) + AntiDiff(j) / lumpedM(dofInd);
       }
    }
 }
