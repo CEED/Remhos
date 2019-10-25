@@ -661,6 +661,7 @@ public:
          SubFes1 = lom.SubFes1;
          subcell_mesh = lom.subcell_mesh;
       }
+      else { SubFes1 = fes; } // TODO dev
 
       // Initialization for transport mode.
       if (exec_mode == 0 && (NeedBdr || NeedSubcells))
@@ -1451,6 +1452,7 @@ int main(int argc, char *argv[])
          lom.VolumeTerms = new MixedConvectionIntegrator(v_sub_coef);
       }
    }
+   else { lom.subcell_mesh = &pmesh; }
 
    Assembly asmbl(dofs, lom);
    const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof();
@@ -1485,20 +1487,19 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
-
    // Smoothness indicator. TODO every step for remap
    SmoothnessIndicator si;
    Vector g_min, g_max;
    
    H1_FECollection H1fec(1, dim, btype);
-   Array<int> ess_tdof_list; // this list remains empty for pure Neumann b.c.
    
    si.fesH1 = new FiniteElementSpace(lom.subcell_mesh, &H1fec);
    
    BilinearForm massH1(si.fesH1);
    massH1.AddDomainIntegrator(new MassIntegrator);
    massH1.Assemble();
-   massH1.FormSystemMatrix(ess_tdof_list, si.Mmat);
+   massH1.Finalize();
+	si.Mmat = massH1.SpMat();
 	
 	DSmoother M_prec;
 	si.M_solver.SetPreconditioner(M_prec);
@@ -1513,10 +1514,8 @@ int main(int argc, char *argv[])
    BilinearForm mlH1(si.fesH1);
    mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
    mlH1.Assemble();
-   
-   SparseMatrix MLmat;
-   mlH1.FormSystemMatrix(ess_tdof_list, MLmat);
-   MLmat.GetDiag(si.lumpedMH1);
+	mlH1.Finalize();
+   mlH1.SpMat().GetDiag(si.lumpedMH1);
    
 	si.MassMixed = new SparseMatrix(si.fesH1->GetVSize(), pfes.GetVSize());
 	si.MassInt = new MassIntegrator;
