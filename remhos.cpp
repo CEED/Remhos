@@ -129,7 +129,7 @@ lua_State* L;
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
 
-bool UseSI;
+int smth_ind;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -1025,7 +1025,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 1;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
-   UseSI = true;
+   smth_ind = 2;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
@@ -1066,8 +1066,10 @@ int main(int argc, char *argv[])
                   "                     5 - residual distribution - monolithic.");
    args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
                   "Optimized low order scheme: PDU / RDS VS DU / RD.");
-   args.AddOption(&UseSI, "-si", "--si-on", "-no-si", "--si-off",
-                  "Enable/disable smoothness indicator.");
+   args.AddOption(&smth_ind, "-si", "--smth_ind",
+                  "Smoothness indicator: 0 - no smoothness indicator,\n\t"
+                  "                      1 - exact_quadratic,\n\t"
+                  "                      2 - approx_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
@@ -1602,11 +1604,22 @@ int main(int argc, char *argv[])
    g_min.SetSize(N); g_max.SetSize(N);
    ComputeFromSparsity(si.Mmat, g, g_min, g_max);
 
-   for (int e = 0; e < N; e++)
-   {
-      si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
-						(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
-   }
+	if (smth_ind == 1)
+	{
+		for (int e = 0; e < N; e++)
+		{
+			si_val(e) = min( 1., q * max(0., g_min(e)*g_max(e))
+										/ (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+		}
+	}
+	else if (smth_ind == 2)
+	{
+		for (int e = 0; e < N; e++)
+		{
+			si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
+										(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
+		}
+	}
    
    // Print the values of the smoothness indicator.
    {
@@ -1852,14 +1865,24 @@ int main(int argc, char *argv[])
    }
 
    ApproximateLaplacian(si, ne, nd, dofs, u, g);
-   
    ComputeFromSparsity(si.Mmat, g, g_min, g_max);
-   
-   for (int e = 0; e < g.Size(); e++)
-   {
-      si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
-      (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
-   }
+
+	if (smth_ind == 1)
+	{
+		for (int e = 0; e < N; e++)
+		{
+			si_val(e) = min( 1., q * max(0., g_min(e)*g_max(e))
+										/ (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+		}
+	}
+	else if (smth_ind == 2)
+	{
+		for (int e = 0; e < N; e++)
+		{
+			si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
+										(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
+		}
+	}
    
    // Print the values of the smoothness indicator.
    {
@@ -2216,17 +2239,31 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       dofs.ComputeBounds();
       
       // Smoothness indicator.
-      ApproximateLaplacian(si, ne, nd, dofs, x, g);
+		if (smth_ind)
+		{
+			ApproximateLaplacian(si, ne, nd, dofs, x, g);
       
-      N = g.Size();
-      g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
-      ComputeFromSparsity(si.Mmat, g, g_min, g_max);
-      
-      for (k = 0; k < N; k++)
-      {
-         si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
-      }
+			N = g.Size();
+			g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
+			ComputeFromSparsity(si.Mmat, g, g_min, g_max);
+			
+			if (smth_ind == 1)
+			{
+				for (k = 0; k < N; k++)
+				{
+					si_val(k) = min( 1., 5. * max(0., g_min(k)*g_max(k))
+												/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+				}
+			}
+			else if (smth_ind == 2)
+			{
+				for (k = 0; k < N; k++)
+				{
+					si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+                                    (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+				}
+			}
+		}
 
       // Discretization terms.
       y = 0.;
@@ -2242,7 +2279,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd))
                                     / (max(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) + eps) );
 
-            if (UseSI)
+            if (smth_ind)
             {
 					tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
 					double bndN = tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) + (1.-tmp) * dofs.xi_min(dofInd);
@@ -2402,7 +2439,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                diff = d(dofInd) - y(dofInd);
                
                tmp = 0.;
-               if (UseSI)
+               if (smth_ind)
                {
                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                }
@@ -2419,7 +2456,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                                      / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                
-               if (UseSI)
+               if (smth_ind)
                {
                   alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
@@ -2509,7 +2546,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
    dofs.ComputeBounds();
    
    // Smoothness indicator.
-   if (UseSI)
+   if (smth_ind)
    {
       ApproximateLaplacian(si, ne, nd, dofs, x, g);
 
@@ -2517,11 +2554,22 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
       g_min.SetSize(N); g_max.SetSize(N); si_val.SetSize(N);
       ComputeFromSparsity(si.Mmat, g, g_min, g_max);
 
-      for (k = 0; k < N; k++)
-      {
-         si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                              (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
-      }
+		if (smth_ind == 1)
+		{
+			for (k = 0; k < N; k++)
+			{
+				si_val(k) = min( 1., 5. * max(0., g_min(k)*g_max(k))
+											/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+			}
+		}
+		if (smth_ind == 2)
+		{
+			for (k = 0; k < N; k++)
+			{
+				si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
+                                 (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+			}
+		}
    }
 
    // Monotonicity terms
@@ -2534,7 +2582,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
          uH = x(dofInd) + dt * yH(dofInd);
          uL = x(dofInd) + dt * yL(dofInd);
          
-         if (UseSI)
+         if (smth_ind)
 			{
             tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
 				umin = tmp * uH + (1. - tmp) * dofs.xi_min(dofInd);
