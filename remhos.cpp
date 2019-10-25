@@ -2254,11 +2254,11 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 						bndP = min(1., bndP);
 					}
 					
-               if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd))
+               if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd) + eps)
 					{
 						alpha(j) = min(1., beta*(x(dofInd) - bndN) / (dofs.xi_max(dofInd) - x(dofInd) + eps));
 					}
-					else
+					else if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) < 2.*x(dofInd) - eps)
 					{
 						alpha(j) = min(1., beta*(bndP - x(dofInd)) / (x(dofInd) - dofs.xi_min(dofInd) + eps));
 					}
