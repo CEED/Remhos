@@ -1362,16 +1362,16 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_init.mesh");
       meshHO.precision(precision);
-      pmesh.Print(meshHO);
+      pmesh.PrintAsOne(meshHO);
       if (lom.subcell_mesh)
       {
          ofstream meshLO("meshLO_init.mesh");
          meshLO.precision(precision);
-         lom.subcell_mesh->Print(meshLO);
+         lom.subcell_mesh->PrintAsOne(meshLO);
       }
       ofstream sltn("sltn_init.gf");
       sltn.precision(precision);
-      u.Save(sltn);
+      u.SaveAsOne(sltn);
    }
 
    // Create data collection for solution output: either VisItDataCollection for
@@ -1525,7 +1525,7 @@ int main(int argc, char *argv[])
    {
       ofstream meshHO("meshHO_final.mesh");
       meshHO.precision(precision);
-      pmesh.Print(meshHO);
+      pmesh.PrintAsOne(meshHO);
       if (asmbl.subcell_mesh)
       {
          ofstream meshLO("meshLO_final.mesh");
@@ -1534,7 +1534,7 @@ int main(int argc, char *argv[])
       }
       ofstream sltn("sltn_final.gf");
       sltn.precision(precision);
-      u.Save(sltn);
+      u.SaveAsOne(sltn);
    }
 
    // Check for mass conservation.
