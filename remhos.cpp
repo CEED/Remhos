@@ -1051,18 +1051,18 @@ int main(int argc, char *argv[])
    {
       if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
       {
-         cout << "Unsupported option for monotonicity treatment." << endl;
+         if (myid == 0) { cout << "Unsupported option for monotonicity treatment." << endl; }
          fail = true;
       }
       if (btype != 2)
       {
-         cout << "Monotonicity treatment requires Bernstein basis." << endl;
+         if (myid == 0) { cout << "Monotonicity treatment requires Bernstein basis." << endl; }
          fail = true;
       }
       if (order == 0)
       {
          // Disable monotonicity treatment for piecewise constants.
-         mfem_warning("For -o 0, monotonicity treatment is disabled.");
+         if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
          MonoType = None;
          OptScheme = false;
       }
@@ -1072,7 +1072,7 @@ int main(int argc, char *argv[])
    if ((MonoType > 2) && (order==1) && OptScheme)
    {
       // Avoid subcell methods for linear elements.
-      mfem_warning("For -o 1, subcell scheme is disabled.");
+      if (myid == 0) { mfem_warning("For -o 1, subcell scheme is disabled."); }
       OptScheme = false;
    }
 
