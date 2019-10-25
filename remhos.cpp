@@ -1325,7 +1325,7 @@ int main(int argc, char *argv[])
       }
       ofstream sltn("sltn_init.gf");
       sltn.precision(precision);
-      u.Save(sltn);
+      u.SaveAsOne(sltn);
    }
 
    // Create data collection for solution output: either VisItDataCollection for
@@ -1473,7 +1473,7 @@ int main(int argc, char *argv[])
       }
       ofstream sltn("sltn_final.gf");
       sltn.precision(precision);
-      u.Save(sltn);
+      u.SaveAsOne(sltn);
    }
 
    // Check for mass conservation.
