@@ -2129,6 +2129,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                
                dofInd = k*nd+i;
                m_it(i) = 0.;
+					// NOTE: This will only work in serial.
                for (j = nd-1; j >= 0; j--) // run backwards through columns
                {
                   m_it(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
