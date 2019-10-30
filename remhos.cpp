@@ -797,7 +797,7 @@ public:
 
 struct SmoothnessIndicator
 {
-   FiniteElementSpace *fesH1;
+   ParFiniteElementSpace *fesH1;
    BilinearFormIntegrator *bfi_dom, *bfi_bdr, *MassInt;
    SparseMatrix Mmat, LaplaceOp, *MassMixed;
    Vector lumpedMH1, DG2CG;
@@ -843,18 +843,19 @@ void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
             tr_vdofs[6] = k*nd + dofs.Sub2Ind(m, 7);
             tr_vdofs[7] = k*nd + dofs.Sub2Ind(m, 6);
          }
-			si.MassMixed->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);      }
+         si.MassMixed->AddSubMatrix(te_vdofs, tr_vdofs, elmat1);
+      }
    }
    si.MassMixed->Finalize();
 }
 
 void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
-                          DofInfo dofs, const Vector &x, Vector &y)
+                          DofInfo dofs, const Vector &x, ParGridFunction &y)
 {
 	int k, i, j, m, e_id, dofInd, N = si.lumpedMH1.Size();
 	Array<int> vdofs, eldofs;
-	bool UseConsistentProj = true; // TODO debug
 	Vector xDofs(nd), tmp(nd), xEval(ne*nd);
+   Vector z1_tv(si.fesH1->GetTrueVSize()), z2_tv(si.fesH1->GetTrueVSize());
 	
 	eldofs.SetSize(nd);
 	y.SetSize(N); // y = 0.; TODO unneccessary
@@ -875,17 +876,26 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 	}
 	
 	si.MassMixed->Mult(xEval, z1);
+   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z1, z1_tv);
+   si.fesH1->GetProlongationMatrix()->Mult(z1_tv, z1);
+
 	y = 0.;
-	
+
+   // Project x to a CG space (result is in y).
 	for (iter = 1; iter <= max_iter; iter++)
 	{
 		si.Mmat.Mult(y, z2);
-		z2 -= z1;
-		resid = z2.Norml2();
-		if (resid <= abs_tol)
-		{
-			break;
-		}
+      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z2, z2_tv);
+      z2_tv -= z1_tv;
+      si.fesH1->GetProlongationMatrix()->Mult(z2_tv, z2);
+
+      double loc_res = z2_tv.Norml2();
+      loc_res *= loc_res;
+      MPI_Allreduce(&loc_res, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      resid = sqrt(resid);
+
+      if (resid <= abs_tol) { break; }
+
 		for (i = 0; i < N; i++)
 		{
 			y(i) -= z2(i) / si.lumpedMH1(i);
@@ -893,45 +903,57 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 	}
 
 	si.LaplaceOp.Mult(y, z1);
-	
+   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z1, z1_tv);
+   si.fesH1->GetProlongationMatrix()->Mult(z1_tv, z1);
+
 	y = 0.;
 	
 	for (iter = 1; iter <= max_iter; iter++)
 	{
 		si.Mmat.Mult(y, z2);
-		z2 -= z1;
-		resid = z2.Norml2();
-		if (resid <= abs_tol)
-		{
-			break;
-		}
+      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z2, z2_tv);
+      z2_tv -= z1_tv;
+      si.fesH1->GetProlongationMatrix()->Mult(z2_tv, z2);
+
+      double loc_res = z2_tv.Norml2();
+      loc_res *= loc_res;
+      MPI_Allreduce(&loc_res, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      resid = sqrt(resid);
+
+      if (resid <= abs_tol) { break; }
+
 		for (i = 0; i < N; i++)
 		{
 			y(i) -= z2(i) / si.lumpedMH1(i);
 		}
 	}
-	
 }
 
-void ComputeFromSparsity(const SparseMatrix& K, const Vector& x, Vector &x_min, 
-                         Vector &x_max)
+void ComputeFromSparsity(const SparseMatrix &K, const ParGridFunction &x,
+                         Vector &x_min, Vector &x_max)
 {
-   const int *I = K.GetI(), *J = K.GetJ(), size = K.Size();
+   const int *I = K.GetI(), *J = K.GetJ(), loc_size = K.Size();
    int end;
-   double x_j;
-   
-   for (int i = 0, k = 0; i < size; i++)
+
+   for (int i = 0, k = 0; i < loc_size; i++)
    {
       x_min(i) = numeric_limits<double>::infinity();
       x_max(i) = -x_min(i);
       for (end = I[i+1]; k < end; k++)
       {
-         x_j = x(J[k]);
-
+         const double x_j = x(J[k]);
          x_max(i) = max(x_max(i), x_j);
          x_min(i) = min(x_min(i), x_j);
       }
    }
+
+   GroupCommunicator &gcomm = x.ParFESpace()->GroupComm();
+   Array<double> minvals(x_min.GetData(), x_min.Size()),
+                 maxvals(x_max.GetData(), x_max.Size());
+   gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
+   gcomm.Bcast(minvals);
+   gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
+   gcomm.Bcast(maxvals);
 }
 
 /** A time-dependent operator for the right-hand side of the ODE. The DG weak
@@ -1495,7 +1517,7 @@ int main(int argc, char *argv[])
    
    H1_FECollection H1fec(1, dim, btype);
    
-   si.fesH1 = new FiniteElementSpace(lom.subcell_mesh, &H1fec);
+   si.fesH1 = new ParFiniteElementSpace(lom.subcell_mesh, &H1fec);
    
    BilinearForm massH1(si.fesH1);
    massH1.AddDomainIntegrator(new MassIntegrator);
@@ -1518,6 +1540,10 @@ int main(int argc, char *argv[])
    mlH1.Assemble();
 	mlH1.Finalize();
    mlH1.SpMat().GetDiag(si.lumpedMH1);
+
+   Vector lumped_hv(si.fesH1->GetTrueVSize());
+   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(si.lumpedMH1, lumped_hv);
+   si.fesH1->GetProlongationMatrix()->Mult(lumped_hv, si.lumpedMH1);
    
 	si.MassMixed = new SparseMatrix(si.fesH1->GetVSize(), pfes.GetVSize());
 	si.MassInt = new MassIntegrator;
@@ -1595,7 +1621,7 @@ int main(int argc, char *argv[])
    }
    si.ShapeEval.Transpose();
 
-   GridFunction g(si.fesH1), si_val(si.fesH1);
+   ParGridFunction g(si.fesH1), si_val(si.fesH1);
    ApproximateLaplacian(si, ne, nd, dofs, u, g);
    
    const int N = g.Size();
@@ -2214,8 +2240,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
              XMIN = x.Min(), XMAX = x.Max(), // TODO q
              q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15; 
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d, g,
+             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
              g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
+      ParGridFunction g(si.fesH1);
 
       bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8; // TODO problem_num 8 wrsl weg
       double* Mij = M.GetData();
@@ -2540,7 +2567,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
        nd = lom.fes->GetFE(0)->GetDof();
    double sumP, sumN, uH, uL, tmp, umax, umin, mass,
           XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;  // TODO q
-   Vector AntiDiff(nd), g, g_min, g_max, si_val;
+   Vector AntiDiff(nd), g_min, g_max, si_val;
+   ParGridFunction g(si.fesH1);
 	bool UseAlphaGlob = true; // TODO
 
    dofs.ComputeBounds();
