@@ -795,7 +795,7 @@ struct SmoothnessIndicator
    SparseMatrix Mmat, LaplaceOp, *MassMixed;
    Vector lumpedMH1, DG2CG;
    DenseMatrix ShapeEval;
-	CGSolver M_solver;
+   double param;
 };
 
 void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
@@ -1526,21 +1526,15 @@ int main(int argc, char *argv[])
    // TODO assemble matrices every RK stage step for remap.
    if (smth_ind)
    {
+      if (smth_ind == 1) { si.param = 5.; }
+      else if (smth_ind == 2) { si.param = 3.; }
+      else { MFEM_ABORT("Such a smoothness indicator is not implemented."); }
+      
       BilinearForm massH1(si.fesH1);
       massH1.AddDomainIntegrator(new MassIntegrator);
       massH1.Assemble();
       massH1.Finalize();
       si.Mmat = massH1.SpMat();
-      
-      DSmoother M_prec;
-      si.M_solver.SetPreconditioner(M_prec);
-      si.M_solver.SetOperator(si.Mmat);
-      
-      si.M_solver.iterative_mode = false;
-      si.M_solver.SetRelTol(1.e-12);
-      si.M_solver.SetAbsTol(0.0);
-      si.M_solver.SetMaxIter(100);
-      si.M_solver.SetPrintLevel(0);
       
       BilinearForm mlH1(si.fesH1);
       mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
@@ -1639,14 +1633,14 @@ int main(int argc, char *argv[])
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = min( 1., 5. * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
          }
       }
       else if (smth_ind == 2)
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), 5. );
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
          }
       }
       
@@ -1915,14 +1909,14 @@ int main(int argc, char *argv[])
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = min( 1., 5. * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
          }
       }
       else if (smth_ind == 2)
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), 5. );
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
          }
       }
 
@@ -2266,7 +2260,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp, bndN, bndP,
-             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
+             gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
              g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
@@ -2305,7 +2299,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 			{
 				for (k = 0; k < N; k++)
 				{
-					si_val(k) = min( 1., 5. * max(0., g_min(k)*g_max(k))
+					si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k))
 												/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
 				}
 			}
@@ -2314,7 +2308,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 				for (k = 0; k < N; k++)
 				{
 					si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                                    (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+                                    (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
 				}
 			}
 		}
@@ -2586,7 +2580,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 {
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
-   double sumP, sumN, uH, uL, tmp, umax, umin, mass, q = 5., eps = 1.E-15;
+   double sumP, sumN, uH, uL, tmp, umax, umin, mass, eps = 1.E-15;
    Vector AntiDiff(nd), g_min, g_max, si_val;
    ParGridFunction g(si.fesH1);
 
@@ -2605,7 +2599,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 		{
 			for (k = 0; k < N; k++)
 			{
-				si_val(k) = min( 1., 5. * max(0., g_min(k)*g_max(k))
+				si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k))
 											/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
 			}
 		}
@@ -2614,7 +2608,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 			for (k = 0; k < N; k++)
 			{
 				si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                                 (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), q );
+                                 (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
 			}
 		}
    }
