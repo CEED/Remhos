@@ -2483,7 +2483,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                                      / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                
-               if (smth_ind)
+               if (smth_ind) // TODO alphaGlob
                {
                   alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
