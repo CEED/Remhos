@@ -643,7 +643,7 @@ public:
       const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
                                              lom.MonoType != DiscUpw_FCT);
 
-      const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
+      const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
                                                   lom.MonoType == ResDist_FCT
                                      || lom.MonoType == ResDist_Monolithic );
 
@@ -652,7 +652,7 @@ public:
          bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
          bdrInt = 0.;
       }
-      if (NeedSubcells)
+      if (NeedSubWgts)
       {
          VolumeTerms = lom.VolumeTerms;
          SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
@@ -664,7 +664,7 @@ public:
       else { SubFes1 = fes; } // TODO dev
 
       // Initialization for transport mode.
-      if (exec_mode == 0 && (NeedBdr || NeedSubcells))
+      if (exec_mode == 0 && (NeedBdr || NeedSubWgts))
       {
          for (k = 0; k < ne; k++)
          {
@@ -680,7 +680,7 @@ public:
                   ComputeFluxTerms(k, i, Trans, lom);
                }
             }
-            if (NeedSubcells)
+            if (NeedSubWgts)
             {
                for (m = 0; m < dofs.numSubcells; m++)
                {
@@ -1399,7 +1399,7 @@ int main(int argc, char *argv[])
    DG_FECollection fec1(1, dim, btype);
 
    // For linear elements, OptScheme has already been disabled.
-   const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
+   const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
                                                lom.MonoType == ResDist_FCT ||
                                                lom.MonoType == ResDist_Monolithic);
    lom.subcell_mesh = NULL;
@@ -1412,7 +1412,7 @@ int main(int argc, char *argv[])
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
 
-   if (NeedSubcells)
+   if (order > 1)
    {
       // The mesh corresponding to Bezier subcells of order p is constructed.
       // NOTE: The mesh is assumed to consist of quads or hexes.
@@ -1789,7 +1789,7 @@ int main(int argc, char *argv[])
       if (exec_mode == 1)
       {
          add(x0, t, v_gf, x);
-         if (NeedSubcells) { add(x0_sub, t, v_sub_gf, *xsub); }
+         add(x0_sub, t, v_sub_gf, *xsub);
       }
 
       if (problem_num != 6 && problem_num != 7 && problem_num != 8)
@@ -1940,7 +1940,7 @@ int main(int argc, char *argv[])
    delete dc;
 
    delete lom.pk;
-   if (NeedSubcells)
+   if (NeedSubWgts)
    {
       delete asmbl.SubFes0;
       delete asmbl.SubFes1;
@@ -1956,7 +1956,7 @@ void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
    Vector y(n);
-   const double abs_tol = 1.e-10; // TODO
+   const double abs_tol = 1.e-4;
 
    x = 0.;
 
