@@ -655,7 +655,6 @@ public:
          SubFes1 = lom.SubFes1;
          subcell_mesh = lom.subcell_mesh;
       }
-      else { SubFes1 = fes; } // TODO dev
 
       // Initialization for transport mode.
       if (exec_mode == 0 && (NeedBdr || NeedSubWgts))
@@ -849,17 +848,17 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 	int k, i, j, m, e_id, dofInd, N = si.lumpedMH1.Size();
 	Array<int> vdofs, eldofs;
 	Vector xDofs(nd), tmp(nd), xEval(ne*nd);
-   Vector z1_tv(si.fesH1->GetTrueVSize()), z2_tv(si.fesH1->GetTrueVSize());
+   Vector rhs_tv(si.fesH1->GetTrueVSize()), z_tv(si.fesH1->GetTrueVSize());
 	
 	eldofs.SetSize(nd);
-	y.SetSize(N); // y = 0.; TODO unneccessary
-	Vector z1(N), z2(N);
+	y.SetSize(N);
+	Vector rhs(N), z(N);
 	
-	int iter, max_iter = 2; // TODO
-	const double abs_tol = 1.e-10; // TODO
+   // Approximate inversion, corresponding to Neumann series truncated after first two summands.
+	int iter, max_iter = 2; 
+	const double abs_tol = 1.e-10;
 	double resid;
-	
-	// 	xEval = x; // TODO xEval vs x Bernstein
+
 	for (k = 0; k < ne; k++)
 	{
 		for (j = 0; j < nd; j++) { eldofs[j] = k*nd + j; }
@@ -869,21 +868,21 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 		xEval.SetSubVector(eldofs, tmp);
 	}
 	
-	si.MassMixed->Mult(xEval, z1);
-   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z1, z1_tv);
-   si.fesH1->GetProlongationMatrix()->Mult(z1_tv, z1);
+	si.MassMixed->Mult(xEval, rhs);
+   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(rhs, rhs_tv);
+   si.fesH1->GetProlongationMatrix()->Mult(rhs_tv, rhs);
 
 	y = 0.;
 
    // Project x to a CG space (result is in y).
 	for (iter = 1; iter <= max_iter; iter++)
 	{
-		si.Mmat.Mult(y, z2);
-      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z2, z2_tv);
-      z2_tv -= z1_tv;
-      si.fesH1->GetProlongationMatrix()->Mult(z2_tv, z2);
+		si.Mmat.Mult(y, z);
+      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z, z_tv);
+      z_tv -= rhs_tv;
+      si.fesH1->GetProlongationMatrix()->Mult(z_tv, z);
 
-      double loc_res = z2_tv.Norml2();
+      double loc_res = z_tv.Norml2();
       loc_res *= loc_res;
       MPI_Allreduce(&loc_res, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
       resid = sqrt(resid);
@@ -892,24 +891,24 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 
 		for (i = 0; i < N; i++)
 		{
-			y(i) -= z2(i) / si.lumpedMH1(i);
+			y(i) -= z(i) / si.lumpedMH1(i);
 		}
 	}
 
-	si.LaplaceOp.Mult(y, z1);
-   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z1, z1_tv);
-   si.fesH1->GetProlongationMatrix()->Mult(z1_tv, z1);
+	si.LaplaceOp.Mult(y, rhs);
+   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(rhs, rhs_tv);
+   si.fesH1->GetProlongationMatrix()->Mult(rhs_tv, rhs);
 
 	y = 0.;
 	
 	for (iter = 1; iter <= max_iter; iter++)
 	{
-		si.Mmat.Mult(y, z2);
-      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z2, z2_tv);
-      z2_tv -= z1_tv;
-      si.fesH1->GetProlongationMatrix()->Mult(z2_tv, z2);
+		si.Mmat.Mult(y, z);
+      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(z, z_tv);
+      z_tv -= rhs_tv;
+      si.fesH1->GetProlongationMatrix()->Mult(z_tv, z);
 
-      double loc_res = z2_tv.Norml2();
+      double loc_res = z_tv.Norml2();
       loc_res *= loc_res;
       MPI_Allreduce(&loc_res, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
       resid = sqrt(resid);
@@ -918,7 +917,7 @@ void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
 
 		for (i = 0; i < N; i++)
 		{
-			y(i) -= z2(i) / si.lumpedMH1(i);
+			y(i) -= z(i) / si.lumpedMH1(i);
 		}
 	}
 }
@@ -1271,14 +1270,17 @@ int main(int argc, char *argv[])
 
    // Fields related to inflow BC.
    FunctionCoefficient inflow(inflow_function);
-   L2_FECollection l2_fec(order, dim);
-   ParFiniteElementSpace l2_fes(&pmesh, &l2_fec);
-   ParGridFunction l2_inflow(&l2_fes);
-   l2_inflow.ProjectCoefficient(inflow);
    ParGridFunction inflow_gf(&pfes);
+   if (problem_num == 7) // Convergence test: use high order projection.
+   {
+      L2_FECollection l2_fec(order, dim);
+      ParFiniteElementSpace l2_fes(&pmesh, &l2_fec);
+      ParGridFunction l2_inflow(&l2_fes);
+      l2_inflow.ProjectCoefficient(inflow);
+      inflow_gf.ProjectGridFunction(l2_inflow);
+   }
+   else { inflow_gf.ProjectCoefficient(inflow); }
 
-//   inflow_gf.ProjectCoefficient(inflow);
-  inflow_gf.ProjectGridFunction(l2_inflow); // TODO
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
@@ -1762,7 +1764,7 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (MonoType != None)
+      if (MonoType != None && !smth_ind)
       {
          double umin_new, umax_new;
          GetMinMax(u, umin_new, umax_new);
