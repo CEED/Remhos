@@ -1518,147 +1518,146 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
-   // Smoothness indicator. TODO every step for remap
+   // Smoothness indicator.
    SmoothnessIndicator si;
-   Vector g_min, g_max;
-   
    H1_FECollection H1fec(1, dim, btype);
-   
    si.fesH1 = new ParFiniteElementSpace(lom.subcell_mesh, &H1fec);
    
-   BilinearForm massH1(si.fesH1);
-   massH1.AddDomainIntegrator(new MassIntegrator);
-   massH1.Assemble();
-   massH1.Finalize();
-	si.Mmat = massH1.SpMat();
-	
-	DSmoother M_prec;
-	si.M_solver.SetPreconditioner(M_prec);
-   si.M_solver.SetOperator(si.Mmat);
-
-   si.M_solver.iterative_mode = false;
-   si.M_solver.SetRelTol(1.e-12);
-   si.M_solver.SetAbsTol(0.0);
-   si.M_solver.SetMaxIter(100);
-   si.M_solver.SetPrintLevel(0);
-   
-   BilinearForm mlH1(si.fesH1);
-   mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
-   mlH1.Assemble();
-	mlH1.Finalize();
-   mlH1.SpMat().GetDiag(si.lumpedMH1);
-
-   Vector lumped_hv(si.fesH1->GetTrueVSize());
-   si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(si.lumpedMH1, lumped_hv);
-   si.fesH1->GetProlongationMatrix()->Mult(lumped_hv, si.lumpedMH1);
-   
-	si.MassMixed = new SparseMatrix(si.fesH1->GetVSize(), pfes.GetVSize());
-	si.MassInt = new MassIntegrator;
-	
-   ConstantCoefficient neg_one(-1.);
-	BilinearForm lap(si.fesH1);
-	lap.AddDomainIntegrator(new DiffusionIntegrator(neg_one));
-	lap.AddBdrFaceIntegrator(new DGDiffusionIntegrator(neg_one, 0., 0.));
-	lap.Assemble();
-	lap.Finalize();
-	si.LaplaceOp = lap.SpMat();
-   
-   // Stores the index for the dof of H1-conforming for each node.
-   // If the node is on the boundary, the entry is -1.
-   si.DG2CG.SetSize(ne*nd);
-   Array<int> vdofs;
-   int e, i, j, e_id;
-   
-   for (e = 0; e < ne; e++)
+   // TODO assemble matrices every RK stage step for remap.
+   if (smth_ind)
    {
-      for (i = 0; i < dofs.numSubcells; i++)
-      {
-         e_id = e*dofs.numSubcells + i;
-         si.fesH1->GetElementVDofs(e_id, vdofs);
-         
-         // Switchero - numbering CG vs DG.
-         si.DG2CG(e*nd + dofs.Sub2Ind(i, 0)) = vdofs[0];
-         si.DG2CG(e*nd + dofs.Sub2Ind(i, 1)) = vdofs[1];
-         if (dim > 1)
-         {
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 2)) = vdofs[3];
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 3)) = vdofs[2];
-         }
-         if (dim == 3)
-         {
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 4)) = vdofs[4];
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 5)) = vdofs[5];
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 6)) = vdofs[7];
-            si.DG2CG(e*nd + dofs.Sub2Ind(i, 7)) = vdofs[6];
-         }
-      }
+      BilinearForm massH1(si.fesH1);
+      massH1.AddDomainIntegrator(new MassIntegrator);
+      massH1.Assemble();
+      massH1.Finalize();
+      si.Mmat = massH1.SpMat();
       
-      // Domain boundaries.
-      for (i = 0; i < dofs.numBdrs; i++)
+      DSmoother M_prec;
+      si.M_solver.SetPreconditioner(M_prec);
+      si.M_solver.SetOperator(si.Mmat);
+      
+      si.M_solver.iterative_mode = false;
+      si.M_solver.SetRelTol(1.e-12);
+      si.M_solver.SetAbsTol(0.0);
+      si.M_solver.SetMaxIter(100);
+      si.M_solver.SetPrintLevel(0);
+      
+      BilinearForm mlH1(si.fesH1);
+      mlH1.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
+      mlH1.Assemble();
+      mlH1.Finalize();
+      mlH1.SpMat().GetDiag(si.lumpedMH1);
+      
+      Vector lumped_hv(si.fesH1->GetTrueVSize());
+      si.fesH1->Dof_TrueDof_Matrix()->MultTranspose(si.lumpedMH1, lumped_hv);
+      si.fesH1->GetProlongationMatrix()->Mult(lumped_hv, si.lumpedMH1);
+      
+      si.MassMixed = new SparseMatrix(si.fesH1->GetVSize(), pfes.GetVSize());
+      si.MassInt = new MassIntegrator;
+      
+      ConstantCoefficient neg_one(-1.);
+      BilinearForm lap(si.fesH1);
+      lap.AddDomainIntegrator(new DiffusionIntegrator(neg_one));
+      lap.AddBdrFaceIntegrator(new DGDiffusionIntegrator(neg_one, 0., 0.));
+      lap.Assemble();
+      lap.Finalize();
+      si.LaplaceOp = lap.SpMat();
+      
+      // Stores the index for the dof of H1-conforming for each node.
+      // If the node is on the boundary, the entry is -1.
+      si.DG2CG.SetSize(ne*nd);
+      Array<int> vdofs;
+      int e, i, j, e_id;
+      
+      for (e = 0; e < ne; e++)
       {
-         for (j = 0; j < dofs.numFaceDofs; j++)
+         for (i = 0; i < dofs.numSubcells; i++)
          {
-            if (dofs.NbrDof(e,i,j) < 0)
+            e_id = e*dofs.numSubcells + i;
+            si.fesH1->GetElementVDofs(e_id, vdofs);
+            
+            // Switchero - numbering CG vs DG.
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 0)) = vdofs[0];
+            si.DG2CG(e*nd + dofs.Sub2Ind(i, 1)) = vdofs[1];
+            if (dim > 1)
             {
-               si.DG2CG(e*nd+dofs.BdrDofs(j,i)) = -1;
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 2)) = vdofs[3];
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 3)) = vdofs[2];
+            }
+            if (dim == 3)
+            {
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 4)) = vdofs[4];
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 5)) = vdofs[5];
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 6)) = vdofs[7];
+               si.DG2CG(e*nd + dofs.Sub2Ind(i, 7)) = vdofs[6];
+            }
+         }
+         
+         // Domain boundaries.
+         for (i = 0; i < dofs.numBdrs; i++)
+         {
+            for (j = 0; j < dofs.numFaceDofs; j++)
+            {
+               if (dofs.NbrDof(e,i,j) < 0)
+               {
+                  si.DG2CG(e*nd+dofs.BdrDofs(j,i)) = -1;
+               }
             }
          }
       }
-   }
+      
+      ComputeVariationalMatrix(si, ne, nd, dofs);
+      
+      IntegrationRule *ir;
+      IntegrationRule irX;
+      QuadratureFunctions1D qf;
+      qf.ClosedUniform(order+1, &irX);
+      Vector shape(nd);
+      
+      if (dim == 1) { ir = &irX; }
+      if (dim == 2) { ir = new IntegrationRule(irX, irX); }
+      if (dim == 3) { ir = new IntegrationRule(irX, irX, irX); }
+      
+      si.ShapeEval.SetSize(nd, nd); // nd equals ir->GetNPoints().
+      
+      for (i = 0; i < ir->GetNPoints(); i++)
+      {
+         const IntegrationPoint &ip = ir->IntPoint(i);
+         pfes.GetFE(0)->CalcShape(ip, shape);
+         si.ShapeEval.SetCol(i, shape);
+      }
+      si.ShapeEval.Transpose();
+      
+      ParGridFunction g(si.fesH1), si_val(si.fesH1);
+      const int N = g.Size();
+      Vector g_min(N), g_max(N);
+      
+      ApproximateLaplacian(si, ne, nd, dofs, u, g);
+      ComputeFromSparsity(si.Mmat, g, g_min, g_max);
+      
+      if (smth_ind == 1)
+      {
+         for (int e = 0; e < N; e++)
+         {
+            si_val(e) = min( 1., 5. * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+         }
+      }
+      else if (smth_ind == 2)
+      {
+         for (int e = 0; e < N; e++)
+         {
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), 5. );
+         }
+      }
+      
+      if (dim > 1) { delete ir; }
 
-   ComputeVariationalMatrix(si, ne, nd, dofs);
-   
-   IntegrationRule *ir;
-   IntegrationRule irX;
-   QuadratureFunctions1D qf;
-   qf.ClosedUniform(order+1, &irX);
-   Vector shape(nd);
-   
-   if (dim == 1) { ir = &irX; }
-   if (dim == 2) { ir = new IntegrationRule(irX, irX); }
-   if (dim == 3) { ir = new IntegrationRule(irX, irX, irX); }
-   
-   si.ShapeEval.SetSize(nd, nd); // nd equals ir->GetNPoints().
-   
-   for (i = 0; i < ir->GetNPoints(); i++)
-   {
-      const IntegrationPoint &ip = ir->IntPoint(i);
-      pfes.GetFE(0)->CalcShape(ip, shape);
-      si.ShapeEval.SetCol(i, shape);
-   }
-   si.ShapeEval.Transpose();
-
-   ParGridFunction g(si.fesH1), si_val(si.fesH1);
-   ApproximateLaplacian(si, ne, nd, dofs, u, g);
-   
-   const int N = g.Size();
-	const double q = 5.; // TODO
-
-   g_min.SetSize(N); g_max.SetSize(N);
-   ComputeFromSparsity(si.Mmat, g, g_min, g_max);
-
-	if (smth_ind == 1)
-	{
-		for (int e = 0; e < N; e++)
-		{
-			si_val(e) = min( 1., q * max(0., g_min(e)*g_max(e))
-										/ (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
-		}
-	}
-	else if (smth_ind == 2)
-	{
-		for (int e = 0; e < N; e++)
-		{
-			si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
-										(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
-		}
-	}
-   
-   // Print the values of the smoothness indicator.
-   {
-      ofstream si("si_init.gf");
-      si.precision(precision);
-      si_val.Save(si); // TODO SaveAsOne
+      // Print the values of the smoothness indicator.
+      {
+         ofstream smth("si_init.gf");
+         smth.precision(precision);
+         si_val.SaveAsOne(smth);
+      }
    }
 
    // Print the starting meshes and initial condition.
@@ -1903,45 +1902,62 @@ int main(int argc, char *argv[])
       }
    }
 
-   ApproximateLaplacian(si, ne, nd, dofs, u, g);
-   ComputeFromSparsity(si.Mmat, g, g_min, g_max);
-
-	if (smth_ind == 1)
-	{
-		for (int e = 0; e < N; e++)
-		{
-			si_val(e) = min( 1., q * max(0., g_min(e)*g_max(e))
-										/ (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
-		}
-	}
-	else if (smth_ind == 2)
-	{
-		for (int e = 0; e < N; e++)
-		{
-			si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) /
-										(abs(g_min(e)) + abs(g_max(e)) + 1.E-50), q );
-		}
-	}
-   
-   // Print the values of the smoothness indicator.
+   if (smth_ind)
    {
-      ofstream si("si_final.gf");
-      si.precision(precision);
-      si_val.Save(si);
+      ParGridFunction g(si.fesH1), si_val(si.fesH1);
+      const int N = g.Size();
+      Vector g_min(N), g_max(N);
+      
+      ApproximateLaplacian(si, ne, nd, dofs, u, g);
+      ComputeFromSparsity(si.Mmat, g, g_min, g_max);
+
+      if (smth_ind == 1)
+      {
+         for (int e = 0; e < N; e++)
+         {
+            si_val(e) = min( 1., 5. * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+         }
+      }
+      else if (smth_ind == 2)
+      {
+         for (int e = 0; e < N; e++)
+         {
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), 5. );
+         }
+      }
+
+      // Print the values of the smoothness indicator.
+      {
+         ofstream smth("si_final.gf");
+         smth.precision(precision);
+         si_val.SaveAsOne(smth);
+      }
    }
 
    // 10. Free the used memory. //TODO
    delete ode_solver;
+   delete mesh_fec;
    delete k_hypre;
-   delete dc;
-
    delete lom.pk;
-   if (NeedSubWgts)
+   delete si.fesH1;
+   delete adv;
+   delete dc;
+   
+   if (order > 1)
    {
-      delete asmbl.SubFes0;
-      delete asmbl.SubFes1;
-      delete asmbl.VolumeTerms;
       delete lom.subcell_mesh;
+      delete fec_sub;
+      delete pfes_sub;
+      delete xsub;
+      delete lom.SubFes0;
+      delete lom.SubFes1;
+      delete lom.VolumeTerms;
+   }
+   
+   if (smth_ind)
+   {
+      delete si.MassMixed;
+      delete si.MassInt;
    }
 
    return 0;
