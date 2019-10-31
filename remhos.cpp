@@ -1934,7 +1934,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   // 10. Free the used memory. //TODO
+   // 10. Free the used memory.
    delete ode_solver;
    delete mesh_fec;
    delete k_hypre;
@@ -2265,17 +2265,15 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       int N, I, m, dofInd2, loc, it, CtrIt, ctr = 0, max_iter = 100;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
-             uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp,
-             XMIN = x.Min(), XMAX = x.Max(), // TODO q
-             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15; 
+             uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp, bndN, bndP,
+             q = 5., gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
       Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
              fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
              g_min, g_max, si_val, m_it(nd), uDot(nd), res(nd), alpha1(nd);
       ParGridFunction g(si.fesH1);
 
-      bool UseMassLim = problem_num != 6 && problem_num != 7 && problem_num != 8; // TODO problem_num 8 wrsl weg
+      bool UseMassLim = problem_num != 6 && problem_num != 7;
       double* Mij = M.GetData();
-      bool UseAlphaGlob = true;
 
       if (!UseMassLim) { max_iter = -1; }
       alpha1 = 1.;
@@ -2338,15 +2336,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             if (smth_ind)
             {
 					tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
-					double bndN = tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) + (1.-tmp) * dofs.xi_min(dofInd);
-					double bndP = tmp * (2.*x(dofInd) - dofs.xi_min(dofInd)) + (1.-tmp) * dofs.xi_max(dofInd);
-					
-					if (UseAlphaGlob)
-               {
-						bndN = max(0., bndN);
-						bndP = min(1., bndP);
-					}
-					
+					bndN = max( 0., tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) + (1.-tmp) * dofs.xi_min(dofInd) );
+					bndP = min( 1., tmp * (2.*x(dofInd) - dofs.xi_min(dofInd)) + (1.-tmp) * dofs.xi_max(dofInd) );
+
                if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd) + eps)
 					{
 						alpha(j) = min(1., beta*(x(dofInd) - bndN) / (dofs.xi_max(dofInd) - x(dofInd) + eps));
@@ -2512,9 +2504,9 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd), x(dofInd) - dofs.xi_min(dofInd)) 
                                                      / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                
-               if (smth_ind) // TODO alphaGlob
+               if (smth_ind) // TODO use alphaGlob according to idea in paper
                {
-                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN)
+                  alphaGlob = min( 1., beta * lom.scale(k) * min(1. - x(dofInd), x(dofInd) - 0.)
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
@@ -2594,11 +2586,9 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 {
    int j, k, dofInd, N, ne = lom.fes->GetMesh()->GetNE(), 
        nd = lom.fes->GetFE(0)->GetDof();
-   double sumP, sumN, uH, uL, tmp, umax, umin, mass,
-          XMIN = x.Min(), XMAX = x.Max(), q = 5., eps = 1.E-15;  // TODO q
+   double sumP, sumN, uH, uL, tmp, umax, umin, mass, q = 5., eps = 1.E-15;
    Vector AntiDiff(nd), g_min, g_max, si_val;
    ParGridFunction g(si.fesH1);
-	bool UseAlphaGlob = true; // TODO
 
    dofs.ComputeBounds();
    
@@ -2642,14 +2632,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
          if (smth_ind)
 			{
             tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
-				umin = tmp * uH + (1. - tmp) * dofs.xi_min(dofInd);
-            umax = tmp * uH + (1. - tmp) * dofs.xi_max(dofInd);
-				
-				if (UseAlphaGlob)
-				{
-					umin = max(umin, 0.);
-					umax = min(umax, 1.);
-				}
+				umin = max( 0., tmp * uH + (1. - tmp) * dofs.xi_min(dofInd) );
+            umax = min( 1., tmp * uH + (1. - tmp) * dofs.xi_max(dofInd) );
          }
          else
 			{
