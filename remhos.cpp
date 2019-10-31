@@ -221,33 +221,27 @@ void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
    }
 }
 
-// Appropriate quadrature rule for faces of is obtained.
-// TODO: check if this gives the desired order. I use the same order for all
-// faces. In DGTraceIntegrator it uses the min of OrderW, why?
+// Appropriate quadrature rule for faces according to DGTraceIntegrator.
 const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
 {
-   int i, qOrdF;
-   Mesh* mesh = fes->GetMesh();
-   FaceElementTransformations *Trans;
-
-   // Use the first mesh face with two elements as indicator.
-   for (i = 0; i < mesh->GetNumFaces(); i++)
+   int i, order;
+   // Use the first mesh face and element as indicator.
+   const FaceElementTransformations *Trans = fes->GetMesh()->GetFaceElementTransformations(0);
+   const FiniteElement *el = fes->GetFE(0);
+   
+   if (Trans->Elem2No >= 0)
    {
-      Trans = mesh->GetFaceElementTransformations(i);
-      // TODO this resets the value and the loop is useless.
-      qOrdF = Trans->Elem1->OrderW();
-      if (Trans->Elem2No >= 0)
-      {
-         // qOrdF is chosen such that L2-norm of basis functions is computed
-         // accurately.
-         qOrdF = max(qOrdF, Trans->Elem2->OrderW());
-         break;
-      }
+      order = min(Trans->Elem1->OrderW(), Trans->Elem2->OrderW()) + 2*el->GetOrder();
    }
-   // Use the first mesh element as indicator.
-   qOrdF += 2 * fes->GetFE(0)->GetOrder();
-
-   return &IntRules.Get(Trans->FaceGeom, qOrdF);
+   else
+   {
+      order = Trans->Elem1->OrderW() + 2*el->GetOrder();
+   }
+   if (el->Space() == FunctionSpace::Pk)
+   {
+      order++;
+   }
+   return &IntRules.Get(Trans->FaceGeom, order);
 }
 
 // Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped
