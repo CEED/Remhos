@@ -828,6 +828,8 @@ public:
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs);
 
    virtual void Mult(const Vector &x, Vector &y) const;
+   
+   virtual double TimeStepControl(const Vector &x, Vector &y) const;
 
    virtual void SetDt(double _dt) { dt = _dt; }
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
@@ -844,7 +846,7 @@ public:
                                   Vector &y, const Vector &alpha) const;
 
    virtual void ComputeHighOrderSolution(const Vector &x, Vector &y) const;
-   virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
+   virtual double ComputeLowOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeFCTSolution(const Vector &x, const Vector &yH,
                                    const Vector &yL, Vector &y) const;
 
@@ -1401,13 +1403,16 @@ int main(int argc, char *argv[])
    }
 
    bool done = false;
+   ParGridFunction v(&pfes);
    for (int ti = 0; !done; )
    {
       double dt_real = min(dt, t_final - t);
 
       adv->SetDt(dt_real);
 
-      ode_solver->Step(u, t, dt_real);
+      dt_real = adv->ComputeLowOrderSolution(u, v);
+      u = v;
+      t = t + dt_real;
       ti++;
 
       // Monotonicity check for debug purposes mainly.
@@ -1530,6 +1535,32 @@ int main(int argc, char *argv[])
 }
 
 
+double FE_Evolution::TimeStepControl(const Vector &x, Vector &y) const
+{
+   int n = x.Size();
+   double cfl = 1., eps = 1.E-10, dt_new = dt;
+   
+   dofs.ComputeBounds();
+   
+   for (int i = 0; i < n; i++)
+   {
+      if (y(i) > eps) { dt_new = min(dt_new, (dofs.xi_max(i) - x(i)) / (y(i)+eps) );
+         if (dofs.xi_max(i) - x(i) < 0.)
+         {
+            cout << dofs.xi_max(i) - x(i) << " " << y(i) << endl;
+            MFEM_ABORT("+");
+         }
+      }
+      else if (y(i) < - eps) { dt_new = min(dt_new, (dofs.xi_min(i) - x(i)) / (y(i)-eps) );
+         if (dofs.xi_min(i) - x(i) > 0.)
+            MFEM_ABORT("-");
+      }
+   }
+   cout << dt_new << endl;
+   if (dt_new < eps) { cout << dt_new << endl; MFEM_ABORT("Time step too small."); }
+   return cfl*dt_new;
+}
+
 void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
 {
    int i, iter, n = f.Size(), max_iter = 20;
@@ -1596,7 +1627,7 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
    }
 }
 
-void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
+double FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 {
    const FiniteElement* dummy = lom.fes->GetFE(0);
    int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
@@ -1772,6 +1803,10 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          }
       }
    }
+   double dt_adpt = TimeStepControl(x, y);
+   cout << dt_adpt << endl;
+   add(x, dt_adpt, y, z);
+   y = z;
 }
 
 // No monotonicity treatment, straightforward high-order scheme
