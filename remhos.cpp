@@ -2617,8 +2617,6 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 		}
    }
 
-   dofs.ComputeBounds();
-
    // Monotonicity terms
    for (k = 0; k < ne; k++)
    {
