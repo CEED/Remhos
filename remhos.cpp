@@ -1040,7 +1040,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 1;
    MONOTYPE MonoType = ResDist_Monolithic;
    bool OptScheme = true;
-   smth_ind = 2;
+   smth_ind = 1;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
@@ -1083,8 +1083,8 @@ int main(int argc, char *argv[])
                   "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&smth_ind, "-si", "--smth_ind",
                   "Smoothness indicator: 0 - no smoothness indicator,\n\t"
-                  "                      1 - exact_quadratic,\n\t"
-                  "                      2 - approx_quadratic.");
+                  "                      1 - approx_quadratic,\n\t"
+                  "                      2 - exact_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
@@ -1523,7 +1523,7 @@ int main(int argc, char *argv[])
    H1_FECollection H1fec(1, dim, btype);
    si.fesH1 = new ParFiniteElementSpace(lom.subcell_mesh, &H1fec);
    
-   // TODO assemble matrices every RK stage step for remap.
+   // TODO assemble SI matrices every RK stage for remap.
    if (smth_ind)
    {
       if (smth_ind == 1) { si.param = 5.; }
@@ -1633,14 +1633,14 @@ int main(int argc, char *argv[])
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
          }
       }
       else if (smth_ind == 2)
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
+            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
          }
       }
       
@@ -1909,14 +1909,14 @@ int main(int argc, char *argv[])
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
          }
       }
       else if (smth_ind == 2)
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(e)) + abs(g_max(e)) + 1.E-50), si.param );
+            si_val(e) = min( 1., si.param * max(0., g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
          }
       }
 
@@ -2299,16 +2299,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 			{
 				for (k = 0; k < N; k++)
 				{
-					si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k))
-												/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+					si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) / (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
 				}
 			}
 			else if (smth_ind == 2)
 			{
 				for (k = 0; k < N; k++)
 				{
-					si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                                    (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
+               si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k)) / (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
 				}
 			}
 		}
@@ -2599,16 +2597,14 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 		{
 			for (k = 0; k < N; k++)
 			{
-				si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k))
-											/ (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+				si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) / (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
 			}
 		}
 		if (smth_ind == 2)
 		{
 			for (k = 0; k < N; k++)
 			{
-				si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) /
-                                 (abs(g_min(k)) + abs(g_max(k)) + 1.E-50), si.param );
+            si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k)) / (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
 			}
 		}
    }
