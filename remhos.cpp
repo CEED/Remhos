@@ -1189,6 +1189,41 @@ int main(int argc, char *argv[])
    Vector x0(x.Size());
    x0 = x;
 
+   // Velocity for the problem. Depending on the execution mode, this is the
+   // advective velocity (transport) or mesh velocity (remap).
+   VectorFunctionCoefficient velocity(dim, velocity_function);
+
+   // Mesh velocity.
+   GridFunction v_gf(x.FESpace());
+   VectorGridFunctionCoefficient v_coef(&v_gf);
+
+   // If remap is on, obtain the mesh velocity by moving the mesh to the final
+   // mesh positions, and taking the displacement vector.
+   // The mesh motion resembles a time-dependent deformation, e.g., similar to
+   // a deformation that is obtained by a Lagrangian simulation.
+   if (exec_mode == 1)
+   {
+      ParGridFunction v(&mesh_pfes);
+      VectorFunctionCoefficient vcoeff(dim, velocity_function);
+      v.ProjectCoefficient(vcoeff);
+
+      double t = 0.0;
+      while(t < t_final)
+      {
+         t += dt;
+         // Move the mesh nodes.
+         x.Add(std::min(dt, t_final-t), v);
+         // Update the node velocities.
+         v.ProjectCoefficient(vcoeff);
+      }
+
+      // Pseudotime velocity.
+      add(x, -1.0, x0, v_gf);
+
+      // Return the mesh to the initial configuration.
+      x = x0;
+   }
+
    // 5. Define the discontinuous DG finite element space of the given
    //    polynomial order on the refined mesh.
    const int btype = BasisType::Positive;
@@ -1250,27 +1285,6 @@ int main(int argc, char *argv[])
 
 //   inflow_gf.ProjectCoefficient(inflow);
   inflow_gf.ProjectGridFunction(l2_inflow); // TODO
-
-   // Velocity for the problem. Depending on the execution mode, this is the
-   // advective velocity (transport) or mesh velocity (remap).
-   VectorFunctionCoefficient velocity(dim, velocity_function);
-
-   // Mesh velocity. Note that the resulting coefficient will be evaluated in
-   // logical space.
-   GridFunction v_gf(x.FESpace());
-   v_gf.ProjectCoefficient(velocity);
-   if (pmesh.bdr_attributes.Size() > 0)
-   {
-      // Zero it out on boundaries (not moving boundaries).
-      Array<int> ess_bdr(pmesh.bdr_attributes.Max()), ess_vdofs;
-      ess_bdr = 1;
-      x.FESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-      for (int i = 0; i < v_gf.Size(); i++)
-      {
-         if (ess_vdofs[i] == -1) { v_gf(i) = 0.0; }
-      }
-   }
-   VectorGridFunctionCoefficient v_coef(&v_gf);
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
@@ -1384,12 +1398,10 @@ int main(int argc, char *argv[])
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
 
-   // For linear elements, Opt scheme has already been disabled.
+   // For linear elements, OptScheme has already been disabled.
    const bool NeedSubcells = lom.OptScheme && (lom.MonoType == ResDist ||
                                                lom.MonoType == ResDist_FCT ||
                                                lom.MonoType == ResDist_Monolithic);
-   // Create the low order refined submesh.
-   
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
@@ -1403,9 +1415,8 @@ int main(int argc, char *argv[])
    if (NeedSubcells)
    {
       // The mesh corresponding to Bezier subcells of order p is constructed.
-      // NOTE: The mesh is assumed to consist of segments, quads or hexes.
-
-      MFEM_VERIFY(order > 1, "This function should not be called with p = 1.");
+      // NOTE: The mesh is assumed to consist of quads or hexes.
+      MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
       MFEM_VERIFY(dim > 1, "Not implemented for dim = 1");
 
       // Get a uniformly refined mesh.
@@ -1733,8 +1744,14 @@ int main(int argc, char *argv[])
 
    double umin, umax;
    GetMinMax(u, umin, umax);
+   
+   if (exec_mode == 1)
+   {
+      adv->SetRemapStartPos(x0, x0_sub);
 
-   if (exec_mode == 1) { adv->SetRemapStartPos(x0, x0_sub); }
+      // For remap, the pseudotime always evolves from 0 to 1.
+      t_final = 1.0;
+   }
    
    ParGridFunction res = u;
    bool converged = false;
@@ -1751,23 +1768,23 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-//       if (MonoType != None)
-//       {
-//          double umin_new, umax_new;
-//          GetMinMax(u, umin_new, umax_new);
-//          if (problem_num % 10 != 6 && problem_num % 10 != 7)
-//          {
-//             MFEM_VERIFY(umin_new > umin - 1e-12, "Undershoot");
-//             MFEM_VERIFY(umax_new < umax + 1e-12, "Overshoot");
-//             umin = umin_new;
-//             umax = umax_new;
-//          }
-//          else
-//          {
-//             MFEM_VERIFY(umin_new > 0.0 - 1e-12, "Undershoot");
-//             MFEM_VERIFY(umax_new < 1.0 + 1e-12, "Overshoot");
-//          }
-//       }
+      if (MonoType != None)
+      {
+         double umin_new, umax_new;
+         GetMinMax(u, umin_new, umax_new);
+         if (problem_num % 10 != 6 && problem_num % 10 != 7)
+         {
+            MFEM_VERIFY(umin_new > umin - 1e-12, "Undershoot");
+            MFEM_VERIFY(umax_new < umax + 1e-12, "Overshoot");
+            umin = umin_new;
+            umax = umax_new;
+         }
+         else
+         {
+            MFEM_VERIFY(umin_new > 0.0 - 1e-12, "Undershoot");
+            MFEM_VERIFY(umax_new < 1.0 + 1e-12, "Overshoot");
+         }
+      }
 
       if (exec_mode == 1)
       {
@@ -1801,7 +1818,7 @@ int main(int argc, char *argv[])
                  << residual << endl;
          }
 
-                  if (visualization)
+         if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
@@ -1862,7 +1879,7 @@ int main(int argc, char *argv[])
       double err = u.ComputeLpError(1., u0);
       if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
    }
-   else if (problem_num == 7 || problem_num == 8)
+   else if (problem_num == 7)
    {
       FunctionCoefficient u_ex(inflow_function);
       double e1 = u.ComputeLpError(1., u_ex);
@@ -2370,8 +2387,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
             // compute min-/max-values and the fluctuation for subcells
             for (m = 0; m < dofs.numSubcells; m++)
             {
-               xMinSubcell(m) = numeric_limits<double>::infinity();
-               xMaxSubcell(m) = -xMinSubcell(m);
+               xMinSubcell(m) =   numeric_limits<double>::infinity();
+               xMaxSubcell(m) = - numeric_limits<double>::infinity();;
                fluct = xSum = 0.;
 
                if (exec_mode == 1)
@@ -2457,7 +2474,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                
                dofInd = k*nd+i;
                m_it(i) = 0.;
-					// NOTE: This will only work in serial.
+               // NOTE: This will only work in serial.
                for (j = nd-1; j >= 0; j--) // run backwards through columns
                {
                   m_it(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
@@ -2485,7 +2502,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                
                if (smth_ind) // TODO alphaGlob
                {
-                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN) // TODO
+                  alphaGlob = min( 1., beta * lom.scale(k) * min(XMAX - x(dofInd), x(dofInd) - XMIN)
                                                           / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
                   tmp = si.DG2CG(dofInd) < 0. ? 1. : si_val(si.DG2CG(dofInd));
                   alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
@@ -2599,6 +2616,8 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 			}
 		}
    }
+
+   dofs.ComputeBounds();
 
    // Monotonicity terms
    for (k = 0; k < ne; k++)
@@ -2883,18 +2902,33 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 10:
       case 11:
+      {
+         // Gresho deformation used for mesh motion in remap tests.
+
+         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
+         if (r < 0.2)
+         {
+            v(0) =  5.0 * x(1);
+            v(1) = -5.0 * x(0);
+         }
+         else if (r < 0.4)
+         {
+            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
+            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
+         }
+         else { v = 0.0; }
+         break;
+      }
       case 12:
       case 13:
       case 14:
       case 15:
       case 16:
+      case 10:
       case 17:
-      case 18:
       {
-         // Taylor-Green velocity, used for mesh motion in remap tests used for
-         // all possible initial conditions.
+         // Taylor-Green deformation used for mesh motion in remap tests.
 
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
@@ -3167,13 +3201,12 @@ double u0_function(const Vector &x)
          }
          else { return 0.; }
       }
-      case 7: 
-		{
-			double r = x.Norml2();
-			double a = 0.5, b = 3.e-2, c = 0.1;  
-			return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
-		}
-      case 8: { return .5*(cos(M_PI*X(0))*cos(M_PI*X(1)) + 1.); }
+      case 7:
+      {
+         double r = x.Norml2();
+         double a = 0.5, b = 3.e-2, c = 0.1;  
+         return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+      }
    }
    return 0.0;
 }
@@ -3221,7 +3254,7 @@ double inflow_function(const Vector &x)
    else if ((problem_num % 10) == 7)
    {
       double a = 0.5, b = 3.e-2, c = 0.1;  
-		return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+      return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
    }
    else { return 0.0; }
 }
