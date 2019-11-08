@@ -1225,7 +1225,7 @@ int main(int argc, char *argv[])
 
    // The min and max bounds are represented as CG functions of the same order
    // as the solution, thus having 1:1 dof correspondence inside each element.
-   H1_FECollection fec_bounds(order, dim, BasisType::GaussLobatto);
+   H1_FECollection fec_bounds(max(order, 1), dim, BasisType::GaussLobatto);
    ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
 
    // Check for meaningful combinations of parameters.
@@ -1298,7 +1298,7 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
-   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && (!OptScheme))
+   if (MonoType == None || ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && (!OptScheme)))
    {
       if (exec_mode == 0)
       {
@@ -2553,7 +2553,7 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
    // Get the MPI neighbor values.
-   if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
+   if (lom.MonoType != None && (lom.MonoType != DiscUpw_FCT || lom.OptScheme))
    {
       // The face contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
@@ -2705,8 +2705,9 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.SpMat().GetDiag(lumpedM);
 
       // Boundary contributions.
-      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                             lom.MonoType != DiscUpw_FCT);
+      const bool NeedBdr = (lom.OptScheme || (lom.MonoType != DiscUpw &&
+                                              lom.MonoType != DiscUpw_FCT))
+                           && lom.MonoType != None;
       if (NeedBdr)
       {
          asmbl.bdrInt = 0.;
