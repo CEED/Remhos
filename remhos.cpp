@@ -1036,11 +1036,11 @@ int main(int argc, char *argv[])
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
-   int mesh_order = 1;
-   int ode_solver_type = 1;
-   MONOTYPE MonoType = ResDist_Monolithic;
+   int mesh_order = 2;
+   int ode_solver_type = 3;
+   MONOTYPE MonoType = ResDist_FCT;
    bool OptScheme = true;
-   smth_ind = 1;
+   smth_ind = 0;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
