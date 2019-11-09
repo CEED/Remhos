@@ -829,7 +829,7 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
    
-   virtual double TimeStepControl(const Vector &x, Vector &y) const;
+   virtual double TimeStepControl(const Vector &x, const Vector &y) const;
 
    virtual void SetDt(double _dt) { dt = _dt; }
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
@@ -1535,29 +1535,32 @@ int main(int argc, char *argv[])
 }
 
 
-double FE_Evolution::TimeStepControl(const Vector &x, Vector &y) const
+double FE_Evolution::TimeStepControl(const Vector &x, const Vector &y) const
 {
    int n = x.Size();
-   double cfl = 1., eps = 1.E-10, dt_new = dt;
+   double dt_new = dt, cfl = 0.5, eps = 1.e-15, dt_min = 1.e-6;
    
    dofs.ComputeBounds();
    
    for (int i = 0; i < n; i++)
    {
-      if (y(i) > eps) { dt_new = min(dt_new, (dofs.xi_max(i) - x(i)) / (y(i)+eps) );
-         if (dofs.xi_max(i) - x(i) < 0.)
-         {
-            cout << dofs.xi_max(i) - x(i) << " " << y(i) << endl;
-            MFEM_ABORT("+");
-         }
+      if (y(i) > eps)
+      {
+         // if (abs(dofs.xi_max(i) - x(i)) < eps) { continue; }
+         dt_new = min(dt_new, (dofs.xi_max(i) - x(i)) / y(i) );
       }
-      else if (y(i) < - eps) { dt_new = min(dt_new, (dofs.xi_min(i) - x(i)) / (y(i)-eps) );
-         if (dofs.xi_min(i) - x(i) > 0.)
-            MFEM_ABORT("-");
+      else if (y(i) < -eps)
+      {
+         // if (abs(dofs.xi_min(i) - x(i)) < eps) { continue; }
+         dt_new = min(dt_new, (dofs.xi_min(i) - x(i)) / y(i) );
       }
+      if (dt_new < dt)
+      {
+         cout << dt_new << endl;
+         cout << dofs.xi_max(i) - x(i) << " " << dofs.xi_min(i) - x(i) << " " << y(i) << endl;
+      }
+      if (dt_new < dt_min) { MFEM_ABORT("Time step too small."); }
    }
-   cout << dt_new << endl;
-   if (dt_new < eps) { cout << dt_new << endl; MFEM_ABORT("Time step too small."); }
    return cfl*dt_new;
 }
 
@@ -1804,9 +1807,9 @@ double FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
       }
    }
    double dt_adpt = TimeStepControl(x, y);
-   cout << dt_adpt << endl;
    add(x, dt_adpt, y, z);
    y = z;
+   return dt_adpt;
 }
 
 // No monotonicity treatment, straightforward high-order scheme
