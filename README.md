@@ -72,8 +72,6 @@ maximum value (`max`) for the runs listed below:
 8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -mt 4`
 9.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 14 -rs 3 -dt 0.003 -tf 0.75 -mt 4`
 10. `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -mt 4`
-11. 'mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mt 5 -si 2'
-12. 'mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mt 5 -si 1'
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
@@ -87,8 +85,6 @@ maximum value (`max`) for the runs listed below:
 |  8. | 0.8087330861 | 0.9999889315 |
 |  9. | 0.372581263  | 0.9999996933 |
 | 10. | 0.9607423409 | 0.9999600963 |
-| 11. | 0.1570667907 | 0.9987771164 |
-| 12. | 0.3182739921 | 1            |
 
 An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.

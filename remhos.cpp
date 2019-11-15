@@ -804,11 +804,10 @@ void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
 {
    Mesh* subcell_mesh = si.fesH1->GetMesh();
 
-   int k, i, j, l, m, e_id, dim = subcell_mesh->Dimension();
-   DenseMatrix elmat1, elmat2;
+   int k, m, e_id, dim = subcell_mesh->Dimension();
+   DenseMatrix elmat1;
 
-   Array <int> bdrs, orientation, te_vdofs, tr_vdofs;
-   FaceElementTransformations *Trans;
+   Array <int> te_vdofs, tr_vdofs;
 
    tr_vdofs.SetSize(dofs.numDofsSubcell);
 
@@ -846,8 +845,8 @@ void ComputeVariationalMatrix(SmoothnessIndicator &si, const int ne,
 void ApproximateLaplacian(SmoothnessIndicator &si, const int ne, const int nd,
                           DofInfo dofs, const Vector &x, ParGridFunction &y)
 {
-   int k, i, j, m, e_id, dofInd, N = si.lumpedMH1.Size();
-   Array<int> vdofs, eldofs;
+   int k, i, j, N = si.lumpedMH1.Size();
+   Array<int> eldofs;
    Vector xDofs(nd), tmp(nd), xEval(ne*nd);
    Vector rhs_tv(si.fesH1->GetTrueVSize()), z_tv(si.fesH1->GetTrueVSize());
 
@@ -1791,6 +1790,7 @@ int main(int argc, char *argv[])
       }
       else
       {
+         // Steady state problems - stop at convergence.
          double res_loc = 0.;
          for (int i = 0; i < res.Size(); i++)
          {
@@ -1913,16 +1913,18 @@ int main(int argc, char *argv[])
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = 1. - pow( (abs(g_min(e) - g_max(e)) + 1.E-50) / (abs(g_min(
-                                                                                e)) + abs(g_max(e)) + 1.E-50), si.param );
+            si_val(e) = 1. - pow((abs(g_min(e) - g_max(e)) + 1.E-50) /
+                                 (abs(g_min(e)) + abs(g_max(e)) + 1.E-50),
+                                 si.param);
          }
       }
       else if (smth_ind == 2)
       {
          for (int e = 0; e < N; e++)
          {
-            si_val(e) = min( 1., si.param * max(0.,
-                                                g_min(e)*g_max(e)) / (max(g_min(e)*g_min(e),g_max(e)*g_max(e)) + 1.E-15) );
+            si_val(e) = min( 1., si.param * max(0.,g_min(e)*g_max(e)) /
+                                            (max(g_min(e)*g_min(e),
+                                                 g_max(e)*g_max(e)) + 1.E-15) );
          }
       }
 
@@ -2075,13 +2077,13 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
       if (SumCorrP + SumCorrN > eps)
       {
-         BdrTermCorr(i) = min(0., BdrTermCorr(i)) - max(0.,
-                                                        BdrTermCorr(i)) * SumCorrN / SumCorrP;
+         BdrTermCorr(i) = min(0., BdrTermCorr(i)) -
+                          max(0., BdrTermCorr(i)) * SumCorrN / SumCorrP;
       }
       else if (SumCorrP + SumCorrN < -eps)
       {
-         BdrTermCorr(i) = max(0., BdrTermCorr(i)) - min(0.,
-                                                        BdrTermCorr(i)) * SumCorrP / SumCorrN;
+         BdrTermCorr(i) = max(0., BdrTermCorr(i)) -
+                          min(0., BdrTermCorr(i)) * SumCorrP / SumCorrN;
       }
       y(dofInd) += BdrTermCorr(i);
    }
@@ -2265,7 +2267,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
    else // RD(S)-Monolithic
    {
-      int N, I, m, dofInd2, loc, it, CtrIt, ctr = 0, max_iter = 100;
+      int N, m, loc, it, CtrIt, ctr = 0, max_iter = 100;
       double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
              sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
              uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp, bndN, bndP,
@@ -2308,16 +2310,18 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          {
             for (k = 0; k < N; k++)
             {
-               si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) / (abs(g_min(
-                                                                                   k)) + abs(g_max(k)) + 1.E-50), si.param );
+               si_val(k) = 1. - pow((abs(g_min(k) - g_max(k)) + 1.E-50) /
+                                    (abs(g_min(k)) + abs(g_max(k)) + 1.E-50),
+                                    si.param );
             }
          }
          else if (smth_ind == 2)
          {
             for (k = 0; k < N; k++)
             {
-               si_val(k) = min( 1., si.param * max(0.,
-                                                   g_min(k)*g_max(k)) / (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+               si_val(k) = min(1., si.param * max(0.,g_min(k)*g_max(k)) /
+                                              (max(g_min(k)*g_min(k),
+                                                   g_max(k)*g_max(k)) + 1.E-15));
             }
          }
       }
@@ -2348,13 +2352,13 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
                if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd) + eps)
                {
-                  alpha(j) = min(1., beta*(x(dofInd) - bndN) / (dofs.xi_max(dofInd) - x(
-                                                                   dofInd) + eps));
+                  alpha(j) = min(1., beta*(x(dofInd) - bndN) /
+                                     (dofs.xi_max(dofInd) - x(dofInd) + eps));
                }
                else if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) < 2.*x(dofInd) - eps)
                {
-                  alpha(j) = min(1., beta*(bndP - x(dofInd)) / (x(dofInd) - dofs.xi_min(
-                                                                   dofInd) + eps));
+                  alpha(j) = min(1., beta*(bndP - x(dofInd)) /
+                                     (x(dofInd) - dofs.xi_min(dofInd) + eps));
                }
             }
 
@@ -2490,7 +2494,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                // NOTE: This will only work in serial.
                for (j = nd-1; j >= 0; j--) // run backwards through columns
                {
-                  m_it(i) += Mij[ctr] * (uDot(i) - uDot(j)); // use knowledge of how M looks like
+                  // use knowledge of how M looks like
+                  m_it(i) += Mij[ctr] * (uDot(i) - uDot(j));
                   ctr++;
                }
                diff = d(dofInd) - y(dofInd);
@@ -2615,16 +2620,18 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
       {
          for (k = 0; k < N; k++)
          {
-            si_val(k) = 1. - pow( (abs(g_min(k) - g_max(k)) + 1.E-50) / (abs(g_min(
-                                                                                k)) + abs(g_max(k)) + 1.E-50), si.param );
+            si_val(k) = 1. - pow((abs(g_min(k) - g_max(k)) + 1.E-50) /
+                                 (abs(g_min(k)) + abs(g_max(k)) + 1.E-50),
+                                 si.param);
          }
       }
       if (smth_ind == 2)
       {
          for (k = 0; k < N; k++)
          {
-            si_val(k) = min( 1., si.param * max(0.,
-                                                g_min(k)*g_max(k)) / (max(g_min(k)*g_min(k),g_max(k)*g_max(k)) + 1.E-15) );
+            si_val(k) = min( 1., si.param * max(0., g_min(k)*g_max(k)) /
+                                            (max(g_min(k)*g_min(k),
+                                                 g_max(k)*g_max(k)) + 1.E-15) );
          }
       }
    }
