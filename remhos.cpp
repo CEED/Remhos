@@ -2519,7 +2519,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
                                                             x(dofInd) - dofs.xi_min(dofInd))
                               / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
 
-               if (smth_ind) // TODO use alphaGlob according to idea in paper
+               if (smth_ind)
                {
                   alphaGlob = min( 1., beta * lom.scale(k) * min(1. - x(dofInd), x(dofInd) - 0.)
                                    / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
