@@ -67,6 +67,7 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include "remhos_ho.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -361,7 +362,6 @@ public:
 
       ExtractBdrDofs(pfes->GetFE(0)->GetOrder(),
                      pfes->GetFE(0)->GetGeomType(), BdrDofs);
-      //pfes->GetFE(0)->ExtractBdrDofs(BdrDofs);
       numFaceDofs = BdrDofs.Height();
       numBdrs = BdrDofs.Width();
 
@@ -978,6 +978,8 @@ private:
    SmoothnessIndicator &si;
    DofInfo &dofs;
 
+   HOSolver &ho_solver;
+
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM,
@@ -986,7 +988,7 @@ public:
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator &si_);
+                SmoothnessIndicator &si_, HOSolver &hos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1657,6 +1659,12 @@ int main(int argc, char *argv[])
       }
    }
 
+   HOSolver *ho_solver;
+   if (true)
+   {
+      ho_solver = new NeumannSolver(pfes, m.SpMat(), *k_hypre, lumpedM);
+   }
+
    // Print the starting meshes and initial condition.
    {
       ofstream meshHO("meshHO_init.mesh");
@@ -1728,7 +1736,7 @@ int main(int argc, char *argv[])
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
                                         k, k.SpMat(), *k_hypre,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, si);
+                                        asmbl, lom, dofs, si, *ho_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1746,7 +1754,6 @@ int main(int argc, char *argv[])
    }
 
    ParGridFunction res = u;
-   bool converged = false;
    double residual;
 
    bool done = false;
@@ -1937,12 +1944,14 @@ int main(int argc, char *argv[])
    }
 
    // 10. Free the used memory.
+   delete adv;
+   delete ho_solver;
+
    delete ode_solver;
    delete mesh_fec;
    delete k_hypre;
    delete lom.pk;
    delete si.fesH1;
-   delete adv;
    delete dc;
 
    if (order > 1)
@@ -2012,7 +2021,7 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
       else
       {
          xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                     : x_nd(nbr_dof_id - size_x);
+                                           : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
    }
@@ -2569,13 +2578,17 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 1.;
 
+   if (lom.MonoType == None)
+   {
+      ho_solver.CalcHOSolution(x, y);
+      return;
+   }
+
    // K multiplies a ldofs Vector, as we're always doing DG.
-   if (lom.MonoType == None) { K_hypre.Mult(x, z); }
-   else                      { K.Mult(x, z); }
+   K.Mult(x, z);
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
-   // Get the MPI neighbor values.
    if (lom.MonoType != None && (lom.MonoType != DiscUpw_FCT || lom.OptScheme))
    {
       // The face contributions have been computed in the low order scheme.
@@ -2701,14 +2714,15 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
-                           SmoothnessIndicator &si_) :
+                           SmoothnessIndicator &si_, HOSolver &hos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_) { }
+   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_),
+   ho_solver(hos) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {

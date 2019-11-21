@@ -115,10 +115,10 @@ LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
 CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
-SOURCE_FILES = remhos.cpp
+SOURCE_FILES = remhos.cpp remhos_ho.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
-HEADER_FILES = 
+HEADER_FILES = remhos_ho.hpp
 
 # Targets
 
