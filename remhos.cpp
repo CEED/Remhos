@@ -960,7 +960,6 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    SparseMatrix &M, &K;
-   HypreParMatrix &K_hypre;
    Vector &lumpedM;
    const GridFunction &inflow_gf;
    const Vector &b;
@@ -983,7 +982,7 @@ private:
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM,
-                ParBilinearForm &Kbf_, SparseMatrix &_K, HypreParMatrix &K_hup,
+                ParBilinearForm &Kbf_, SparseMatrix &_K,
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
@@ -1300,8 +1299,7 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
-   if (MonoType == None || ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) &&
-                            (!OptScheme)))
+   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && !OptScheme)
    {
       if (exec_mode == 0)
       {
@@ -1337,8 +1335,6 @@ int main(int argc, char *argv[])
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
    b.Assemble();
-
-   HypreParMatrix *k_hypre = k.ParallelAssemble();
 
    // Store topological dof data.
    DofInfo dofs(&pfes, &pfes_bounds);
@@ -1662,7 +1658,7 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-      ho_solver = new NeumannSolver(pfes, m.SpMat(), *k_hypre, lumpedM);
+      ho_solver = new NeumannSolver(pfes, m.SpMat(), NULL, lumpedM);
    }
 
    // Print the starting meshes and initial condition.
@@ -1734,7 +1730,7 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
-                                        k, k.SpMat(), *k_hypre,
+                                        k, k.SpMat(),
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, si, *ho_solver);
 
@@ -1949,7 +1945,6 @@ int main(int argc, char *argv[])
 
    delete ode_solver;
    delete mesh_fec;
-   delete k_hypre;
    delete lom.pk;
    delete si.fesH1;
    delete dc;
@@ -2578,18 +2573,12 @@ void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
    int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 1.;
 
-   if (lom.MonoType == None)
-   {
-      ho_solver.CalcHOSolution(x, y);
-      return;
-   }
-
    // K multiplies a ldofs Vector, as we're always doing DG.
    K.Mult(x, z);
 
    // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
    // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
-   if (lom.MonoType != None && (lom.MonoType != DiscUpw_FCT || lom.OptScheme))
+   if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
    {
       // The face contributions have been computed in the low order scheme.
       for (k = 0; k < ne; k++)
@@ -2708,7 +2697,6 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            ParBilinearForm &Kbf_, SparseMatrix &_K,
-                           HypreParMatrix &K_hyp,
                            const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
@@ -2716,7 +2704,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator &si_, HOSolver &hos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
+   M(_M), K(_K), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
@@ -2747,8 +2735,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
       // Boundary contributions.
       const bool NeedBdr = (lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                              lom.MonoType != DiscUpw_FCT))
-                           && lom.MonoType != None;
+                                              lom.MonoType != DiscUpw_FCT));
       if (NeedBdr)
       {
          asmbl.bdrInt = 0.;
