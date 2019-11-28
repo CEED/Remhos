@@ -38,13 +38,12 @@ public:
 class NeumannSolver : public HOSolver
 {
 protected:
-   SparseMatrix &M;
-   HypreParMatrix *K;
-   Vector &M_lumped;
+   const SparseMatrix &M, &K;
+   const Vector &M_lumped;
 
 public:
    NeumannSolver(ParFiniteElementSpace &space,
-                 SparseMatrix &M_, HypreParMatrix *K_, Vector &Mlump)
+                 SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump)
       : HOSolver(space),
         M(M_), K(K_), M_lumped(Mlump) { }
 

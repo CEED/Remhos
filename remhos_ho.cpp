@@ -27,7 +27,7 @@ void NeumannSolver::CalcHOSolution(const Vector &u, Vector &du) const
    Vector rhs(n), res(n);
 
    // K multiplies a ldofs Vector, as we're always doing DG.
-   K->Mult(u, rhs);
+   K.Mult(u, rhs);
 
    du = 0.0;
    const double abs_tol = 1.e-4;
