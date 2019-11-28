@@ -529,7 +529,6 @@ public:
                                   const int BdrID, const Vector &x,
                                   Vector &y, const Vector &alpha) const;
 
-   virtual void ComputeHighOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeFCTSolution(const Vector &x, const Vector &yH,
                                    const Vector &yL, Vector &y) const;
@@ -1178,7 +1177,7 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-      ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM);
+      ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
    }
 
    // Print the starting meshes and initial condition.
@@ -2086,35 +2085,6 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
 }
 
-// No monotonicity treatment, straightforward high-order scheme
-// ydot = M^{-1} (K x + b).
-void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
-{
-   int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
-   Vector alpha(nd); alpha = 1.;
-
-   // K multiplies a ldofs Vector, as we're always doing DG.
-   K.Mult(x, z);
-
-   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
-   // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
-   if (lom.MonoType != DiscUpw_FCT || lom.OptScheme)
-   {
-      // The face contributions have been computed in the low order scheme.
-      for (k = 0; k < ne; k++)
-      {
-         for (i = 0; i < dofs.numBdrs; i++)
-         {
-            asmbl.LinearFluxLumping(k, nd, i, x, z, alpha);
-            //LinearFluxLumping(k, nd, i, x, z, alpha);
-         }
-      }
-   }
-
-   // Can be done on the ldofs, as M is a DG mass matrix.
-   NeumannSolve(z, y);
-}
-
 // High order reconstruction that yields an updated admissible solution by means
 // of clipping the solution coefficients within certain bounds and scaling the
 // antidiffusive fluxes in a way that leads to local conservation of mass. yH,
@@ -2285,7 +2255,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    x_gf.ExchangeFaceNbrData();
    if (lom.MonoType == 0)
    {
-      ComputeHighOrderSolution(x, y);
+      ho_solver.CalcHOSolution(x, y);
    }
    else
    {
@@ -2299,7 +2269,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
          Vector yH(x.Size()), yL(x.Size());
 
          ComputeLowOrderSolution(x, yL);
-         ComputeHighOrderSolution(x, yH);
+         ho_solver.CalcHOSolution(x, yH);
          ComputeFCTSolution(x, yH, yL, y);
       }
    }
@@ -2482,16 +2452,13 @@ void velocity_function(const Vector &x, Vector &v)
 }
 
 void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
-                                 const Vector &x, Vector &y,
+                                 const Vector &x, Vector &y, const Vector &x_nd,
                                  const Vector &alpha) const
 {
    int i, j, dofInd;
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
-   x_gf = x;
-   x_gf.ExchangeFaceNbrData();
-   Vector &x_nd = x_gf.FaceNbrData();
 
    for (j = 0; j < dofs.numFaceDofs; j++)
    {

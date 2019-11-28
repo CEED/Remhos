@@ -35,17 +35,19 @@ public:
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
 };
 
+class Assembly;
+
 class NeumannSolver : public HOSolver
 {
 protected:
    const SparseMatrix &M, &K;
    const Vector &M_lumped;
+   Assembly &assembly;
 
 public:
    NeumannSolver(ParFiniteElementSpace &space,
-                 SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump)
-      : HOSolver(space),
-        M(M_), K(K_), M_lumped(Mlump) { }
+                 SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
+                 Assembly &a);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };

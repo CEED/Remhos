@@ -15,20 +15,41 @@
 // testbed platforms, in support of the nation's exascale computing imperative.
 
 #include "remhos_ho.hpp"
+#include "remhos_tools.hpp"
 
 using namespace std;
 
 namespace mfem
 {
 
+NeumannSolver::NeumannSolver(ParFiniteElementSpace &space,
+                             SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
+                             Assembly &a)
+   : HOSolver(space), M(M_), K(K_), M_lumped(Mlump), assembly(a) { }
+
 void NeumannSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   const int n = u.Size();
+   const int n = u.Size(), ne = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    Vector rhs(n), res(n);
+   Vector alpha(ndof); alpha = 1.0;
 
    // K multiplies a ldofs Vector, as we're always doing DG.
    K.Mult(u, rhs);
 
+   // Face contributions.
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+   Vector &u_nd = u_gf.FaceNbrData();
+   for (int k = 0; k < ne; k++)
+   {
+      for (int i = 0; i < assembly.dofs.numBdrs; i++)
+      {
+         assembly.LinearFluxLumping(k, ndof, i, u, rhs, u_nd, alpha);
+      }
+   }
+
+   // Neumann iteration.
    du = 0.0;
    const double abs_tol = 1.e-4;
    const int max_iter = 20;
