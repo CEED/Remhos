@@ -657,7 +657,6 @@ public:
       {
          for (k = 0; k < ne; k++)
          {
-
             if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
             else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
             else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
