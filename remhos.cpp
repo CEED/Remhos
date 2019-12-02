@@ -658,16 +658,16 @@ public:
          for (k = 0; k < ne; k++)
          {
 
-				if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
-				else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
-				else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
-				
-				for (i = 0; i < dofs.numBdrs; i++)
-				{
-					Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-					ComputeFluxTerms(k, i, Trans, lom);
-				}
-				
+            if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
+            
+            for (i = 0; i < dofs.numBdrs; i++)
+            {
+               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               ComputeFluxTerms(k, i, Trans, lom);
+            }
+            
             if (NeedSubWgts)
             {
                for (m = 0; m < dofs.numSubcells; m++)
@@ -2692,26 +2692,26 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.SpMat().GetDiag(lumpedM);
 
       // Boundary contributions.
-		asmbl.bdrInt = 0.;
-		
-		Mesh *mesh = lom.fes->GetMesh();
-		const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
-		Array<int> bdrs, orientation;
-		FaceElementTransformations *Trans;
-		
-		for (int k = 0; k < ne; k++)
-		{
-			if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-			else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-			else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-			
-			for (int i = 0; i < dofs.numBdrs; i++)
-			{
-				Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-				asmbl.ComputeFluxTerms(k, i, Trans, lom);
-			}
-		}
-	}
+      asmbl.bdrInt = 0.;
+      
+      Mesh *mesh = lom.fes->GetMesh();
+      const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+      
+      for (int k = 0; k < ne; k++)
+      {
+         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+         
+         for (int i = 0; i < dofs.numBdrs; i++)
+         {
+            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
+         }
+      }
+   }
 
    x_gf = x;
    x_gf.ExchangeFaceNbrData();
