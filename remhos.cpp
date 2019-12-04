@@ -67,6 +67,8 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include "remhos_ho.hpp"
+#include "remhos_tools.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -147,27 +149,7 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
-int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
-                         int face_dof_id, int face_dof1D_cnt);
 void GetMinMax(const ParGridFunction &g, double &min, double &max);
-void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs);
-
-enum MONOTYPE { None, DiscUpw, DiscUpw_FCT, ResDist, ResDist_FCT, ResDist_Monolithic };
-
-struct LowOrderMethod
-{
-   MONOTYPE MonoType;
-   bool OptScheme;
-   FiniteElementSpace *fes, *SubFes0, *SubFes1;
-   Array <int> smap;
-   SparseMatrix D;
-   ParBilinearForm* pk;
-   VectorCoefficient* coef;
-   const IntegrationRule* irF;
-   BilinearFormIntegrator* VolumeTerms;
-   ParMesh* subcell_mesh;
-   Vector scale;
-};
 
 // Utility function to build a map to the offset of the symmetric entry in a
 // sparse matrix.
@@ -326,468 +308,6 @@ public:
       }
    }
 };
-
-// Class storing information on dofs needed for the low order methods and FCT.
-class DofInfo
-{
-private:
-   ParMesh *pmesh;
-   ParFiniteElementSpace *pfes;
-
-public:
-   ParGridFunction x_min, x_max;
-
-   Vector xi_min, xi_max; // min/max values for each dof
-   Vector xe_min, xe_max; // min/max values for each element
-
-   DenseMatrix BdrDofs, Sub2Ind;
-   DenseTensor NbrDof;
-
-   int dim, numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
-
-   DofInfo(ParFiniteElementSpace *fes_sltn, ParFiniteElementSpace *fes_bounds)
-      : pmesh(fes_sltn->GetParMesh()), pfes(fes_sltn),
-        x_min(fes_bounds), x_max(fes_bounds)
-   {
-      dim = pmesh->Dimension();
-
-      int n = pfes->GetVSize();
-      int ne = pmesh->GetNE();
-
-      xi_min.SetSize(n);
-      xi_max.SetSize(n);
-      xe_min.SetSize(ne);
-      xe_max.SetSize(ne);
-
-      ExtractBdrDofs(pfes->GetFE(0)->GetOrder(),
-                     pfes->GetFE(0)->GetGeomType(), BdrDofs);
-      //pfes->GetFE(0)->ExtractBdrDofs(BdrDofs);
-      numFaceDofs = BdrDofs.Height();
-      numBdrs = BdrDofs.Width();
-
-      FillNeighborDofs();    // Fill NbrDof.
-      FillSubcell2CellDof(); // Fill Sub2Ind.
-   }
-
-   // Computes the admissible interval of values for each DG dof from the values
-   // of all elements that feature the dof at its physical location.
-   // Assumes that xe_min and xe_max are already computed.
-   void ComputeBounds()
-   {
-      ParFiniteElementSpace *pfesCG = x_min.ParFESpace();
-      GroupCommunicator &gcomm = pfesCG->GroupComm();
-      Array<int> dofsCG;
-
-      // Form min/max at each CG dof, considering element overlaps.
-      x_min =   numeric_limits<double>::infinity();
-      x_max = - numeric_limits<double>::infinity();
-      for (int i = 0; i < pmesh->GetNE(); i++)
-      {
-         x_min.FESpace()->GetElementDofs(i, dofsCG);
-         for (int j = 0; j < dofsCG.Size(); j++)
-         {
-            x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), xe_min(i));
-            x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), xe_max(i));
-         }
-      }
-      Array<double> minvals(x_min.GetData(), x_min.Size()),
-            maxvals(x_max.GetData(), x_max.Size());
-      gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
-      gcomm.Bcast(minvals);
-      gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
-      gcomm.Bcast(maxvals);
-
-      // Use (x_min, x_max) to fill (xi_min, xi_max) for each DG dof.
-      const TensorBasisElement *fe_cg =
-         dynamic_cast<const TensorBasisElement *>(pfesCG->GetFE(0));
-      const Array<int> &dof_map = fe_cg->GetDofMap();
-      const int ndofs = dof_map.Size();
-      for (int i = 0; i < pmesh->GetNE(); i++)
-      {
-         x_min.FESpace()->GetElementDofs(i, dofsCG);
-         for (int j = 0; j < dofsCG.Size(); j++)
-         {
-            xi_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
-            xi_max(i*ndofs + j) = x_max(dofsCG[dof_map[j]]);
-         }
-      }
-   }
-
-   ~DofInfo() { }
-
-private:
-
-   // For each DOF on an element boundary, the global index of the DOF on the
-   // opposite site is computed and stored in a list. This is needed for lumping
-   // the flux contributions as in the paper. Right now it works on 1D meshes,
-   // quad meshes in 2D and 3D meshes of ordered cubes.
-   // NOTE: The mesh is assumed to consist of segments, quads or hexes.
-   // NOTE: This approach will not work for meshes with hanging nodes.
-   void FillNeighborDofs()
-   {
-      // Use the first mesh element as indicator.
-      const FiniteElement &dummy = *pfes->GetFE(0);
-      int i, j, k, nbr, ne = pmesh->GetNE();
-      int nd = dummy.GetDof(), p = dummy.GetOrder();
-      Array <int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-
-      pmesh->ExchangeFaceNbrData();
-      Table *face_to_el = pmesh->GetFaceToAllElementTable();
-
-      NbrDof.SetSize(ne, numBdrs, numFaceDofs);
-
-      // Permutations of BdrDofs, taking into account all possible orientations.
-      // Assumes BdrDofs are ordered in xyz order, which is true for 3D hexes,
-      // but it isn't true for 2D quads.
-      // TODO: check other FEs, function ExtractBoundaryDofs().
-      int orient_cnt = 1;
-      if (dim == 2) { orient_cnt = 2; }
-      if (dim == 3) { orient_cnt = 8; }
-      const int dof1D_cnt = p+1;
-      DenseTensor fdof_ids(numFaceDofs, numBdrs, orient_cnt);
-      for (int ori = 0; ori < orient_cnt; ori++)
-      {
-         for (int face_id = 0; face_id < numBdrs; face_id++)
-         {
-            for (int fdof_id = 0; fdof_id < numFaceDofs; fdof_id++)
-            {
-               // Index of fdof_id in the current orientation.
-               const int ori_fdof_id = GetLocalFaceDofIndex(dim, face_id, ori,
-                                                            fdof_id, dof1D_cnt);
-               fdof_ids(ori)(ori_fdof_id, face_id) = BdrDofs(fdof_id, face_id);
-            }
-         }
-      }
-
-      for (k = 0; k < ne; k++)
-      {
-         if (dim==1)
-         {
-            pmesh->GetElementVertices(k, bdrs);
-
-            for (i = 0; i < numBdrs; i++)
-            {
-               Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
-               nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-               NbrDof(k,i,0) = nbr*nd + BdrDofs(0,(i+1)%2);
-            }
-         }
-         else if (dim==2)
-         {
-            pmesh->GetElementEdges(k, bdrs, orientation);
-
-            for (i = 0; i < numBdrs; i++)
-            {
-               const int nbr_cnt = face_to_el->RowSize(bdrs[i]);
-               if (nbr_cnt == 1)
-               {
-                  // No neighbor element.
-                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k, i, j) = -1; }
-                  continue;
-               }
-
-               int el1_id, el2_id, nbr_id;
-               pmesh->GetFaceElements(bdrs[i], &el1_id, &el2_id);
-               if (el2_id < 0)
-               {
-                  // This element is in a different mpi task.
-                  el2_id = -1 - el2_id + ne;
-               }
-               nbr_id = (el1_id == k) ? el2_id : el1_id;
-
-               int el1_info, el2_info;
-               pmesh->GetFaceInfos(bdrs[i], &el1_info, &el2_info);
-               const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
-                                       : el2_info / 64;
-               for (j = 0; j < numFaceDofs; j++)
-               {
-                  // Here it is utilized that the orientations of the face for
-                  // the two elements are opposite of each other.
-                  NbrDof(k,i,j) = nbr_id*nd + BdrDofs(numFaceDofs - 1 - j,
-                                                      face_id_nbr);
-               }
-            }
-         }
-         else if (dim==3)
-         {
-            pmesh->GetElementFaces(k, bdrs, orientation);
-
-            for (int f = 0; f < numBdrs; f++)
-            {
-               const int nbr_cnt = face_to_el->RowSize(bdrs[f]);
-               if (nbr_cnt == 1)
-               {
-                  // No neighbor element.
-                  for (j = 0; j < numFaceDofs; j++) { NbrDof(k, f, j) = -1; }
-                  continue;
-               }
-
-               int el1_id, el2_id, nbr_id;
-               pmesh->GetFaceElements(bdrs[f], &el1_id, &el2_id);
-               if (el2_id < 0)
-               {
-                  // This element is in a different mpi task.
-                  el2_id = -1 - el2_id + ne;
-               }
-               nbr_id = (el1_id == k) ? el2_id : el1_id;
-
-               // Local index and orientation of the face, when considered in
-               // the neighbor element.
-               int el1_info, el2_info;
-               pmesh->GetFaceInfos(bdrs[f], &el1_info, &el2_info);
-               const int face_id_nbr = (nbr_id == el1_id) ? el1_info / 64
-                                       : el2_info / 64;
-               const int face_or_nbr = (nbr_id == el1_id) ? el1_info % 64
-                                       : el2_info % 64;
-               for (j = 0; j < numFaceDofs; j++)
-               {
-                  // What is the index of the j-th dof on the face, given its
-                  // orientation.
-                  const int loc_face_dof_id =
-                     GetLocalFaceDofIndex(dim, face_id_nbr, face_or_nbr,
-                                          j, dof1D_cnt);
-                  // What is the corresponding local dof id on the element,
-                  // given the face orientation.
-                  const int nbr_dof_id =
-                     fdof_ids(face_or_nbr)(loc_face_dof_id, face_id_nbr);
-
-                  NbrDof(k, f, j) = nbr_id*nd + nbr_dof_id;
-               }
-            }
-         }
-      }
-   }
-
-   // A list is filled to later access the correct element-global indices given
-   // the subcell number and subcell index.
-   // NOTE: The mesh is assumed to consist of segments, quads or hexes.
-   void FillSubcell2CellDof()
-   {
-      const FiniteElement &dummy = *pfes->GetFE(0);
-      int j, m, aux, p = dummy.GetOrder();
-
-      if (dim==1)
-      {
-         numSubcells = p;
-         numDofsSubcell = 2;
-      }
-      else if (dim==2)
-      {
-         numSubcells = p*p;
-         numDofsSubcell = 4;
-      }
-      else if (dim==3)
-      {
-         numSubcells = p*p*p;
-         numDofsSubcell = 8;
-      }
-
-      Sub2Ind.SetSize(numSubcells, numDofsSubcell);
-
-      for (m = 0; m < numSubcells; m++)
-      {
-         for (j = 0; j < numDofsSubcell; j++)
-         {
-            if (dim == 1) { Sub2Ind(m,j) = m + j; }
-            else if (dim == 2)
-            {
-               aux = m + m/p;
-               switch (j)
-               {
-                  case 0: Sub2Ind(m,j) =  aux; break;
-                  case 1: Sub2Ind(m,j) =  aux + 1; break;
-                  case 2: Sub2Ind(m,j) =  aux + p+1; break;
-                  case 3: Sub2Ind(m,j) =  aux + p+2; break;
-               }
-            }
-            else if (dim == 3)
-            {
-               aux = m + m/p + (p+1)*(m/(p*p));
-               switch (j)
-               {
-                  case 0: Sub2Ind(m,j) = aux; break;
-                  case 1: Sub2Ind(m,j) = aux + 1; break;
-                  case 2: Sub2Ind(m,j) = aux + p+1; break;
-                  case 3: Sub2Ind(m,j) = aux + p+2; break;
-                  case 4: Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
-                  case 5: Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
-                  case 6: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
-                  case 7: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
-               }
-            }
-         }
-      }
-   }
-};
-
-
-class Assembly
-{
-public:
-   Assembly(DofInfo &_dofs, LowOrderMethod &lom)
-      : fes(lom.fes), SubFes0(NULL), SubFes1(NULL), dofs(_dofs),
-        subcell_mesh(NULL)
-   {
-      Mesh *mesh = fes->GetMesh();
-      int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
-
-      Array <int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-
-      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                             lom.MonoType != DiscUpw_FCT);
-
-      const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
-                                                 lom.MonoType == ResDist_FCT
-                                                 || lom.MonoType == ResDist_Monolithic );
-
-      if (NeedBdr)
-      {
-         bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
-         bdrInt = 0.;
-      }
-      if (NeedSubWgts)
-      {
-         VolumeTerms = lom.VolumeTerms;
-         SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
-
-         SubFes0 = lom.SubFes0;
-         SubFes1 = lom.SubFes1;
-         subcell_mesh = lom.subcell_mesh;
-      }
-
-      // Initialization for transport mode.
-      if (exec_mode == 0 && (NeedBdr || NeedSubWgts))
-      {
-         for (k = 0; k < ne; k++)
-         {
-            if (NeedBdr)
-            {
-               if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
-               else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
-               else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-               for (i = 0; i < dofs.numBdrs; i++)
-               {
-                  Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-                  ComputeFluxTerms(k, i, Trans, lom);
-               }
-            }
-            if (NeedSubWgts)
-            {
-               for (m = 0; m < dofs.numSubcells; m++)
-               {
-                  ComputeSubcellWeights(k, m);
-               }
-            }
-         }
-      }
-   }
-
-   // Destructor
-   ~Assembly() { }
-
-   // Auxiliary member variables that need to be accessed during time-stepping.
-   FiniteElementSpace *fes, *SubFes0, *SubFes1;
-   DofInfo &dofs;
-   Mesh *subcell_mesh;
-   BilinearFormIntegrator *VolumeTerms;
-
-   // Data structures storing Galerkin contributions. These are updated for
-   // remap but remain constant for transport.
-   // bdrInt - eq (32).
-   // SubcellWeights - above eq (49).
-   DenseTensor bdrInt, SubcellWeights;
-
-   void ComputeFluxTerms(const int e_id, const int BdrID,
-                         FaceElementTransformations *Trans, LowOrderMethod &lom)
-   {
-      Mesh *mesh = fes->GetMesh();
-
-      int i, j, l, dim = mesh->Dimension();
-      double aux, vn;
-
-      const FiniteElement &el = *fes->GetFE(e_id);
-
-      Vector vval, nor(dim), shape(el.GetDof());
-
-      for (l = 0; l < lom.irF->GetNPoints(); l++)
-      {
-         const IntegrationPoint &ip = lom.irF->IntPoint(l);
-         IntegrationPoint eip1;
-         Trans->Face->SetIntPoint(&ip);
-
-         if (dim == 1)
-         {
-            Trans->Loc1.Transform(ip, eip1);
-            nor(0) = 2.*eip1.x - 1.0;
-         }
-         else
-         {
-            CalcOrtho(Trans->Face->Jacobian(), nor);
-         }
-
-         if (Trans->Elem1No != e_id)
-         {
-            Trans->Loc2.Transform(ip, eip1);
-            el.CalcShape(eip1, shape);
-            Trans->Elem2->SetIntPoint(&eip1);
-            lom.coef->Eval(vval, *Trans->Elem2, eip1);
-            nor *= -1.;
-         }
-         else
-         {
-            Trans->Loc1.Transform(ip, eip1);
-            el.CalcShape(eip1, shape);
-            Trans->Elem1->SetIntPoint(&eip1);
-            lom.coef->Eval(vval, *Trans->Elem1, eip1);
-         }
-
-         nor /= nor.Norml2();
-
-         if (exec_mode == 0)
-         {
-            // Transport.
-            vn = min(0., vval * nor);
-         }
-         else
-         {
-            // Remap.
-            vn = max(0., vval * nor);
-            vn *= -1.0;
-         }
-
-         const double w = ip.weight * Trans->Face->Weight();
-         for (i = 0; i < dofs.numFaceDofs; i++)
-         {
-            aux = w * shape(dofs.BdrDofs(i,BdrID)) * vn;
-            for (j = 0; j < dofs.numFaceDofs; j++)
-            {
-               bdrInt(e_id, BdrID, i*dofs.numFaceDofs+j) -=
-                  aux * shape(dofs.BdrDofs(j,BdrID));
-            }
-         }
-      }
-   }
-
-   void ComputeSubcellWeights(const int k, const int m)
-   {
-      DenseMatrix elmat; // These are essentially the same.
-      const int e_id = k*dofs.numSubcells + m;
-      const FiniteElement *el0 = SubFes0->GetFE(e_id);
-      const FiniteElement *el1 = SubFes1->GetFE(e_id);
-      ElementTransformation *tr = subcell_mesh->GetElementTransformation(e_id);
-      VolumeTerms->AssembleElementMatrix2(*el1, *el0, *tr, elmat);
-
-      for (int j = 0; j < elmat.Width(); j++)
-      {
-         // Using the fact that elmat has just one row.
-         SubcellWeights(k)(m,j) = elmat(0,j);
-      }
-   }
-};
-
 
 struct SmoothnessIndicator
 {
@@ -960,7 +480,6 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    SparseMatrix &M, &K;
-   HypreParMatrix &K_hypre;
    Vector &lumpedM;
    const GridFunction &inflow_gf;
    const Vector &b;
@@ -978,15 +497,17 @@ private:
    SmoothnessIndicator &si;
    DofInfo &dofs;
 
+   HOSolver &ho_solver;
+
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM,
-                ParBilinearForm &Kbf_, SparseMatrix &_K, HypreParMatrix &K_hup,
+                ParBilinearForm &Kbf_, SparseMatrix &_K,
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator &si_);
+                SmoothnessIndicator &si_, HOSolver &hos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1008,7 +529,6 @@ public:
                                   const int BdrID, const Vector &x,
                                   Vector &y, const Vector &alpha) const;
 
-   virtual void ComputeHighOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
    virtual void ComputeFCTSolution(const Vector &x, const Vector &yH,
                                    const Vector &yL, Vector &y) const;
@@ -1298,8 +818,9 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
-   if (MonoType == None || ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) &&
-                            (!OptScheme)))
+   // TODO these will still be used for the matrix-based HO solver option.
+   /*
+   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && !OptScheme)
    {
       if (exec_mode == 0)
       {
@@ -1316,6 +837,7 @@ int main(int argc, char *argv[])
                                     new DGTraceIntegrator(v_coef, -1.0, -0.5)) );
       }
    }
+   */
 
    ParLinearForm b(&pfes);
    b.AddBdrFaceIntegrator(
@@ -1335,8 +857,6 @@ int main(int argc, char *argv[])
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
    b.Assemble();
-
-   HypreParMatrix *k_hypre = k.ParallelAssemble();
 
    // Store topological dof data.
    DofInfo dofs(&pfes, &pfes_bounds);
@@ -1486,7 +1006,7 @@ int main(int argc, char *argv[])
    }
    else { lom.subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs, lom);
+   Assembly asmbl(dofs, lom, inflow_gf, pfes, exec_mode);
    const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof();
 
    // Monolithic limiting correction factors.
@@ -1657,6 +1177,12 @@ int main(int argc, char *argv[])
       }
    }
 
+   HOSolver *ho_solver;
+   if (true)
+   {
+      ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+   }
+
    // Print the starting meshes and initial condition.
    {
       ofstream meshHO("meshHO_init.mesh");
@@ -1726,9 +1252,9 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
-                                        k, k.SpMat(), *k_hypre,
+                                        k, k.SpMat(),
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, si);
+                                        asmbl, lom, dofs, si, *ho_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1746,7 +1272,6 @@ int main(int argc, char *argv[])
    }
 
    ParGridFunction res = u;
-   bool converged = false;
    double residual;
 
    bool done = false;
@@ -1937,12 +1462,13 @@ int main(int argc, char *argv[])
    }
 
    // 10. Free the used memory.
+   delete adv;
+   delete ho_solver;
+
    delete ode_solver;
    delete mesh_fec;
-   delete k_hypre;
    delete lom.pk;
    delete si.fesH1;
-   delete adv;
    delete dc;
 
    if (order > 1)
@@ -2012,7 +1538,7 @@ void FE_Evolution::LinearFluxLumping(const int k, const int nd,
       else
       {
          xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                     : x_nd(nbr_dof_id - size_x);
+                                           : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
    }
@@ -2114,21 +1640,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       // Discretization and monotonicity terms.
       lom.D.Mult(x, y);
-      if (!lom.OptScheme)
-      {
-         y += b; // Only use b, in case that no flux lumping is used.
-      }
 
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
       {
          // Boundary contributions
-         if (lom.OptScheme)
+         for (i = 0; i < dofs.numBdrs; i++)
          {
-            for (i = 0; i < dofs.numBdrs; i++)
-            {
-               LinearFluxLumping(k, nd, i, x, y, alpha);
-            }
+            LinearFluxLumping(k, nd, i, x, y, alpha);
          }
 
          // Compute min / max over elements (needed for FCT).
@@ -2562,36 +2081,6 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
 }
 
-// No monotonicity treatment, straightforward high-order scheme
-// ydot = M^{-1} (K x + b).
-void FE_Evolution::ComputeHighOrderSolution(const Vector &x, Vector &y) const
-{
-   int i, k, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
-   Vector alpha(nd); alpha = 1.;
-
-   // K multiplies a ldofs Vector, as we're always doing DG.
-   if (lom.MonoType == None) { K_hypre.Mult(x, z); }
-   else                      { K.Mult(x, z); }
-
-   // Incorporate flux terms only if the low order scheme is PDU, RD, or RDS. Low
-   // order PDU (DiscUpw && OptScheme) does not call ComputeHighOrderSolution.
-   // Get the MPI neighbor values.
-   if (lom.MonoType != None && (lom.MonoType != DiscUpw_FCT || lom.OptScheme))
-   {
-      // The face contributions have been computed in the low order scheme.
-      for (k = 0; k < ne; k++)
-      {
-         for (i = 0; i < dofs.numBdrs; i++)
-         {
-            LinearFluxLumping(k, nd, i, x, z, alpha);
-         }
-      }
-   }
-
-   // Can be done on the ldofs, as M is a DG mass matrix.
-   NeumannSolve(z, y);
-}
-
 // High order reconstruction that yields an updated admissible solution by means
 // of clipping the solution coefficients within certain bounds and scaling the
 // antidiffusive fluxes in a way that leads to local conservation of mass. yH,
@@ -2695,20 +2184,20 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            ParBilinearForm &Kbf_, SparseMatrix &_K,
-                           HypreParMatrix &K_hyp,
                            const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
-                           SmoothnessIndicator &si_) :
+                           SmoothnessIndicator &si_, HOSolver &hos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), K_hypre(K_hyp), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
+   M(_M), K(_K), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_) { }
+   asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_),
+   ho_solver(hos) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -2732,29 +2221,22 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.SpMat().GetDiag(lumpedM);
 
       // Boundary contributions.
-      const bool NeedBdr = (lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                              lom.MonoType != DiscUpw_FCT))
-                           && lom.MonoType != None;
-      if (NeedBdr)
+      asmbl.bdrInt = 0.;
+      Mesh *mesh = lom.fes->GetMesh();
+      const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+
+      for (int k = 0; k < ne; k++)
       {
-         asmbl.bdrInt = 0.;
+         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-         Mesh *mesh = lom.fes->GetMesh();
-         const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
-         Array<int> bdrs, orientation;
-         FaceElementTransformations *Trans;
-
-         for (int k = 0; k < ne; k++)
+         for (int i = 0; i < dofs.numBdrs; i++)
          {
-            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-            for (int i = 0; i < dofs.numBdrs; i++)
-            {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-            }
+            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
          }
       }
    }
@@ -2763,7 +2245,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    x_gf.ExchangeFaceNbrData();
    if (lom.MonoType == 0)
    {
-      ComputeHighOrderSolution(x, y);
+      ho_solver.CalcHOSolution(x, y);
    }
    else
    {
@@ -2777,7 +2259,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
          Vector yH(x.Size()), yL(x.Size());
 
          ComputeLowOrderSolution(x, yL);
-         ComputeHighOrderSolution(x, yH);
+         ho_solver.CalcHOSolution(x, yH);
          ComputeFCTSolution(x, yH, yL, y);
       }
    }
@@ -2955,6 +2437,45 @@ void velocity_function(const Vector &x, Vector &v)
             v(2) = 0.0;
          }
          break;
+      }
+   }
+}
+
+void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
+                                 const Vector &x, Vector &y, const Vector &x_nd,
+                                 const Vector &alpha) const
+{
+   int i, j, dofInd;
+   double xNeighbor;
+   Vector xDiff(dofs.numFaceDofs);
+   const int size_x = x.Size();
+
+   for (j = 0; j < dofs.numFaceDofs; j++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
+      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+      // s.t. this value will not matter.
+      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
+      else
+      {
+         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
+                                           : x_nd(nbr_dof_id - size_x);
+      }
+      xDiff(j) = xNeighbor - x(dofInd);
+   }
+
+   for (i = 0; i < dofs.numFaceDofs; i++)
+   {
+      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+      for (j = 0; j < dofs.numFaceDofs; j++)
+      {
+         // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
+         // 0 < alpha < 1 can be used for limiting within the low order method.
+         y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
+                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
+                       alpha(dofs.BdrDofs(i,BdrID)) *
+                       alpha(dofs.BdrDofs(j,BdrID)));
       }
    }
 }
@@ -3329,358 +2850,9 @@ void PrecondConvectionIntegrator::AssembleElementMatrix(
    MultAtB(tmp, conv, elmat); // using symmetry of mass matrix
 }
 
-int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
-                           int face_dof_id, int face_dof1D_cnt)
-{
-   int k1, k2;
-   const int kf1 = face_dof_id % face_dof1D_cnt;
-   const int kf2 = face_dof_id / face_dof1D_cnt;
-   switch (loc_face_id)
-   {
-      case 0://BOTTOM
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      case 1://SOUTH
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      case 2://EAST
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      case 3://NORTH
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      case 4://WEST
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      case 5://TOP
-         switch (face_orient)
-         {
-            case 0://{0, 1, 2, 3}
-               k1 = kf1;
-               k2 = kf2;
-               break;
-            case 1://{0, 3, 2, 1}
-               k1 = kf2;
-               k2 = kf1;
-               break;
-            case 2://{1, 2, 3, 0}
-               k1 = kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 3://{1, 0, 3, 2}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = kf2;
-               break;
-            case 4://{2, 3, 0, 1}
-               k1 = face_dof1D_cnt-1-kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            case 5://{2, 1, 0, 3}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = face_dof1D_cnt-1-kf1;
-               break;
-            case 6://{3, 0, 1, 2}
-               k1 = face_dof1D_cnt-1-kf2;
-               k2 = kf1;
-               break;
-            case 7://{3, 2, 1, 0}
-               k1 = kf1;
-               k2 = face_dof1D_cnt-1-kf2;
-               break;
-            default:
-               mfem_error("This orientation does not exist in 3D");
-               break;
-         }
-         break;
-      default: MFEM_ABORT("This face_id does not exist in 3D");
-   }
-   return k1 + face_dof1D_cnt * k2;
-}
-
-int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
-                         int face_dof_id, int face_dof1D_cnt)
-{
-   switch (dim)
-   {
-      case 1:
-         return face_dof_id;
-      case 2:
-         if (loc_face_id <= 1)
-         {
-            // SOUTH or EAST (canonical ordering)
-            return face_dof_id;
-         }
-         else
-         {
-            // NORTH or WEST (counter-canonical ordering)
-            return face_dof1D_cnt - 1 - face_dof_id;
-         }
-      case 3:
-         return GetLocalFaceDofIndex3D(loc_face_id, face_orient,
-                                       face_dof_id, face_dof1D_cnt);
-      default: MFEM_ABORT("Dimension too high!"); return 0;
-   }
-}
-
 void GetMinMax(const ParGridFunction &g, double &min, double &max)
 {
    double min_loc = g.Min(), max_loc = g.Max();
    MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-}
-
-// Assuming L2 elements.
-void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
-{
-   switch (gtype)
-   {
-      case Geometry::SQUARE:
-      {
-         dofs.SetSize(p+1,4);
-         for (int i = 0; i <= p; i++)
-         {
-            dofs(i,0) = i;
-            dofs(i,1) = i*(p+1) + p;
-            dofs(i,2) = (p+1)*(p+1) - 1 - i;
-            dofs(i,3) = (p-i)*(p+1);
-         }
-         break;
-      }
-      case Geometry::CUBE:
-      {
-         dofs.SetSize((p+1)*(p+1), 6);
-         for (int bdrID = 0; bdrID < 6; bdrID++)
-         {
-            int o(0);
-            switch (bdrID)
-            {
-               case 0:
-                  for (int i = 0; i < (p+1)*(p+1); i++)
-                  {
-                     dofs(o++,bdrID) = i;
-                  }
-                  break;
-               case 1:
-                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
-                     for (int j = 0; j < p+1; j++)
-                     {
-                        dofs(o++,bdrID) = i+j;
-                     }
-                  break;
-               case 2:
-                  for (int i = p; i < (p+1)*(p+1)*(p+1); i+=p+1)
-                  {
-                     dofs(o++,bdrID) = i;
-                  }
-                  break;
-               case 3:
-                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
-                     for (int j = p*(p+1); j < (p+1)*(p+1); j++)
-                     {
-                        dofs(o++,bdrID) = i+j;
-                     }
-                  break;
-               case 4:
-                  for (int i = 0; i <= (p+1)*((p+1)*(p+1)-1); i+=p+1)
-                  {
-                     dofs(o++,bdrID) = i;
-                  }
-                  break;
-               case 5:
-                  for (int i = p*(p+1)*(p+1); i < (p+1)*(p+1)*(p+1); i++)
-                  {
-                     dofs(o++,bdrID) = i;
-                  }
-                  break;
-            }
-         }
-         break;
-      }
-      default: MFEM_ABORT("Geometry not implemented.");
-   }
 }
