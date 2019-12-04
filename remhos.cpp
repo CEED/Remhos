@@ -818,6 +818,8 @@ int main(int argc, char *argv[])
    }
 
    // In case of basic discrete upwinding, add boundary terms.
+   // TODO these will still be used for the matrix-based HO solver option.
+   /*
    if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && !OptScheme)
    {
       if (exec_mode == 0)
@@ -835,6 +837,7 @@ int main(int argc, char *argv[])
                                     new DGTraceIntegrator(v_coef, -1.0, -0.5)) );
       }
    }
+   */
 
    ParLinearForm b(&pfes);
    b.AddBdrFaceIntegrator(
@@ -1637,21 +1640,14 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 
       // Discretization and monotonicity terms.
       lom.D.Mult(x, y);
-      if (!lom.OptScheme)
-      {
-         y += b; // Only use b, in case that no flux lumping is used.
-      }
 
       // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
       for (k = 0; k < ne; k++)
       {
          // Boundary contributions
-         if (lom.OptScheme)
+         for (i = 0; i < dofs.numBdrs; i++)
          {
-            for (i = 0; i < dofs.numBdrs; i++)
-            {
-               LinearFluxLumping(k, nd, i, x, y, alpha);
-            }
+            LinearFluxLumping(k, nd, i, x, y, alpha);
          }
 
          // Compute min / max over elements (needed for FCT).
@@ -2225,28 +2221,22 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.SpMat().GetDiag(lumpedM);
 
       // Boundary contributions.
-      const bool NeedBdr = (lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                              lom.MonoType != DiscUpw_FCT));
-      if (NeedBdr)
+      asmbl.bdrInt = 0.;
+      Mesh *mesh = lom.fes->GetMesh();
+      const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+
+      for (int k = 0; k < ne; k++)
       {
-         asmbl.bdrInt = 0.;
+         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-         Mesh *mesh = lom.fes->GetMesh();
-         const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
-         Array<int> bdrs, orientation;
-         FaceElementTransformations *Trans;
-
-         for (int k = 0; k < ne; k++)
+         for (int i = 0; i < dofs.numBdrs; i++)
          {
-            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-            for (int i = 0; i < dofs.numBdrs; i++)
-            {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-            }
+            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
          }
       }
    }

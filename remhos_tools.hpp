@@ -359,18 +359,13 @@ public:
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      const bool NeedBdr = lom.OptScheme || (lom.MonoType != DiscUpw &&
-                                             lom.MonoType != DiscUpw_FCT);
-
       const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
                                                  lom.MonoType == ResDist_FCT
                                                  || lom.MonoType == ResDist_Monolithic );
 
-      if (NeedBdr)
-      {
-         bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
-         bdrInt = 0.;
-      }
+      bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
+      bdrInt = 0.;
+
       if (NeedSubWgts)
       {
          VolumeTerms = lom.VolumeTerms;
@@ -382,22 +377,20 @@ public:
       }
 
       // Initialization for transport mode.
-      if (exec_mode == 0 && (NeedBdr || NeedSubWgts))
+      if (exec_mode == 0)
       {
          for (k = 0; k < ne; k++)
          {
-            if (NeedBdr)
-            {
-               if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
-               else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
-               else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
+            if (dim==1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim==2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim==3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-               for (i = 0; i < dofs.numBdrs; i++)
-               {
-                  Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-                  ComputeFluxTerms(k, i, Trans, lom);
-               }
+            for (i = 0; i < dofs.numBdrs; i++)
+            {
+               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               ComputeFluxTerms(k, i, Trans, lom);
             }
+
             if (NeedSubWgts)
             {
                for (m = 0; m < dofs.numSubcells; m++)
