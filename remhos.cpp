@@ -558,7 +558,7 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = ResDist_FCT;
+   MONOTYPE MonoType = None;
    bool OptScheme = true;
    smth_ind = 0;
    double t_final = 4.0;

@@ -25,7 +25,7 @@ namespace mfem
 NeumannSolver::NeumannSolver(ParFiniteElementSpace &space,
                              SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
                              Assembly &a)
-   : HOSolver(space), M(M_), K(K_), M_lumped(Mlump), assembly(a) { }
+   : HOSolver(space), M(M_), K(K_), M_lumped(Mlump), assembly(a) { printf("constructed Neumman solver \n");}
 
 void NeumannSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
