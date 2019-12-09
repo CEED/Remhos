@@ -808,14 +808,21 @@ int main(int argc, char *argv[])
    m.AddDomainIntegrator(new MassIntegrator);
 
    ParBilinearForm k(&pfes);
+   ParBilinearForm pak(&pfes); //Partial assembly version of k
    if (exec_mode == 0)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      pak.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      pak.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
+
+   //Set partial assembly level
+   pak.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+   pak.Assemble();
 
    // In case of basic discrete upwinding, add boundary terms.
    // TODO these will still be used for the matrix-based HO solver option.
@@ -1180,7 +1187,7 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-      ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+      ho_solver = new NeumannSolver(pfes, m.SpMat(), pak, lumpedM, asmbl);
    }
 
    // Print the starting meshes and initial condition.

@@ -40,13 +40,14 @@ class Assembly;
 class NeumannSolver : public HOSolver
 {
 protected:
-   const SparseMatrix &M, &K;
+   const SparseMatrix &M;
+   const ParBilinearForm &K;
    const Vector &M_lumped;
    Assembly &assembly;
 
 public:
    NeumannSolver(ParFiniteElementSpace &space,
-                 SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
+                 SparseMatrix &M_, ParBilinearForm &K_, Vector &Mlump,
                  Assembly &a);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
