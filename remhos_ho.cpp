@@ -22,6 +22,15 @@ using namespace std;
 namespace mfem
 {
 
+PASolver::PASolver(ParFiniteElementSpace &space,
+                   ParBilinearForm &M_, ParBilinearForm &K_)
+  : HOSolver(space), M(M_), K(K_) {}
+
+void PASolver::CalcHOSolution(const Vector &u, Vector &du) const
+{
+
+}
+
 NeumannSolver::NeumannSolver(ParFiniteElementSpace &space,
                              SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
                              Assembly &a)
