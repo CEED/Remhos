@@ -807,6 +807,10 @@ int main(int argc, char *argv[])
    ParBilinearForm m(&pfes);
    m.AddDomainIntegrator(new MassIntegrator);
 
+   ParBilinearForm pma(&pfes);
+   ConstantCoefficient one(1.0);
+   pma.AddDomainIntegrator(new MassIntegrator(one));
+
    ParBilinearForm k(&pfes);
    ParBilinearForm pak(&pfes); //Partial assembly version of k
    if (exec_mode == 0)
@@ -821,7 +825,10 @@ int main(int argc, char *argv[])
    }
 
    //Set partial assembly level
+   pma.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    pak.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+
+   pma.Assemble();
    pak.Assemble();
 
    // In case of basic discrete upwinding, add boundary terms.
@@ -1187,7 +1194,8 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-      ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+     //ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+      ho_solver = new PASolver(pfes, pma, pak);
    }
 
    // Print the starting meshes and initial condition.

@@ -28,6 +28,12 @@ PASolver::PASolver(ParFiniteElementSpace &space,
 
 void PASolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
+   const int n = u.Size(), ne = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
+   Vector rhs(n), res(n);
+   Vector alpha(ndof); alpha = 1.0;
+
+   //K multiply by advection matrix
+   K.Mult(u, rhs);
 
 }
 
