@@ -42,10 +42,14 @@ class PASolver : public HOSolver
 
 protected:
   const ParBilinearForm &M, &K;
+  mutable Vector z;
+  const Vector &M_lumped;
+  Assembly &assembly;
 
 public:
   PASolver(ParFiniteElementSpace &space,
-           ParBilinearForm &M_, ParBilinearForm &K_);
+           ParBilinearForm &M_, ParBilinearForm &K_,
+           Vector &Mlump, Assembly &a);
 
   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };
