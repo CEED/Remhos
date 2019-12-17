@@ -1194,8 +1194,8 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-     ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
-     //ho_solver = new PASolver(pfes, pma, pak, lumpedM, asmbl);
+     //ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+     ho_solver = new PASolver(pfes, pma, pak, lumpedM, asmbl);
    }
 
    // Print the starting meshes and initial condition.
