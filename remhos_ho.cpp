@@ -35,6 +35,10 @@ void PASolver::CalcHOSolution(const Vector &u, Vector &du) const
    Vector alpha(ndof); alpha = 1.0;
 
    // K multiplies a ldofs Vector, as we're always doing DG.
+   ParBilinearForm &kk = const_cast<ParBilinearForm &>(K);
+   ParBilinearForm &mm = const_cast<ParBilinearForm &>(M);
+   kk.Assemble();
+   mm.Assemble();
    K.Mult(u, rhs);
 
    // Face contributions.

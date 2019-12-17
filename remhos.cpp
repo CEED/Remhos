@@ -1194,8 +1194,8 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-     ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
-     //ho_solver = new PASolver(pfes, pma, pak, lumpedM, asmbl);
+     //ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
+     ho_solver = new PASolver(pfes, pma, pak, lumpedM, asmbl);
    }
 
    // Print the starting meshes and initial condition.
@@ -1303,8 +1303,7 @@ int main(int argc, char *argv[])
       if (MonoType != None && !smth_ind)
       {
          double umin_new, umax_new;         
-         GetMinMax(u, umin_new, umax_new);
-         /*         
+         GetMinMax(u, umin_new, umax_new);        
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
             MFEM_VERIFY(umin_new > umin - 1e-12, "Undershoot");
@@ -1317,7 +1316,6 @@ int main(int argc, char *argv[])
             MFEM_VERIFY(umin_new > 0.0 - 1e-12, "Undershoot");
             MFEM_VERIFY(umax_new < 1.0 + 1e-12, "Overshoot");
          }
-         */
       }
 
       if (exec_mode == 1)
@@ -2236,6 +2234,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       ml.SpMat().GetDiag(lumpedM);
+
 
       // Boundary contributions.
       asmbl.bdrInt = 0.;
