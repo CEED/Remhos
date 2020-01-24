@@ -82,6 +82,9 @@ ifeq ($(USE_LUA),YES)
   MFEM_LIBS += -L$(LUA)/include -llua
 endif
 
+MFEM_LIBS += -L$(MFEM_DIR)/miniapps/common -lmfem-common -Wl,-rpath,$(abspath\
+   $(MFEM_DIR)/miniapps/common)
+
 CXX = $(MFEM_CXX)
 CPPFLAGS = $(MFEM_CPPFLAGS)
 CXXFLAGS = $(MFEM_CXXFLAGS)

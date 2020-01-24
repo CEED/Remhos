@@ -65,6 +65,7 @@
 //               with VisIt (visit.llnl.gov) is also illustrated.
 
 #include "mfem.hpp"
+#include "miniapps/common/mfem-common.hpp"
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
@@ -72,55 +73,6 @@
 
 using namespace std;
 using namespace mfem;
-
-void VisualizeField(socketstream &sock, const char *vishost, int visport,
-                    ParGridFunction &gf, const char *title,
-                    int x, int y, int w, int h, bool vec)
-{
-   ParMesh &pmesh = *gf.ParFESpace()->GetParMesh();
-   MPI_Comm comm = pmesh.GetComm();
-
-   int num_procs, myid;
-   MPI_Comm_size(comm, &num_procs);
-   MPI_Comm_rank(comm, &myid);
-
-   bool newly_opened = false;
-   int connection_failed;
-
-   do
-   {
-      if (myid == 0)
-      {
-         if (!sock.is_open() || !sock)
-         {
-            sock.open(vishost, visport);
-            sock.precision(8);
-            newly_opened = true;
-         }
-         sock << "solution\n";
-      }
-
-      pmesh.PrintAsOne(sock);
-      gf.SaveAsOne(sock);
-
-      if (myid == 0 && newly_opened)
-      {
-         sock << "window_title '" << title << "'\n"
-              << "window_geometry "
-              << x << " " << y << " " << w << " " << h << "\n"
-              << "keys maaAcl";
-         if ( vec ) { sock << "vvv"; }
-         sock << endl;
-      }
-
-      if (myid == 0)
-      {
-         connection_failed = !sock && !newly_opened;
-      }
-      MPI_Bcast(&connection_failed, 1, MPI_INT, 0, comm);
-   }
-   while (connection_failed);
-}
 
 #ifdef USE_LUA
 #include "lua.hpp"
@@ -934,7 +886,6 @@ int main(int argc, char *argv[])
       // The mesh corresponding to Bezier subcells of order p is constructed.
       // NOTE: The mesh is assumed to consist of quads or hexes.
       MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
-      MFEM_VERIFY(dim > 1, "Not implemented for dim = 1");
 
       // Get a uniformly refined mesh.
       lom.subcell_mesh = new ParMesh(&pmesh, order, BasisType::ClosedUniform);
@@ -1236,8 +1187,8 @@ int main(int argc, char *argv[])
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 350, Wh = 350; // window size
-      VisualizeField(sout, vishost, visport, u,
-                     "Solution", Wx, Wy, Ww, Wh, false);
+      common::VisualizeField(sout, vishost, visport, u,
+                             "Solution", Wx, Wy, Ww, Wh);
    }
 
    // check for conservation
@@ -1340,8 +1291,8 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
-            VisualizeField(sout, vishost, visport,
-                           u, "Solution", Wx, Wy, Ww, Wh, false);
+            common::VisualizeField(sout, vishost, visport,
+                                   u, "Solution", Wx, Wy, Ww, Wh);
          }
          if (visit)
          {
