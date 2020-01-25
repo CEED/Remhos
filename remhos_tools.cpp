@@ -307,7 +307,7 @@ void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
       {
          dofs.SetSize(1, 2);
          dofs(0, 0) = 0;
-         dofs(0, 1) = 1;
+         dofs(0, 1) = p;
          break;
       }
       case Geometry::SQUARE:

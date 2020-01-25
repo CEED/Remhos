@@ -867,10 +867,6 @@ int main(int argc, char *argv[])
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
 
-   // For linear elements, OptScheme has already been disabled.
-   const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
-                                              lom.MonoType == ResDist_FCT ||
-                                              lom.MonoType == ResDist_Monolithic);
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
