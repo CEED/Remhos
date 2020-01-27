@@ -1238,15 +1238,19 @@ int main(int argc, char *argv[])
          GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
-            MFEM_VERIFY(umin_new > umin - 1e-12, "Undershoot");
-            MFEM_VERIFY(umax_new < umax + 1e-12, "Overshoot");
+            MFEM_VERIFY(umin_new > umin - 1e-12,
+                        "Undershoot of " << umin - umin_new);
+            MFEM_VERIFY(umax_new < umax + 1e-12,
+                        "Overshoot of " << umax_new - umax);
             umin = umin_new;
             umax = umax_new;
          }
          else
          {
-            MFEM_VERIFY(umin_new > 0.0 - 1e-12, "Undershoot");
-            MFEM_VERIFY(umax_new < 1.0 + 1e-12, "Overshoot");
+            MFEM_VERIFY(umin_new > 0.0 - 1e-12,
+                        "Undershoot of " << 0.0 - umin_new);
+            MFEM_VERIFY(umax_new < 1.0 + 1e-12,
+                        "Overshoot of " << umax_new - 1.0);
          }
       }
 
