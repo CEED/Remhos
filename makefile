@@ -82,6 +82,9 @@ ifeq ($(USE_LUA),YES)
   MFEM_LIBS += -L$(LUA)/include -llua
 endif
 
+MFEM_LIBS += -L$(MFEM_DIR)/miniapps/common -lmfem-common -Wl,-rpath,$(abspath\
+   $(MFEM_DIR)/miniapps/common)
+
 CXX = $(MFEM_CXX)
 CPPFLAGS = $(MFEM_CPPFLAGS)
 CXXFLAGS = $(MFEM_CXXFLAGS)
@@ -115,10 +118,10 @@ LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
 CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
-SOURCE_FILES = remhos.cpp remhos_fct.cpp
+SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_ho.cpp remhos_fct.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
-HEADER_FILES = remhos_fct.hpp
+HEADER_FILES = remhos_tools.hpp remhos_ho.hpp remhos_fct.hpp
 
 # Targets
 
