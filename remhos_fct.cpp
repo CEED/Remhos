@@ -21,22 +21,21 @@ using namespace std;
 namespace mfem
 {
 
-void ClipScaleSolver::CalcMHCSolution(const Vector &u, const Vector &m,
+void ClipScaleSolver::CalcFCTSolution(const Vector &u, const Vector &m,
                                       const Vector &du_ho, const Vector &du_lo,
                                       const Vector &u_min, const Vector &u_max,
                                       Vector &du) const
 {
    const int NE = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
-   Vector fClipped(nd);
+   Vector f_clip(nd);
 
    int dof_id;
-   double sumPos, sumNeg, u_new_ho, u_new_clip;
+   double sumPos, sumNeg, u_new_ho, u_new_lo, new_mass, f_clip_min, f_clip_max;
    const double eps = 1.0e-15;
 
    for (int k = 0; k < NE; k++)
    {
-      fClipped = 0.0;
       sumPos = sumNeg = 0.0;
 
       // Clip.
@@ -45,32 +44,39 @@ void ClipScaleSolver::CalcMHCSolution(const Vector &u, const Vector &m,
          dof_id = k*nd+j;
 
          u_new_ho   = u(dof_id) + dt * du_ho(dof_id);
-         u_new_clip = min(u_max(dof_id), max(u_new_ho, u_min(dof_id)) );
+         u_new_lo   = u(dof_id) + dt * du_lo(dof_id);
 
-         fClipped(j) = m(dof_id) / dt
-                       * ( u_new_clip - (u(dof_id) + dt * du_lo(dof_id)) );
+         f_clip_min = m(dof_id) / dt * (u_min(dof_id) - u_new_lo);
+         f_clip_max = m(dof_id) / dt * (u_max(dof_id) - u_new_lo);
 
-         sumPos += max(fClipped(j), 0.);
-         sumNeg += min(fClipped(j), 0.);
+         f_clip(j) = m(dof_id) * (du_ho(dof_id) - du_lo(dof_id));
+         f_clip(j) = min(f_clip_max, max(f_clip_min, f_clip(j)));
+
+         sumNeg += min(f_clip(j), 0.0);
+         sumPos += max(f_clip(j), 0.0);
       }
+
+      new_mass = sumNeg + sumPos;
 
       // Rescale.
       for (int j = 0; j < nd; j++)
       {
-         if (sumPos + sumNeg > eps && fClipped(j) > eps)
+         if (new_mass > eps)
          {
-            fClipped(j) *= - sumNeg / sumPos;
+            f_clip(j) = min(0.0, f_clip(j)) -
+                        max(0.0, f_clip(j)) * sumNeg / sumPos;
          }
-         if (sumPos + sumNeg < -eps && fClipped(j) < -eps)
+         if (new_mass < -eps)
          {
-            fClipped(j) *= - sumPos / sumNeg;
+            f_clip(j) = max(0.0, f_clip(j)) -
+                        min(0.0, f_clip(j)) * sumPos / sumNeg;
          }
 
-         // Set du to the discrete time derivative featuring the high order anti-
-         // diffusive reconstruction that leads to an forward Euler updated
-         // admissible solution.
+         // Set du to the discrete time derivative featuring the high order
+         // anti-diffusive reconstruction that leads to an forward Euler
+         // updated admissible solution.
          dof_id = k*nd+j;
-         du(dof_id) = du_lo(dof_id) + fClipped(j) / m(dof_id);
+         du(dof_id) = du_lo(dof_id) + f_clip(j) / m(dof_id);
       }
    }
 }

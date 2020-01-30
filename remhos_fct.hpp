@@ -23,14 +23,14 @@ namespace mfem
 {
 
 // Monotone, High-order, Conservative Solver.
-class MHCSolver
+class FCTSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
    double dt;
 
 public:
-   MHCSolver(ParFiniteElementSpace &space, double dt_) : pfes(space), dt(dt_) {}
+   FCTSolver(ParFiniteElementSpace &space, double dt_) : pfes(space), dt(dt_) {}
 
    virtual void UpdateTimeStep(double dt_) { dt = dt_; }
 
@@ -38,16 +38,19 @@ public:
    // bounds preservation: u_min_i <= u_i + dt du_i <= u_max_i,
    // conservation:        sum m_i (u_i + dt du_ho_i) = sum m_i (u_i + dt du_i).
    // Some methods utilize du_lo as a backup choice, as it satisfies the above.
-   virtual void CalcMHCSolution(const Vector &u, const Vector &m,
+   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const = 0;
 };
 
-class ClipScaleSolver : public MHCSolver
+class ClipScaleSolver : public FCTSolver
 {
 public:
-   virtual void CalcMHCSolution(const Vector &u, const Vector &m,
+   ClipScaleSolver(ParFiniteElementSpace &space, double dt_)
+      : FCTSolver(space, dt_) { }
+
+   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;

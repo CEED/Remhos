@@ -450,8 +450,8 @@ private:
    SmoothnessIndicator &si;
    DofInfo &dofs;
 
-   MHCSolver *mhc_solver;
    HOSolver &ho_solver;
+   FCTSolver *fct_solver;
 
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
@@ -461,7 +461,7 @@ public:
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator &si_, HOSolver &hos, MHCSolver *mhcs);
+                SmoothnessIndicator &si_, HOSolver &hos, FCTSolver *fct);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -1200,12 +1200,17 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   MHCSolver *mhc_solver = NULL;
+   FCTSolver *fct_solver = NULL;
+   if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
+   {
+      fct_solver = new ClipScaleSolver(pfes, dt);
+   }
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
                                         k, k.SpMat(),
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, si, *ho_solver, mhc_solver);
+                                        asmbl, lom, dofs, si,
+                                        *ho_solver, fct_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1418,6 +1423,7 @@ int main(int argc, char *argv[])
 
    // 10. Free the used memory.
    delete adv;
+   delete fct_solver;
    delete ho_solver;
 
    delete ode_solver;
@@ -2145,7 +2151,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator &si_, HOSolver &hos,
-                           MHCSolver *mhc) :
+                           FCTSolver *fct) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -2153,7 +2159,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs), si(si_),
-   ho_solver(hos), mhc_solver(mhc) { }
+   ho_solver(hos), fct_solver(fct) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -2216,7 +2222,10 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
          ComputeLowOrderSolution(x, yL);
          ho_solver.CalcHOSolution(x, yH);
-         ComputeFCTSolution(x, yH, yL, y);
+         //ComputeFCTSolution(x, yH, yL, y);
+         dofs.ComputeBounds();
+         fct_solver->CalcFCTSolution(x, lumpedM, yH, yL,
+                                     dofs.xi_min, dofs.xi_max, y);
       }
    }
 }
