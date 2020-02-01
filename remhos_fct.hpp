@@ -34,7 +34,7 @@ public:
 
    virtual void UpdateTimeStep(double dt_) { dt = dt_; }
 
-   // Calculate du, so that we have
+   // Calculate du that satisfies the following:
    // bounds preservation: u_min_i <= u_i + dt du_i <= u_max_i,
    // conservation:        sum m_i (u_i + dt du_ho_i) = sum m_i (u_i + dt du_i).
    // Some methods utilize du_lo as a backup choice, as it satisfies the above.
@@ -48,6 +48,23 @@ class ClipScaleSolver : public FCTSolver
 {
 public:
    ClipScaleSolver(ParFiniteElementSpace &space, double dt_)
+      : FCTSolver(space, dt_) { }
+
+   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
+                                const Vector &du_ho, const Vector &du_lo,
+                                const Vector &u_min, const Vector &u_max,
+                                Vector &du) const;
+};
+
+// TODO doesn't conserve mass exactly for some reason.
+class NonlinearPenaltySolver : public FCTSolver
+{
+private:
+   void CorrectFlux(Vector &fluxL, Vector &fluxH, Vector &flux_fix) const;
+   double get_max_on_cellNi(Vector &fluxH) const;
+
+public:
+   NonlinearPenaltySolver(ParFiniteElementSpace &space, double dt_)
       : FCTSolver(space, dt_) { }
 
    virtual void CalcFCTSolution(const Vector &u, const Vector &m,

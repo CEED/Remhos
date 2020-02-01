@@ -1203,6 +1203,7 @@ int main(int argc, char *argv[])
    FCTSolver *fct_solver = NULL;
    if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
    {
+      //fct_solver = new NonlinearPenaltySolver(pfes, dt);
       fct_solver = new ClipScaleSolver(pfes, dt);
    }
 
