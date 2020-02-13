@@ -432,6 +432,7 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    SparseMatrix &M, &K;
+   ParBilinearForm &M_HO, &K_HO;
    Vector &lumpedM;
    const GridFunction &inflow_gf;
    const Vector &b;
@@ -455,6 +456,7 @@ public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
                 Vector &_lumpedM,
                 ParBilinearForm &Kbf_, SparseMatrix &_K,
+                ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                 const Vector &_b, const GridFunction &inflow,
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
@@ -469,9 +471,6 @@ public:
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
-
-   // Mass matrix solve, addressing the bad Bernstein condition number.
-   virtual void NeumannSolve(const Vector &b, Vector &x) const;
 
    virtual void LinearFluxLumping(const int k, const int nd,
                                   const int BdrID, const Vector &x,
@@ -511,6 +510,7 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    MONOTYPE MonoType = None;
+   bool pa = false;
    bool OptScheme = true;
    smth_ind = 0;
    double t_final = 4.0;
@@ -551,6 +551,9 @@ int main(int argc, char *argv[])
                   "                     3 - residual distribution - LO,\n\t"
                   "                     4 - residual distribution - FCT,n\t"
                   "                     5 - residual distribution - monolithic.");
+   args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
+                  "--no-partial-assembly",
+                  "Enable or disable partial assembly for the HO solution.");
    args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
                   "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&smth_ind, "-si", "--smth_ind",
@@ -759,29 +762,37 @@ int main(int argc, char *argv[])
    ParBilinearForm m(&pfes);
    m.AddDomainIntegrator(new MassIntegrator);
 
-   ParBilinearForm pma(&pfes);
+   ParBilinearForm M_HO(&pfes);
    ConstantCoefficient one(1.0);
-   pma.AddDomainIntegrator(new MassIntegrator(one));
+   M_HO.AddDomainIntegrator(new MassIntegrator(one));
 
    ParBilinearForm k(&pfes);
-   ParBilinearForm pak(&pfes); //Partial assembly version of k
+   ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
-      pak.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      pak.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
-   //Set partial assembly level
-   pma.SetAssemblyLevel(AssemblyLevel::PARTIAL);
-   pak.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+   if (pa)
+   {
+      M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+   }
 
-   pma.Assemble();
-   pak.Assemble();
+   M_HO.Assemble();
+   K_HO.Assemble(0);
+
+   if (pa == false)
+   {
+      M_HO.Finalize();
+      K_HO.Finalize();
+   }
 
    // In case of basic discrete upwinding, add boundary terms.
    // TODO these will still be used for the matrix-based HO solver option.
@@ -1141,8 +1152,7 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (true)
    {
-     //ho_solver = new NeumannSolver(pfes, m.SpMat(), k.SpMat(), lumpedM, asmbl);
-     ho_solver = new PASolver(pfes, pma, pak, lumpedM, asmbl);
+     ho_solver = new NeumannSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
    }
 
    // Print the starting meshes and initial condition.
@@ -1214,7 +1224,7 @@ int main(int argc, char *argv[])
    //    iterations, ti, with a time-step dt).
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
-                                        k, k.SpMat(),
+                                        k, k.SpMat(), M_HO, K_HO,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, si, *ho_solver);
 
@@ -1455,33 +1465,6 @@ int main(int argc, char *argv[])
    }
 
    return 0;
-}
-
-
-void FE_Evolution::NeumannSolve(const Vector &f, Vector &x) const
-{
-   int i, iter, n = f.Size(), max_iter = 20;
-   Vector y(n);
-   const double abs_tol = 1.e-4;
-
-   x = 0.;
-
-   for (iter = 1; iter <= max_iter; iter++)
-   {
-      M.Mult(x, y);
-      y -= f;
-
-      double resid_loc = y.Norml2(); resid_loc *= resid_loc;
-      double resid;
-      MPI_Allreduce(&resid_loc, &resid, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      resid = std::sqrt(resid);
-      if (resid <= abs_tol) { return; }
-
-      for (i = 0; i < n; i++)
-      {
-         x(i) -= y(i) / lumpedM(i);
-      }
-   }
 }
 
 void FE_Evolution::LinearFluxLumping(const int k, const int nd,
@@ -2150,6 +2133,7 @@ void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
                            ParBilinearForm &Kbf_, SparseMatrix &_K,
+                           ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                            const Vector &_b, const GridFunction &inflow,
                            GridFunction &pos, GridFunction *sub_pos,
                            GridFunction &vel, GridFunction &sub_vel,
@@ -2157,7 +2141,9 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator &si_, HOSolver &hos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), lumpedM(_lumpedM), inflow_gf(inflow), b(_b),
+   M(_M), K(_K), lumpedM(_lumpedM),
+   M_HO(M_HO_), K_HO(K_HO_),
+   inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
@@ -2176,8 +2162,12 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       {
          add(start_submesh_pos, t, submesh_vel, *submesh_pos);
       }
+      // Reset precomputed geometric data.
+      Mbf.GetFES()->GetMesh()->DeleteGeometricFactors();
 
       // Reassemble on the new mesh. Element contributions.
+      // TODO: remove these.
+      // Currently needed to have the sparse matrices used by the LO methods.
       Mbf.BilinearForm::operator=(0.0);
       Mbf.Assemble();
       Kbf.BilinearForm::operator=(0.0);
@@ -2186,6 +2176,10 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       ml.Assemble();
       ml.SpMat().GetDiag(lumpedM);
 
+      M_HO.BilinearForm::operator=(0.0);
+      M_HO.Assemble();
+      K_HO.BilinearForm::operator=(0.0);
+      K_HO.Assemble(0);
 
       // Boundary contributions.
       asmbl.bdrInt = 0.;

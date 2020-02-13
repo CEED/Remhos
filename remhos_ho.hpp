@@ -37,33 +37,16 @@ public:
 
 class Assembly;
 
-class PASolver : public HOSolver
-{
-
-protected:
-  const ParBilinearForm &M, &K;
-  mutable Vector z;
-  const Vector &M_lumped;
-  Assembly &assembly;
-
-public:
-  PASolver(ParFiniteElementSpace &space,
-           ParBilinearForm &M_, ParBilinearForm &K_,
-           Vector &Mlump, Assembly &a);
-
-  virtual void CalcHOSolution(const Vector &u, Vector &du) const;
-};
-
 class NeumannSolver : public HOSolver
 {
 protected:
-   const SparseMatrix &M, &K;
+   const ParBilinearForm &M, &K;
    const Vector &M_lumped;
    Assembly &assembly;
 
 public:
    NeumannSolver(ParFiniteElementSpace &space,
-                 SparseMatrix &M_, SparseMatrix &K_, Vector &Mlump,
+                 ParBilinearForm &M_, ParBilinearForm &K_, Vector &Mlump,
                  Assembly &a);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
