@@ -180,15 +180,32 @@ private:
 
       for (k = 0; k < ne; k++)
       {
-         if (dim==1)
+         if (dim == 1)
          {
             pmesh->GetElementVertices(k, bdrs);
 
             for (i = 0; i < numBdrs; i++)
             {
+               const int nbr_cnt = face_to_el->RowSize(bdrs[i]);
+               if (nbr_cnt == 1)
+               {
+                  // No neighbor element.
+                  NbrDof(k, i, 0) = -1;
+                  continue;
+               }
+
+               int el1_id, el2_id, nbr_id;
+               pmesh->GetFaceElements(bdrs[i], &el1_id, &el2_id);
+               if (el2_id < 0)
+               {
+                  // This element is in a different mpi task.
+                  el2_id = -1 - el2_id + ne;
+               }
+               nbr_id = (el1_id == k) ? el2_id : el1_id;
+
                Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
                nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
-               NbrDof(k,i,0) = nbr*nd + BdrDofs(0,(i+1)%2);
+               NbrDof(k,i,0) = nbr_id*nd + BdrDofs(0, (i+1) % 2);
             }
          }
          else if (dim==2)
