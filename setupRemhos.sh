@@ -11,7 +11,7 @@ tar -zxvf metis-4.0.3.tar.gz && cd metis-4.0.3 &&
 make -j 3 && cd .. &&
 ln -s metis-4.0.3 metis-4.0 &&
 git clone --recursive https://github.com/mfem/mfem.git &&
-cd mfem && git checkout convection-pa && make parallel -j 3
+cd mfem && make parallel -j 3
 cd ../Remhos && make -j 3
 
 
