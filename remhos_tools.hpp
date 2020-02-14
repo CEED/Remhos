@@ -186,7 +186,7 @@ private:
 
             for (i = 0; i < numBdrs; i++)
             {
-               const int nbr_cnt = face_to_el->RowSize(bdrs[0]);
+               const int nbr_cnt = face_to_el->RowSize(bdrs[i]);
                if (nbr_cnt == 1)
                {
                   // No neighbor element.
