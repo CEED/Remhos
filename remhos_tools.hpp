@@ -31,6 +31,37 @@ int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs);
 
+class DofInfo;
+
+class SmoothnessIndicator
+{
+private:
+   const int type;
+   const double param;
+   ParFiniteElementSpace &pfes_CG_sub, &pfes_DG;
+   SparseMatrix Mmat, LaplaceOp, *MassMixed;
+   BilinearFormIntegrator *MassInt;
+   Vector lumpedMH1;
+   DenseMatrix ShapeEval;
+
+   void ComputeVariationalMatrix(DofInfo &dof_info);
+   void ApproximateLaplacian(const Vector &x, ParGridFunction &y);
+   void ComputeFromSparsity(const SparseMatrix &K, const ParGridFunction &x,
+                            Vector &x_min, Vector &x_max);
+
+public:
+   SmoothnessIndicator(int type_id,
+                       ParFiniteElementSpace &pfes_CG_sub_,
+                       ParFiniteElementSpace &pfes_DG_,
+                       ParGridFunction &u,
+                       DofInfo &dof_info);
+   ~SmoothnessIndicator();
+
+   void ComputeSmoothnessIndicator(const Vector &u, ParGridFunction &si_vals_u);
+
+   Vector DG2CG;
+};
+
 struct LowOrderMethod
 {
    MONOTYPE MonoType;
