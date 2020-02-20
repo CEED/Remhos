@@ -22,15 +22,20 @@
 namespace mfem
 {
 
+class SmoothnessIndicator;
+
 // Monotone, High-order, Conservative Solver.
 class FCTSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
+   SmoothnessIndicator *smth_indicator;
    double dt;
 
 public:
-   FCTSolver(ParFiniteElementSpace &space, double dt_) : pfes(space), dt(dt_) {}
+   FCTSolver(ParFiniteElementSpace &space,
+             SmoothnessIndicator *si, double dt_)
+      : pfes(space), smth_indicator(si), dt(dt_) { }
 
    virtual void UpdateTimeStep(double dt_) { dt = dt_; }
 
@@ -47,8 +52,9 @@ public:
 class ClipScaleSolver : public FCTSolver
 {
 public:
-   ClipScaleSolver(ParFiniteElementSpace &space, double dt_)
-      : FCTSolver(space, dt_) { }
+   ClipScaleSolver(ParFiniteElementSpace &space,
+                   SmoothnessIndicator *si, double dt_)
+      : FCTSolver(space, si, dt_) { }
 
    virtual void CalcFCTSolution(const Vector &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
@@ -64,8 +70,9 @@ private:
    double get_max_on_cellNi(Vector &fluxH) const;
 
 public:
-   NonlinearPenaltySolver(ParFiniteElementSpace &space, double dt_)
-      : FCTSolver(space, dt_) { }
+   NonlinearPenaltySolver(ParFiniteElementSpace &space,
+                          SmoothnessIndicator *si, double dt_)
+      : FCTSolver(space, si, dt_) { }
 
    virtual void CalcFCTSolution(const Vector &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,

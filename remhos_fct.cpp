@@ -15,6 +15,7 @@
 // testbed platforms, in support of the nation's exascale computing imperative.
 
 #include "remhos_fct.hpp"
+#include "remhos_tools.hpp"
 
 using namespace std;
 
@@ -32,7 +33,15 @@ void ClipScaleSolver::CalcFCTSolution(const Vector &u, const Vector &m,
 
    int dof_id;
    double sumPos, sumNeg, u_new_ho, u_new_lo, new_mass, f_clip_min, f_clip_max;
+   double umin, umax;
    const double eps = 1.0e-15;
+
+   // Smoothness indicator.
+   ParGridFunction si_val;
+   if (smth_indicator)
+   {
+      smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+   }
 
    for (int k = 0; k < NE; k++)
    {
@@ -46,8 +55,15 @@ void ClipScaleSolver::CalcFCTSolution(const Vector &u, const Vector &m,
          u_new_ho   = u(dof_id) + dt * du_ho(dof_id);
          u_new_lo   = u(dof_id) + dt * du_lo(dof_id);
 
-         f_clip_min = m(dof_id) / dt * (u_min(dof_id) - u_new_lo);
-         f_clip_max = m(dof_id) / dt * (u_max(dof_id) - u_new_lo);
+         umin = u_min(dof_id);
+         umax = u_max(dof_id);
+         if (smth_indicator)
+         {
+            smth_indicator->UpdateBounds(dof_id, u_new_ho, si_val, umin, umax);
+         }
+
+         f_clip_min = m(dof_id) / dt * (umin - u_new_lo);
+         f_clip_max = m(dof_id) / dt * (umax - u_new_lo);
 
          f_clip(j) = m(dof_id) * (du_ho(dof_id) - du_lo(dof_id));
          f_clip(j) = min(f_clip_max, max(f_clip_min, f_clip(j)));
@@ -88,12 +104,29 @@ void NonlinearPenaltySolver::CalcFCTSolution(const Vector &u, const Vector &m,
    const int size = u.Size();
    Vector du_ho_star(size);
 
+   double umin, umax;
+
+   // Smoothness indicator.
+   ParGridFunction si_val;
+   if (smth_indicator)
+   {
+      smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+   }
+
    // Clipped flux.
    for (int i = 0; i < size; i++)
    {
+      umin = u_min(i);
+      umax = u_max(i);
+      if (smth_indicator)
+      {
+         smth_indicator->UpdateBounds(i, u(i) + dt * du_ho(i),
+                                      si_val, umin, umax);
+      }
+
       // Note that this uses u(i) at the old time.
-      du_ho_star(i) = min( (u_max(i) - u(i)) / dt,
-                           max(du_ho(i), (u_min(i) - u(i)) / dt) );
+      du_ho_star(i) = min( (umax - u(i)) / dt,
+                           max(du_ho(i), (umin - u(i)) / dt) );
    }
 
    // Non-conservative fluxes.
