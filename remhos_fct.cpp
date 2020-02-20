@@ -62,8 +62,8 @@ void ClipScaleSolver::CalcFCTSolution(const Vector &u, const Vector &m,
             smth_indicator->UpdateBounds(dof_id, u_new_ho, si_val, umin, umax);
          }
 
-         f_clip_min = m(dof_id) / dt * (u_min(dof_id) - u_new_lo);
-         f_clip_max = m(dof_id) / dt * (u_max(dof_id) - u_new_lo);
+         f_clip_min = m(dof_id) / dt * (umin - u_new_lo);
+         f_clip_max = m(dof_id) / dt * (umax - u_new_lo);
 
          f_clip(j) = m(dof_id) * (du_ho(dof_id) - du_lo(dof_id));
          f_clip(j) = min(f_clip_max, max(f_clip_min, f_clip(j)));
