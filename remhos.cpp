@@ -321,8 +321,6 @@ public:
                                   Vector &y, const Vector &alpha) const;
 
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
-   virtual void ComputeFCTSolution(const Vector &x, const Vector &yH,
-                                   const Vector &yL, Vector &y) const;
 
    virtual ~FE_Evolution() { }
 };
@@ -819,7 +817,7 @@ int main(int argc, char *argv[])
    else { lom.subcell_mesh = &pmesh; }
 
    Assembly asmbl(dofs, lom, inflow_gf, pfes, exec_mode);
-   const int ne = pmesh.GetNE(), nd = pfes.GetFE(0)->GetDof();
+   const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
    if (lom.MonoType == ResDist_Monolithic)
@@ -938,8 +936,8 @@ int main(int argc, char *argv[])
    FCTSolver *fct_solver = NULL;
    if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
    {
-      //fct_solver = new NonlinearPenaltySolver(pfes, dt);
-      fct_solver = new ClipScaleSolver(pfes, dt);
+      //fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
    }
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
@@ -1698,82 +1696,6 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
    }
 }
 
-// High order reconstruction that yields an updated admissible solution by means
-// of clipping the solution coefficients within certain bounds and scaling the
-// antidiffusive fluxes in a way that leads to local conservation of mass. yH,
-// yL are the high and low order discrete time derivatives.
-void FE_Evolution::ComputeFCTSolution(const Vector &x, const Vector &yH,
-                                      const Vector &yL, Vector &y) const
-{
-   int j, k, dofInd, ne = lom.fes->GetMesh()->GetNE(),
-                     nd = lom.fes->GetFE(0)->GetDof();
-   double sumP, sumN, uH, uL, tmp, umax, umin, mass, eps = 1.E-15;
-   Vector AntiDiff(nd);
-
-   dofs.ComputeBounds();
-
-   // Smoothness indicator.
-   ParGridFunction si_val;
-   if (smth_indicator)
-   {
-      smth_indicator->ComputeSmoothnessIndicator(x, si_val);
-   }
-
-   // Monotonicity terms
-   for (k = 0; k < ne; k++)
-   {
-      sumP = sumN = 0.;
-      for (j = 0; j < nd; j++)
-      {
-         dofInd = k*nd+j;
-         uH = x(dofInd) + dt * yH(dofInd);
-         uL = x(dofInd) + dt * yL(dofInd);
-
-         if (smth_indicator)
-         {
-            tmp = smth_indicator->DG2CG(dofInd) < 0. ? 1. : si_val(smth_indicator->DG2CG(dofInd));
-            umin = max( 0., tmp * uH + (1. - tmp) * dofs.xi_min(dofInd) );
-            umax = min( 1., tmp * uH + (1. - tmp) * dofs.xi_max(dofInd) );
-         }
-         else
-         {
-            umin = dofs.xi_min(dofInd);
-            umax = dofs.xi_max(dofInd);
-         }
-
-         umin = lumpedM(dofInd) / dt * (umin - uL);
-         umax = lumpedM(dofInd) / dt * (umax - uL);
-
-         AntiDiff(j) = lumpedM(dofInd) * (yH(dofInd) - yL(dofInd));
-         AntiDiff(j) = min(umax, max(umin, AntiDiff(j)));
-
-         sumN += min(AntiDiff(j), 0.);
-         sumP += max(AntiDiff(j), 0.);
-      }
-
-      mass = sumN + sumP;
-
-      for (j = 0; j < nd; j++)
-      {
-         if (mass > eps)
-         {
-            AntiDiff(j) = min(0., AntiDiff(j)) - max(0., AntiDiff(j)) * sumN / sumP;
-         }
-         else if (mass < -eps)
-         {
-            AntiDiff(j) = max(0., AntiDiff(j)) - min(0., AntiDiff(j)) * sumP / sumN;
-         }
-
-         // Set y to the discrete time derivative featuring the high order anti-
-         // diffusive reconstruction that leads to an forward Euler updated
-         // admissible solution.
-         dofInd = k*nd+j;
-         y(dofInd) = yL(dofInd) + AntiDiff(j) / lumpedM(dofInd);
-      }
-   }
-}
-
-
 // Implementation of class FE_Evolution
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
@@ -1867,7 +1789,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
          ComputeLowOrderSolution(x, yL);
          ho_solver.CalcHOSolution(x, yH);
-         //ComputeFCTSolution(x, yH, yL, y);
+
          dofs.ComputeBounds();
          fct_solver->CalcFCTSolution(x, lumpedM, yH, yL,
                                      dofs.xi_min, dofs.xi_max, y);

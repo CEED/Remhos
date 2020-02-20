@@ -58,6 +58,9 @@ public:
    ~SmoothnessIndicator();
 
    void ComputeSmoothnessIndicator(const Vector &u, ParGridFunction &si_vals_u);
+   void UpdateBounds(int dof_id, double u_HO,
+                     const ParGridFunction &si_vals,
+                     double &u_min, double &u_max);
 
    Vector DG2CG;
 };
@@ -140,7 +143,7 @@ public:
          }
       }
       Array<double> minvals(x_min.GetData(), x_min.Size()),
-            maxvals(x_max.GetData(), x_max.Size());
+                    maxvals(x_max.GetData(), x_max.Size());
       gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
       gcomm.Bcast(minvals);
       gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);

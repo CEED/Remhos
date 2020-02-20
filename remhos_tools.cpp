@@ -179,6 +179,16 @@ void SmoothnessIndicator::ComputeSmoothnessIndicator(const Vector &u,
    }
 }
 
+void SmoothnessIndicator::UpdateBounds(int dof_id, double u_HO,
+                                       const ParGridFunction &si_vals,
+                                       double &u_min, double &u_max)
+{
+   const double tmp = (DG2CG(dof_id) < 0.0) ? 1.0
+                                            : si_vals(DG2CG(dof_id));
+   u_min = max(0.0, tmp * u_HO + (1.0 - tmp) * u_min);
+   u_max = min(1.0, tmp * u_HO + (1.0 - tmp) * u_max);
+}
+
 void SmoothnessIndicator::ComputeVariationalMatrix(DofInfo &dof_info)
 {
    Mesh *subcell_mesh = pfes_CG_sub.GetMesh();
