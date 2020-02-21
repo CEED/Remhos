@@ -31,7 +31,6 @@ protected:
 public:
    HOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
-   // du_dt = M^{-1} (K u + b).
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
 };
 
@@ -47,9 +46,21 @@ public:
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };
 
+class LocalInverseHOSolver : public HOSolver
+{
+protected:
+   ParBilinearForm &M, &K;
+
+public:
+   LocalInverseHOSolver(ParFiniteElementSpace &space,
+                        ParBilinearForm &Mbf, ParBilinearForm &Kbf);
+
+   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+};
+
 class Assembly;
 
-class NeumannSolver : public HOSolver
+class NeumannHOSolver : public HOSolver
 {
 protected:
    const ParBilinearForm &M, &K;
@@ -57,9 +68,9 @@ protected:
    Assembly &assembly;
 
 public:
-   NeumannSolver(ParFiniteElementSpace &space,
-                 ParBilinearForm &Mbf, ParBilinearForm &Kbf, Vector &Mlump,
-                 Assembly &a);
+   NeumannHOSolver(ParFiniteElementSpace &space,
+                   ParBilinearForm &Mbf, ParBilinearForm &Kbf, Vector &Mlump,
+                   Assembly &a);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };

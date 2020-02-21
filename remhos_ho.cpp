@@ -67,12 +67,52 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    delete K_mat;
 }
 
-NeumannSolver::NeumannSolver(ParFiniteElementSpace &space,
-                             ParBilinearForm &Mbf, ParBilinearForm &Kbf,
-                             Vector &Mlump, Assembly &a)
+LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
+                                           ParBilinearForm &Mbf,
+                                           ParBilinearForm &Kbf)
+   : HOSolver(space), M(Mbf), K(Kbf) { }
+
+void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
+{
+   Vector rhs(u.Size());
+
+   HypreParMatrix *K_mat = NULL;
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      MFEM_ABORT("TODO: add PA for DG.");
+      K.Mult(u, rhs);
+   }
+   else
+   {
+      K_mat = K.ParallelAssemble();
+      K_mat->Mult(u, rhs);
+   }
+
+   const int ne = pfes.GetMesh()->GetNE();
+   const int nd = pfes.GetFE(0)->GetDof();
+   DenseMatrix M_loc(nd);
+   DenseMatrixInverse M_loc_inv(&M_loc);
+   Vector rhs_loc(nd), du_loc(nd);
+   Array<int> dofs;
+   for (int i = 0; i < ne; i++)
+   {
+      pfes.GetElementDofs(i, dofs);
+      rhs.GetSubVector(dofs, rhs_loc);
+      M.SpMat().GetSubMatrix(dofs, dofs, M_loc);
+      M_loc_inv.Factor();
+      M_loc_inv.Mult(rhs_loc, du_loc);
+      du.SetSubVector(dofs, du_loc);
+   }
+
+   delete K_mat;
+}
+
+NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,
+                                 ParBilinearForm &Mbf, ParBilinearForm &Kbf,
+                                 Vector &Mlump, Assembly &a)
   : HOSolver(space), M(Mbf), K(Kbf), M_lumped(Mlump), assembly(a) { }
 
-void NeumannSolver::CalcHOSolution(const Vector &u, Vector &du) const
+void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
    const int n = u.Size(), ne = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    Vector rhs(n), res(n);

@@ -80,7 +80,7 @@ using namespace mfem;
 lua_State* L;
 #endif
 
-enum HOSolverType {Neumann, CG};
+enum HOSolverType {Neumann, CG, LocalInverse};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -393,8 +393,9 @@ int main(int argc, char *argv[])
                   "                     4 - residual distribution - FCT,n\t"
                   "                     5 - residual distribution - monolithic.");
    args.AddOption((int*)(&ho_type), "-ho", "--ho-type",
-                  "High-Order Solver: 0 - CG solver ,\n\t"
-                  "                   1 - Neumann iteration.");
+                  "High-Order Solver: 0 - Neumann iteration,\n\t"
+                  "                   1 - CG solver,\n\t"
+                  "                   2 - Local inverse.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -623,7 +624,8 @@ int main(int argc, char *argv[])
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
-   if (ho_type == HOSolverType::CG)
+   // TODO: decide what to do with assembly.LinearFluxLumping.
+   if (ho_type == HOSolverType::CG || ho_type == HOSolverType::LocalInverse)
    {
       if (exec_mode == 0)
       {
@@ -866,12 +868,17 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (ho_type == HOSolverType::Neumann)
    {
-      ho_solver = new NeumannSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
+      ho_solver = new NeumannHOSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
    }
-   else
+   else if (ho_type == HOSolverType::CG)
    {
       ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
    }
+   else if (ho_type == HOSolverType::LocalInverse)
+   {
+      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+   }
+   else { MFEM_ABORT("Wrong high-order solver type specification."); }
 
    // Print the starting meshes and initial condition.
    {
