@@ -22,10 +22,55 @@ using namespace std;
 namespace mfem
 {
 
+CGHOSolver::CGHOSolver(ParFiniteElementSpace &space,
+                       ParBilinearForm &Mbf, ParBilinearForm &Kbf)
+   : HOSolver(space), M(Mbf), K(Kbf)
+{ }
+
+void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
+{
+   Vector rhs(u.Size());
+
+   // Invert by preconditioned CG.
+   CGSolver M_solver(pfes.GetComm());
+   HypreParMatrix *M_mat = NULL, *K_mat = NULL;
+   Solver *M_prec;
+   Array<int> ess_tdof_list;
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      MFEM_ABORT("TODO: add PA for DG.");
+
+      K.Mult(u, rhs);
+
+      M_solver.SetOperator(M);
+      M_prec = new OperatorJacobiSmoother(M, ess_tdof_list);
+   }
+   else
+   {
+      K_mat = K.ParallelAssemble();
+      K_mat->Mult(u, rhs);
+
+      M_mat = M.ParallelAssemble();
+      M_solver.SetOperator(*M_mat);
+      M_prec = new HypreSmoother(*M_mat, HypreSmoother::Jacobi);
+   }
+   M_solver.SetPreconditioner(*M_prec);
+   M_solver.SetRelTol(1e-9);
+   M_solver.SetAbsTol(0.0);
+   M_solver.SetMaxIter(100);
+   M_solver.SetPrintLevel(0);
+
+   M_solver.Mult(rhs, du);
+
+   delete M_prec;
+   delete M_mat;
+   delete K_mat;
+}
+
 NeumannSolver::NeumannSolver(ParFiniteElementSpace &space,
-                             ParBilinearForm &M_, ParBilinearForm &K_,
+                             ParBilinearForm &Mbf, ParBilinearForm &Kbf,
                              Vector &Mlump, Assembly &a)
-  : HOSolver(space), M(M_), K(K_), M_lumped(Mlump), assembly(a) { }
+  : HOSolver(space), M(Mbf), K(Kbf), M_lumped(Mlump), assembly(a) { }
 
 void NeumannSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {

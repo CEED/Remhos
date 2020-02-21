@@ -80,6 +80,8 @@ using namespace mfem;
 lua_State* L;
 #endif
 
+enum HOSolverType {Neumann, CG};
+
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
@@ -348,6 +350,7 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    MONOTYPE MonoType = None;
+   HOSolverType ho_type = Neumann;
    bool pa = false;
    bool OptScheme = true;
    int smth_ind_type = 0;
@@ -389,6 +392,9 @@ int main(int argc, char *argv[])
                   "                     3 - residual distribution - LO,\n\t"
                   "                     4 - residual distribution - FCT,n\t"
                   "                     5 - residual distribution - monolithic.");
+   args.AddOption((int*)(&ho_type), "-ho", "--ho-type",
+                  "High-Order Solver: 0 - CG solver ,\n\t"
+                  "                   1 - Neumann iteration.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -617,6 +623,26 @@ int main(int argc, char *argv[])
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
+   if (ho_type == HOSolverType::CG)
+   {
+      if (exec_mode == 0)
+      {
+         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(velocity, 1.0, -0.5);
+         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(velocity, 1.0, -0.5);
+         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+      }
+      else if (exec_mode == 1)
+      {
+         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+      }
+
+      K_HO.KeepNbrBlock();
+   }
+
    if (pa)
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
@@ -629,30 +655,8 @@ int main(int argc, char *argv[])
    if (pa == false)
    {
       M_HO.Finalize();
-      K_HO.Finalize();
+      K_HO.Finalize(0);
    }
-
-   // In case of basic discrete upwinding, add boundary terms.
-   // TODO these will still be used for the matrix-based HO solver option.
-   /*
-   if ((MonoType == DiscUpw || MonoType == DiscUpw_FCT) && !OptScheme)
-   {
-      if (exec_mode == 0)
-      {
-         k.AddInteriorFaceIntegrator( new TransposeIntegrator(
-                                         new DGTraceIntegrator(velocity, 1.0, -0.5)) );
-         k.AddBdrFaceIntegrator( new TransposeIntegrator(
-                                    new DGTraceIntegrator(velocity, 1.0, -0.5)) );
-      }
-      else if (exec_mode == 1)
-      {
-         k.AddInteriorFaceIntegrator(new TransposeIntegrator(
-                                        new DGTraceIntegrator(v_coef, -1.0, -0.5)) );
-         k.AddBdrFaceIntegrator( new TransposeIntegrator(
-                                    new DGTraceIntegrator(v_coef, -1.0, -0.5)) );
-      }
-   }
-   */
 
    ParLinearForm b(&pfes);
    b.AddBdrFaceIntegrator(
@@ -860,9 +864,13 @@ int main(int argc, char *argv[])
    }
 
    HOSolver *ho_solver;
-   if (true)
+   if (ho_type == HOSolverType::Neumann)
    {
-     ho_solver = new NeumannSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
+      ho_solver = new NeumannSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
+   }
+   else
+   {
+      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
    }
 
    // Print the starting meshes and initial condition.
@@ -1749,7 +1757,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
 
-      // Boundary contributions.
+      // Face contributions.
       asmbl.bdrInt = 0.;
       Mesh *mesh = lom.fes->GetMesh();
       const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
