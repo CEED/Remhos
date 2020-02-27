@@ -43,10 +43,36 @@ public:
    // bounds preservation: u_min_i <= u_i + dt du_i <= u_max_i,
    // conservation:        sum m_i (u_i + dt du_ho_i) = sum m_i (u_i + dt du_i).
    // Some methods utilize du_lo as a backup choice, as it satisfies the above.
-   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const = 0;
+};
+
+class FluxBasedFCT : public FCTSolver
+{
+protected:
+   const SparseMatrix &K, &M;
+   const Array<int> &K_smap;
+   mutable SparseMatrix flux_ij;
+   mutable ParGridFunction gp, gm;
+
+   const int iter_cnt;
+
+public:
+   FluxBasedFCT(ParFiniteElementSpace &space,
+                SmoothnessIndicator *si, double delta_t,
+                const SparseMatrix &adv_mat, const Array<int> &adv_smap,
+                const SparseMatrix &mass_mat, int fct_iterations = 1)
+      : FCTSolver(space, si, delta_t),
+        K(adv_mat), M(mass_mat), K_smap(adv_smap), flux_ij(adv_mat),
+        gp(&pfes), gm(&pfes),
+        iter_cnt(fct_iterations) { }
+
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+                                const Vector &du_ho, const Vector &du_lo,
+                                const Vector &u_min, const Vector &u_max,
+                                Vector &du) const;
 };
 
 class ClipScaleSolver : public FCTSolver
@@ -56,7 +82,7 @@ public:
                    SmoothnessIndicator *si, double dt_)
       : FCTSolver(space, si, dt_) { }
 
-   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
@@ -65,7 +91,7 @@ public:
 // TODO doesn't conserve mass exactly for some reason.
 class NonlinearPenaltySolver : public FCTSolver
 {
-private:
+protected:
    void CorrectFlux(Vector &fluxL, Vector &fluxH, Vector &flux_fix) const;
    double get_max_on_cellNi(Vector &fluxH) const;
 
@@ -74,7 +100,7 @@ public:
                           SmoothnessIndicator *si, double dt_)
       : FCTSolver(space, si, dt_) { }
 
-   virtual void CalcFCTSolution(const Vector &u, const Vector &m,
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
