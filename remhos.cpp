@@ -659,12 +659,12 @@ int main(int argc, char *argv[])
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
-   M_HO.Assemble(0);
+   M_HO.Assemble();
    K_HO.Assemble(0);
 
    if (pa == false)
    {
-      M_HO.Finalize(0);
+      M_HO.Finalize();
       K_HO.Finalize(0);
    }
 
