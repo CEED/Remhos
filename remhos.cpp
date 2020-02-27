@@ -81,6 +81,7 @@ lua_State* L;
 #endif
 
 enum HOSolverType {Neumann, CG, LocalInverse};
+enum FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -350,7 +351,8 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    MONOTYPE MonoType = None;
-   HOSolverType ho_type = Neumann;
+   HOSolverType ho_type   = Neumann;
+   FCTSolverType fct_type = ClipScale;
    bool pa = false;
    bool OptScheme = true;
    int smth_ind_type = 0;
@@ -396,6 +398,10 @@ int main(int argc, char *argv[])
                   "High-Order Solver: 0 - Neumann iteration,\n\t"
                   "                   1 - CG solver,\n\t"
                   "                   2 - Local inverse.");
+   args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
+                  "Correction type: 0 - Flux-based FCT,\n\t"
+                  "                 1 - Local clip + scale,\n\t"
+                  "                 2 - Local clip + nonlinear penalization.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -625,7 +631,9 @@ int main(int argc, char *argv[])
    }
 
    // TODO: decide what to do with assembly.LinearFluxLumping.
-   if (ho_type == HOSolverType::CG || ho_type == HOSolverType::LocalInverse)
+   if (ho_type == HOSolverType::CG ||
+       ho_type == HOSolverType::LocalInverse ||
+       fct_type == FCTSolverType::FluxBased)
    {
       if (exec_mode == 0)
       {
@@ -642,7 +650,7 @@ int main(int argc, char *argv[])
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
 
-      K_HO.KeepNbrBlock();
+      K_HO.KeepNbrBlock(true);
    }
 
    if (pa)
@@ -868,7 +876,7 @@ int main(int argc, char *argv[])
    HOSolver *ho_solver;
    if (ho_type == HOSolverType::Neumann)
    {
-      ho_solver = new NeumannHOSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
+      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
    }
    else if (ho_type == HOSolverType::CG)
    {
@@ -948,11 +956,27 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
+   Array<int> K_smap;
    FCTSolver *fct_solver = NULL;
    if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
    {
-      //fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      if (fct_type == FCTSolverType::FluxBased)
+      {
+         MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
+
+         K_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         const int fct_iterations = 1;
+         fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+                                       K_smap, M_HO.SpMat(), fct_iterations);
+      }
+      else if (fct_type == FCTSolverType::ClipScale)
+      {
+         fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      }
+      else if (fct_type == FCTSolverType::NonlinearPenalty)
+      {
+         fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      }
    }
 
    FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
@@ -993,7 +1017,7 @@ int main(int argc, char *argv[])
       if (MonoType != None && smth_indicator == NULL)
       {
          double umin_new, umax_new;         
-         GetMinMax(u, umin_new, umax_new);        
+         GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
             MFEM_VERIFY(umin_new > umin - 1e-12,
@@ -1806,7 +1830,7 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
          ho_solver.CalcHOSolution(x, yH);
 
          dofs.ComputeBounds();
-         fct_solver->CalcFCTSolution(x, lumpedM, yH, yL,
+         fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
                                      dofs.xi_min, dofs.xi_max, y);
       }
    }
