@@ -315,10 +315,6 @@ public:
       start_submesh_pos = sm_pos;
    }
 
-   virtual void LinearFluxLumping(const int k, const int nd,
-                                  const int BdrID, const Vector &x,
-                                  Vector &y, const Vector &alpha) const;
-
    virtual void NonlinFluxLumping(const int k, const int nd,
                                   const int BdrID, const Vector &x,
                                   Vector &y, const Vector &alpha) const;
@@ -1195,46 +1191,6 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-void FE_Evolution::LinearFluxLumping(const int k, const int nd,
-                                     const int BdrID, const Vector &x,
-                                     Vector &y, const Vector &alpha) const
-{
-   int i, j, dofInd;
-   double xNeighbor;
-   Vector xDiff(dofs.numFaceDofs);
-   const int size_x = x.Size();
-   Vector &x_nd = x_gf.FaceNbrData();
-
-   for (j = 0; j < dofs.numFaceDofs; j++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
-      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-      // s.t. this value will not matter.
-      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
-      else
-      {
-         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                                           : x_nd(nbr_dof_id - size_x);
-      }
-      xDiff(j) = xNeighbor - x(dofInd);
-   }
-
-   for (i = 0; i < dofs.numFaceDofs; i++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      for (j = 0; j < dofs.numFaceDofs; j++)
-      {
-         // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
-         // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
-                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
-                       alpha(dofs.BdrDofs(i,BdrID)) *
-                       alpha(dofs.BdrDofs(j,BdrID)));
-      }
-   }
-}
-
 void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
                                      const int BdrID, const Vector &x,
                                      Vector &y, const Vector &alpha) const
@@ -1294,9 +1250,10 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
 
 void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
 {
-   const FiniteElement* dummy = lom.fes->GetFE(0);
-   int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
+   int i, j, k, dofInd, nd = lom.fes->GetFE(0)->GetDof(), ne = lom.fes->GetNE();
    Vector alpha(nd); alpha = 0.;
+
+   Vector &x_nd = x_gf.FaceNbrData();
 
    if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
    {
@@ -1324,7 +1281,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
+            asmbl.LinearFluxLumping(k, nd, i, x, y, x_nd, alpha);
          }
 
          // Compute min / max over elements (needed for FCT).
@@ -1358,7 +1315,7 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
+            asmbl.LinearFluxLumping(k, nd, i, x, y, x_nd, alpha);
          }
 
          // Element contributions
