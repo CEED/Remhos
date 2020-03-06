@@ -132,7 +132,7 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 
 // Given a matrix K, matrix D (initialized with same sparsity as K) is computed,
 // such that (K+D)_ij >= 0 for i != j.
-void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
+void ComputeDiscreteUpwindingMatrix(const SparseMatrix &K,
                                     Array<int> smap, SparseMatrix& D)
 {
    const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
