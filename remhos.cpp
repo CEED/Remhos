@@ -69,6 +69,7 @@
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
+#include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
 #include "remhos_tools.hpp"
 
@@ -81,6 +82,7 @@ lua_State* L;
 #endif
 
 enum HOSolverType {Neumann, CG, LocalInverse};
+enum LOSolverType {DiscrUpwind, OLD, ResidDist, ResidDistMonolithic};
 enum FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
@@ -293,6 +295,7 @@ private:
    DofInfo &dofs;
 
    HOSolver &ho_solver;
+   LOSolver *lo_solver;
    FCTSolver *fct_solver;
 
 public:
@@ -304,7 +307,8 @@ public:
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator *si, HOSolver &hos, FCTSolver *fct);
+                SmoothnessIndicator *si,
+                HOSolver &hos, LOSolver *los, FCTSolver *fct);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -348,6 +352,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 3;
    MONOTYPE MonoType = None;
    HOSolverType ho_type   = Neumann;
+   LOSolverType lo_type   = OLD;
    FCTSolverType fct_type = ClipScale;
    bool pa = false;
    bool OptScheme = true;
@@ -394,6 +399,10 @@ int main(int argc, char *argv[])
                   "High-Order Solver: 0 - Neumann iteration,\n\t"
                   "                   1 - CG solver,\n\t"
                   "                   2 - Local inverse.");
+   args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
+                  "Low-Order Solver: 0 - Discrete Upwind,\n\t"
+                  "                  1 - Residual Distribution,\n\t"
+                  "                  2 - Residual Distribution Monolithic.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - Flux-based FCT,\n\t"
                   "                 1 - Local clip + scale,\n\t"
@@ -854,6 +863,17 @@ int main(int argc, char *argv[])
       }
    }
 
+   LOSolver *lo_solver;
+   Array<int> lo_smap;
+   if (lo_type == LOSolverType::DiscrUpwind)
+   {
+      SparseMatrix *lo_spmat = (OptScheme) ? &lom.pk->SpMat() : &k.SpMat();
+      lo_smap = SparseMatrix_Build_smap(*lo_spmat);
+      bool update_D = (exec_mode == 0) ? false : true;
+      lo_solver = new DiscreteUpwind(pfes, *lo_spmat, lo_smap,
+                                     lumpedM, asmbl, update_D);
+   }
+
    // Initial condition.
    ParGridFunction u(&pfes);
    FunctionCoefficient u0(u0_function);
@@ -952,7 +972,7 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   Array<int> K_smap;
+   Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
    if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
    {
@@ -960,10 +980,10 @@ int main(int argc, char *argv[])
       {
          MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
 
-         K_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
          const int fct_iterations = 1;
          fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                       K_smap, M_HO.SpMat(), fct_iterations);
+                                       K_HO_smap, M_HO.SpMat(), fct_iterations);
       }
       else if (fct_type == FCTSolverType::ClipScale)
       {
@@ -979,7 +999,7 @@ int main(int argc, char *argv[])
                                         k, k.SpMat(), M_HO, K_HO,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, smth_indicator,
-                                        *ho_solver, fct_solver);
+                                        *ho_solver, lo_solver, fct_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1702,8 +1722,8 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
-                           SmoothnessIndicator *si, HOSolver &hos,
-                           FCTSolver *fct) :
+                           SmoothnessIndicator *si,
+                           HOSolver &hos, LOSolver *los, FCTSolver *fct) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
    M_HO(M_HO_), K_HO(K_HO_),
@@ -1713,7 +1733,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs), smth_indicator(si),
-   ho_solver(hos), fct_solver(fct) { }
+   ho_solver(hos), lo_solver(los), fct_solver(fct) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -1777,7 +1797,15 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       if (lom.MonoType % 2 == 1)
       {
          // NOTE: Right now this is called for monolithic limiting.
-         ComputeLowOrderSolution(x, y);
+         if (lo_solver)
+         {
+            lo_solver->CalcLOSolution(x, y);
+         }
+         else
+         {
+            ComputeLowOrderSolution(x, y);
+         }
+
       }
       else if (lom.MonoType % 2 == 0)
       {
