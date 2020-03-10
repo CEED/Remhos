@@ -156,5 +156,4 @@ void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
 }
 
-
 } // namespace mfem

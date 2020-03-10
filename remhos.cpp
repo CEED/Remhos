@@ -71,6 +71,7 @@
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
+#include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 
 using namespace std;
@@ -82,8 +83,9 @@ lua_State* L;
 #endif
 
 enum HOSolverType {Neumann, CG, LocalInverse};
-enum LOSolverType {DiscrUpwind, OLD, ResidDist, ResidDistMonolithic};
+enum LOSolverType {DiscrUpwind, OLD, ResidDist};
 enum FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
+enum MonolithicSolverType {None, RDMonolithic};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -297,6 +299,7 @@ private:
    HOSolver &ho_solver;
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
+   MonolithicSolver *mono_solver;
 
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
@@ -308,7 +311,7 @@ public:
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
                 SmoothnessIndicator *si,
-                HOSolver &hos, LOSolver *los, FCTSolver *fct);
+                HOSolver &hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -318,10 +321,6 @@ public:
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
-
-   virtual void NonlinFluxLumping(const int k, const int nd,
-                                  const int BdrID, const Vector &x,
-                                  Vector &y, const Vector &alpha) const;
 
    virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
 
@@ -350,10 +349,11 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = None;
+   MONOTYPE MonoType = MONOTYPE::None;
    HOSolverType ho_type   = Neumann;
    LOSolverType lo_type   = OLD;
    FCTSolverType fct_type = ClipScale;
+   MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
    bool OptScheme = true;
    int smth_ind_type = 0;
@@ -401,12 +401,14 @@ int main(int argc, char *argv[])
                   "                   2 - Local inverse.");
    args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
                   "Low-Order Solver: 0 - Discrete Upwind,\n\t"
-                  "                  1 - Residual Distribution,\n\t"
-                  "                  2 - Residual Distribution Monolithic.");
+                  "                  1 - Residual Distribution.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - Flux-based FCT,\n\t"
                   "                 1 - Local clip + scale,\n\t"
                   "                 2 - Local clip + nonlinear penalization.");
+   args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
+                  "Monolithic solver: 0 - No monolithic solver,\n\t"
+                  "                   1 - Residual distribution.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -561,7 +563,7 @@ int main(int argc, char *argv[])
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
-   if (MonoType != None)
+   if (MonoType != MONOTYPE::None)
    {
       if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
       {
@@ -577,7 +579,7 @@ int main(int argc, char *argv[])
       {
          // Disable monotonicity treatment for piecewise constants.
          if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
-         MonoType = None;
+         MonoType = MONOTYPE::None;
          OptScheme = false;
       }
    }
@@ -911,6 +913,18 @@ int main(int argc, char *argv[])
    }
    else { MFEM_ABORT("Wrong high-order solver type specification."); }
 
+
+   MonolithicSolver *mono_solver = NULL;
+   if (mono_type == MonolithicSolverType::RDMonolithic)
+   {
+      bool subcell = (OptScheme) ? true : false;
+      bool dynamic = (exec_mode == 0) ? false : true;
+      bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+                                     asmbl, smth_indicator, lom.scale,
+                                     subcell, dynamic, mass_lim);
+   }
+
    // Print the starting meshes and initial condition.
    {
       ofstream meshHO("meshHO_init.mesh");
@@ -1006,7 +1020,8 @@ int main(int argc, char *argv[])
                                         k, k.SpMat(), M_HO, K_HO,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, smth_indicator,
-                                        *ho_solver, lo_solver, fct_solver);
+                                        *ho_solver, lo_solver,
+                                        fct_solver, mono_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1037,7 +1052,7 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (MonoType != None && smth_indicator == NULL)
+      if (MonoType != MONOTYPE::None && smth_indicator == NULL)
       {
          double umin_new, umax_new;         
          GetMinMax(u, umin_new, umax_new);
@@ -1195,9 +1210,10 @@ int main(int argc, char *argv[])
 
    // 10. Free the used memory.
    delete adv;
+   delete mono_solver;
    delete fct_solver;
-   delete ho_solver;
    delete smth_indicator;
+   delete ho_solver;
 
    delete ode_solver;
    delete mesh_fec;
@@ -1218,14 +1234,14 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
-                                     const int BdrID, const Vector &x,
-                                     Vector &y, const Vector &alpha) const
+void Assembly::NonlinFluxLumping(const int k, const int nd,
+                                 const int BdrID, const Vector &x,
+                                 Vector &y, const Vector &x_nd,
+                                 const Vector &alpha) const
 {
    int i, j, dofInd;
    double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
    const int size_x = x.Size();
-   Vector &x_nd = x_gf.FaceNbrData();
    Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
    BdrTermCorr = 0.;
 
@@ -1249,9 +1265,9 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
       for (j = 0; j < dofs.numFaceDofs; j++)
       {
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
-         BdrTermCorr(i) += asmbl.bdrInt(k, BdrID,
-                                        i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
+         y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
+         BdrTermCorr(i) += bdrInt(k, BdrID,
+                                  i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
       }
       BdrTermCorr(i) *= alpha(dofs.BdrDofs(i,BdrID));
       SumCorrP += max(0., BdrTermCorr(i));
@@ -1527,8 +1543,8 @@ void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
          // Boundary contributions
          for (i = 0; i < dofs.numBdrs; i++)
          {
-            NonlinFluxLumping(k, nd, i, x, y, alpha);
-            NonlinFluxLumping(k, nd, i, x, d, alpha1);
+            asmbl.NonlinFluxLumping(k, nd, i, x, y, x_nd, alpha);
+            asmbl.NonlinFluxLumping(k, nd, i, x, d, x_nd, alpha1);
          }
 
          // Element contributions
@@ -1730,7 +1746,8 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator *si,
-                           HOSolver &hos, LOSolver *los, FCTSolver *fct) :
+                           HOSolver &hos, LOSolver *los, FCTSolver *fct,
+                           MonolithicSolver *mos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
    M_HO(M_HO_), K_HO(K_HO_),
@@ -1740,7 +1757,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs), smth_indicator(si),
-   ho_solver(hos), lo_solver(los), fct_solver(fct) { }
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -1801,6 +1818,13 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
    x_gf = x;
    x_gf.ExchangeFaceNbrData();
+
+   if (mono_solver)
+   {
+      mono_solver->CalcSolution(x, y);
+      return;
+   }
+
    if (lom.MonoType == 0)
    {
       ho_solver.CalcHOSolution(x, y);

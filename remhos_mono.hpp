@@ -14,68 +14,54 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
-#ifndef MFEM_REMHOS_HO
-#define MFEM_REMHOS_HO
+#ifndef MFEM_REMHOS_MONO
+#define MFEM_REMHOS_MONO
 
 #include "mfem.hpp"
 
 namespace mfem
 {
 
-// High-Order Solver.
-// Conserve mass / provide high-order convergence / may violate the bounds.
-class HOSolver
+// Monolithic solvers - these solve the transport/remap problem directly,
+// without splitting into HO / LO / FCT phases.
+// The result should be a high-order, conservative, bound preserving solution.
+class MonolithicSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
 
 public:
-   HOSolver(ParFiniteElementSpace &space) : pfes(space) { }
+   MonolithicSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
-};
-
-class CGHOSolver : public HOSolver
-{
-protected:
-   ParBilinearForm &M, &K;
-
-public:
-   CGHOSolver(ParFiniteElementSpace &space,
-              ParBilinearForm &Mbf, ParBilinearForm &Kbf);
-
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
-};
-
-class LocalInverseHOSolver : public HOSolver
-{
-protected:
-   ParBilinearForm &M, &K;
-
-public:
-   LocalInverseHOSolver(ParFiniteElementSpace &space,
-                        ParBilinearForm &Mbf, ParBilinearForm &Kbf);
-
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+   virtual void CalcSolution(const Vector &u, Vector &du) const = 0;
 };
 
 class Assembly;
+class SmoothnessIndicator;
 
-class NeumannHOSolver : public HOSolver
+class MonoRDSolver : public MonolithicSolver
 {
 protected:
-   const ParBilinearForm &M, &K;
+   const SparseMatrix &K_mat, &M_mat;
    const Vector &M_lumped;
    Assembly &assembly;
+   SmoothnessIndicator *smth_indicator;
+   const Vector &scale;
+   bool subcell_scheme;
+   const bool time_dep;
+   const bool mass_lim;
 
 public:
-   NeumannHOSolver(ParFiniteElementSpace &space,
-                   ParBilinearForm &Mbf, ParBilinearForm &Kbf, Vector &Mlump,
-                   Assembly &a);
+   MonoRDSolver(ParFiniteElementSpace &space,
+                const SparseMatrix &adv_mat, const SparseMatrix &mass_mat,
+                const Vector &Mlump,
+                Assembly &asmbly, SmoothnessIndicator *si,
+                const Vector &mono_scale,
+                bool subcell, bool timedep, bool masslim);
 
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+   void CalcSolution(const Vector &u, Vector &du) const;
 };
 
 } // namespace mfem
 
-#endif // MFEM_REMHOS_HO
+#endif // MFEM_REMHOS_MONO
