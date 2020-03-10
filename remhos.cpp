@@ -863,7 +863,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   LOSolver *lo_solver;
+   LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
@@ -872,6 +872,13 @@ int main(int argc, char *argv[])
       bool update_D = (exec_mode == 0) ? false : true;
       lo_solver = new DiscreteUpwind(pfes, *lo_spmat, lo_smap,
                                      lumpedM, asmbl, update_D);
+   }
+   else if (lo_type == LOSolverType::ResidDist)
+   {
+      bool subcell = (OptScheme) ? true : false;
+      bool dynamic = (exec_mode == 0) ? false : true;
+      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                           subcell, dynamic);
    }
 
    // Initial condition.
@@ -1764,6 +1771,12 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       M_HO.Assemble();
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
+
+      if (lom.pk)
+      {
+         lom.pk->BilinearForm::operator=(0.0);
+         lom.pk->Assemble();
+      }
 
       // Face contributions.
       asmbl.bdrInt = 0.;
