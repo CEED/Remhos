@@ -1848,7 +1848,15 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       {
          Vector yH(x.Size()), yL(x.Size());
 
-         ComputeLowOrderSolution(x, yL);
+         if (lo_solver)
+         {
+            lo_solver->CalcLOSolution(x, yL);
+         }
+         else
+         {
+            ComputeLowOrderSolution(x, yL);
+         }
+
          ho_solver.CalcHOSolution(x, yH);
 
          dofs.ComputeBounds();

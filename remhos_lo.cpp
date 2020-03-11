@@ -51,15 +51,25 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    u_gf.ExchangeFaceNbrData();
    Vector &u_nd = u_gf.FaceNbrData();
    const int ne = pfes.GetMesh()->GetNE();
-   for (int i = 0; i < ne; i++)
+   for (int k = 0; k < ne; k++)
    {
       // Face contributions.
       for (int f = 0; f < assembly.dofs.numBdrs; f++)
       {
-         assembly.LinearFluxLumping(i, ndof, f, u, du, u_nd, alpha);
+         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+      }
+
+      // Compute min / max over elements (needed for FCT).
+      assembly.dofs.xe_min(k) = numeric_limits<double>::infinity();
+      assembly.dofs.xe_max(k) = -numeric_limits<double>::infinity();
+      for (int j = 0; j < ndof; j++)
+      {
+         int dof_id = k*ndof + j;
+         assembly.dofs.xe_max(k) = max(assembly.dofs.xe_max(k), u(dof_id));
+         assembly.dofs.xe_min(k) = min(assembly.dofs.xe_min(k), u(dof_id));
+         du(dof_id) /= M_lumped(dof_id);
       }
    }
-   for (int i = 0; i < du.Size(); i++) { du(i) /= M_lumped(i); }
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
