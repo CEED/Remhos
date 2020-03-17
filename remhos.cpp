@@ -43,11 +43,6 @@
 using namespace std;
 using namespace mfem;
 
-#ifdef USE_LUA
-#include "lua.hpp"
-lua_State* L;
-#endif
-
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class LOSolverType {None, DiscrUpwind, ResidDist};
 enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
@@ -291,22 +286,12 @@ public:
    virtual ~FE_Evolution() { }
 };
 
-FE_Evolution* adv;
-
 int main(int argc, char *argv[])
 {
    // Initialize MPI.
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   // Parse command-line options.
-#ifdef USE_LUA
-   L = luaL_newstate();
-   luaL_openlibs(L);
-   const char* problem_file = "problem.lua";
-#else
-   problem_num = 4;
-#endif
    const char *mesh_file = "data/periodic-square.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
@@ -324,7 +309,6 @@ int main(int argc, char *argv[])
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
-   bool binary = false;
    int vis_steps = 100;
 
    int precision = 8;
@@ -333,13 +317,8 @@ int main(int argc, char *argv[])
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
-#ifdef USE_LUA
-   args.AddOption(&problem_file, "-p", "--problem",
-                  "lua problem definition file.");
-#else
    args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
-#endif
    args.AddOption(&rs_levels, "-rs", "--refine-serial",
                   "Number of times to refine the mesh uniformly in serial.");
    args.AddOption(&rp_levels, "-rp", "--refine-parallel",
@@ -387,9 +366,6 @@ int main(int argc, char *argv[])
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
-   args.AddOption(&binary, "-binary", "--binary-datafiles", "-ascii",
-                  "--ascii-datafiles",
-                  "Use binary (Sidre) or ascii format for VisIt data files.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -404,23 +380,6 @@ int main(int argc, char *argv[])
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
-
-#ifdef USE_LUA
-   // When using lua, exec mode is read from lua file
-   if (luaL_dofile(L, problem_file))
-   {
-      printf("Error opening lua file: %s\n",problem_file);
-      exit(1);
-   }
-
-   lua_getglobal(L, "exec_mode");
-   if (!lua_isnumber(L, -1))
-   {
-      printf("Did not find exec_mode in lua input.\n");
-      return 1;
-   }
-   exec_mode = (int)lua_tonumber(L, -1);
-#endif
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -902,19 +861,8 @@ int main(int argc, char *argv[])
    DataCollection *dc = NULL;
    if (visit)
    {
-      if (binary)
-      {
-#ifdef MFEM_USE_SIDRE
-         dc = new SidreDataCollection("Example9", &pmesh);
-#else
-         MFEM_ABORT("Must build with MFEM_USE_SIDRE=YES for binary output.");
-#endif
-      }
-      else
-      {
-         dc = new VisItDataCollection("Example9", &pmesh);
-         dc->SetPrecision(precision);
-      }
+      dc = new VisItDataCollection("Remhos", &pmesh);
+      dc->SetPrecision(precision);
       dc->RegisterField("solution", &u);
       dc->SetCycle(0);
       dc->SetTime(0.0);
@@ -1347,62 +1295,9 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    MFEM_ABORT("No solver was chosen.");
 }
 
-#ifdef USE_LUA
-void lua_velocity_function(const Vector &x, Vector &v)
-{
-   lua_getglobal(L, "velocity_function");
-   int dim = x.Size();
-
-   lua_pushnumber(L, x(0));
-   if (dim > 1)
-   {
-      lua_pushnumber(L, x(1));
-   }
-   if (dim > 2)
-   {
-      lua_pushnumber(L, x(2));
-   }
-
-   double v0 = 0;
-   double v1 = 0;
-   double v2 = 0;
-   lua_call(L, dim, dim);
-   v0 = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-   if (dim > 1)
-   {
-      v1 = (double)lua_tonumber(L, -1);
-      lua_pop(L, 1);
-   }
-   if (dim > 2)
-   {
-      v2 = (double)lua_tonumber(L, -1);
-      lua_pop(L, 1);
-   }
-
-   v(0) = v0;
-   if (dim > 1)
-   {
-      v(0) = v1;
-      v(1) = v0;
-   }
-   if (dim > 2)
-   {
-      v(0) = v2;
-      v(1) = v1;
-      v(2) = v0;
-   }
-}
-#endif
-
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
-#ifdef USE_LUA
-   lua_velocity_function(x, v);
-   return;
-#endif
-
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -1640,38 +1535,9 @@ double ring(double rin, double rout, Vector c, Vector y)
    }
 }
 
-// Initial condition as defined by lua function
-#ifdef USE_LUA
-double lua_u0_function(const Vector &x)
-{
-   lua_getglobal(L, "initial_function");
-   int dim = x.Size();
-
-   lua_pushnumber(L, x(0));
-   if (dim > 1)
-   {
-      lua_pushnumber(L, x(1));
-   }
-   if (dim > 2)
-   {
-      lua_pushnumber(L, x(2));
-   }
-
-   lua_call(L, dim, 1);
-   double u = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-
-   return u;
-}
-#endif
-
 // Initial condition: lua function or hard-coded functions
 double u0_function(const Vector &x)
 {
-#ifdef USE_LUA
-   return lua_u0_function(x);
-#endif
-
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -1826,36 +1692,8 @@ double u0_function(const Vector &x)
    return 0.0;
 }
 
-#ifdef USE_LUA
-double lua_inflow_function(const Vector& x)
-{
-   lua_getglobal(L, "boundary_condition");
-
-   int dim = x.Size();
-
-   double t;
-   adv ? t = adv->GetTime() : t = 0.0;
-
-   for (int d = 0; d < dim; d++)
-   {
-      lua_pushnumber(L, x(d));
-   }
-   lua_pushnumber(L, t);
-
-   lua_call(L, dim+1, 1);
-   double u = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-
-   return u;
-}
-#endif
-
 double inflow_function(const Vector &x)
 {
-#ifdef USE_LUA
-   return lua_inflow_function(x);
-#endif
-
    double r = x.Norml2();
    if ((problem_num % 10) == 6 && x.Size() == 2)
    {
