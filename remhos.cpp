@@ -69,7 +69,9 @@
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
+#include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
+#include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 
 using namespace std;
@@ -80,8 +82,10 @@ using namespace mfem;
 lua_State* L;
 #endif
 
-enum HOSolverType {Neumann, CG, LocalInverse};
-enum FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
+enum class HOSolverType {Neumann, CG, LocalInverse};
+enum class LOSolverType {None, DiscrUpwind, ResidDist};
+enum class FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
+enum class MonolithicSolverType {None, RDMonolithic};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -132,7 +136,7 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
 
 // Given a matrix K, matrix D (initialized with same sparsity as K) is computed,
 // such that (K+D)_ij >= 0 for i != j.
-void ComputeDiscreteUpwindingMatrix(const SparseMatrix& K,
+void ComputeDiscreteUpwindingMatrix(const SparseMatrix &K,
                                     Array<int> smap, SparseMatrix& D)
 {
    const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
@@ -293,7 +297,9 @@ private:
    DofInfo &dofs;
 
    HOSolver &ho_solver;
+   LOSolver *lo_solver;
    FCTSolver *fct_solver;
+   MonolithicSolver *mono_solver;
 
 public:
    FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
@@ -304,7 +310,8 @@ public:
                 GridFunction &pos, GridFunction *sub_pos,
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator *si, HOSolver &hos, FCTSolver *fct);
+                SmoothnessIndicator *si,
+                HOSolver &hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -314,16 +321,6 @@ public:
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
-
-   virtual void LinearFluxLumping(const int k, const int nd,
-                                  const int BdrID, const Vector &x,
-                                  Vector &y, const Vector &alpha) const;
-
-   virtual void NonlinFluxLumping(const int k, const int nd,
-                                  const int BdrID, const Vector &x,
-                                  Vector &y, const Vector &alpha) const;
-
-   virtual void ComputeLowOrderSolution(const Vector &x, Vector &y) const;
 
    virtual ~FE_Evolution() { }
 };
@@ -350,9 +347,11 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = None;
-   HOSolverType ho_type   = Neumann;
-   FCTSolverType fct_type = ClipScale;
+   MONOTYPE MonoType = MONOTYPE::None;
+   HOSolverType ho_type   = HOSolverType::Neumann;
+   LOSolverType lo_type   = LOSolverType::None;
+   FCTSolverType fct_type = FCTSolverType::ClipScale;
+   MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
    bool OptScheme = true;
    int smth_ind_type = 0;
@@ -398,10 +397,17 @@ int main(int argc, char *argv[])
                   "High-Order Solver: 0 - Neumann iteration,\n\t"
                   "                   1 - CG solver,\n\t"
                   "                   2 - Local inverse.");
+   args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
+                  "Low-Order Solver: 0 - None,\n\t"
+                  "                  1 - Discrete Upwind,\n\t"
+                  "                  2 - Residual Distribution.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - Flux-based FCT,\n\t"
                   "                 1 - Local clip + scale,\n\t"
                   "                 2 - Local clip + nonlinear penalization.");
+   args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
+                  "Monolithic solver: 0 - No monolithic solver,\n\t"
+                  "                   1 - Residual distribution.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -455,6 +461,20 @@ int main(int argc, char *argv[])
    }
    exec_mode = (int)lua_tonumber(L, -1);
 #endif
+
+   // TODO remove MONOTYPE and use the other enums.
+   if (MonoType == MONOTYPE::DiscUpw || MonoType == MONOTYPE::DiscUpw_FCT)
+   {
+      lo_type = LOSolverType::DiscrUpwind;
+   }
+   else if (MonoType == MONOTYPE::ResDist || MonoType == MONOTYPE::ResDist_FCT)
+   {
+      lo_type = LOSolverType::ResidDist;
+   }
+   if (MonoType == MONOTYPE::ResDist_Monolithic)
+   {
+      mono_type = MonolithicSolverType::RDMonolithic;
+   }
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -556,7 +576,7 @@ int main(int argc, char *argv[])
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
-   if (MonoType != None)
+   if (MonoType != MONOTYPE::None)
    {
       if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
       {
@@ -572,7 +592,7 @@ int main(int argc, char *argv[])
       {
          // Disable monotonicity treatment for piecewise constants.
          if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
-         MonoType = None;
+         MonoType = MONOTYPE::None;
          OptScheme = false;
       }
    }
@@ -858,6 +878,24 @@ int main(int argc, char *argv[])
       }
    }
 
+   LOSolver *lo_solver = NULL;
+   Array<int> lo_smap;
+   if (lo_type == LOSolverType::DiscrUpwind)
+   {
+      SparseMatrix *lo_spmat = (OptScheme) ? &lom.pk->SpMat() : &k.SpMat();
+      lo_smap = SparseMatrix_Build_smap(*lo_spmat);
+      bool update_D = (exec_mode == 0) ? false : true;
+      lo_solver = new DiscreteUpwind(pfes, *lo_spmat, lo_smap,
+                                     lumpedM, asmbl, update_D);
+   }
+   else if (lo_type == LOSolverType::ResidDist)
+   {
+      bool subcell = (OptScheme) ? true : false;
+      bool dynamic = (exec_mode == 0) ? false : true;
+      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                           subcell, dynamic);
+   }
+
    // Initial condition.
    ParGridFunction u(&pfes);
    FunctionCoefficient u0(u0_function);
@@ -887,6 +925,18 @@ int main(int argc, char *argv[])
       ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
    }
    else { MFEM_ABORT("Wrong high-order solver type specification."); }
+
+
+   MonolithicSolver *mono_solver = NULL;
+   if (mono_type == MonolithicSolverType::RDMonolithic)
+   {
+      bool subcell = (OptScheme) ? true : false;
+      bool dynamic = (exec_mode == 0) ? false : true;
+      bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+                                     asmbl, smth_indicator, lom.scale,
+                                     subcell, dynamic, mass_lim);
+   }
 
    // Print the starting meshes and initial condition.
    {
@@ -956,7 +1006,7 @@ int main(int argc, char *argv[])
    //    right-hand side, and perform time-integration (looping over the time
    //    iterations, ti, with a time-step dt).
 
-   Array<int> K_smap;
+   Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
    if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
    {
@@ -964,10 +1014,10 @@ int main(int argc, char *argv[])
       {
          MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
 
-         K_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
          const int fct_iterations = 1;
          fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                       K_smap, M_HO.SpMat(), fct_iterations);
+                                       K_HO_smap, M_HO.SpMat(), fct_iterations);
       }
       else if (fct_type == FCTSolverType::ClipScale)
       {
@@ -983,7 +1033,8 @@ int main(int argc, char *argv[])
                                         k, k.SpMat(), M_HO, K_HO,
                                         b, inflow_gf, x, xsub, v_gf, v_sub_gf,
                                         asmbl, lom, dofs, smth_indicator,
-                                        *ho_solver, fct_solver);
+                                        *ho_solver, lo_solver,
+                                        fct_solver, mono_solver);
 
    double t = 0.0;
    adv->SetTime(t);
@@ -1014,7 +1065,7 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (MonoType != None && smth_indicator == NULL)
+      if (MonoType != MONOTYPE::None && smth_indicator == NULL)
       {
          double umin_new, umax_new;         
          GetMinMax(u, umin_new, umax_new);
@@ -1172,9 +1223,10 @@ int main(int argc, char *argv[])
 
    // 10. Free the used memory.
    delete adv;
+   delete mono_solver;
    delete fct_solver;
-   delete ho_solver;
    delete smth_indicator;
+   delete ho_solver;
 
    delete ode_solver;
    delete mesh_fec;
@@ -1195,54 +1247,14 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-void FE_Evolution::LinearFluxLumping(const int k, const int nd,
-                                     const int BdrID, const Vector &x,
-                                     Vector &y, const Vector &alpha) const
-{
-   int i, j, dofInd;
-   double xNeighbor;
-   Vector xDiff(dofs.numFaceDofs);
-   const int size_x = x.Size();
-   Vector &x_nd = x_gf.FaceNbrData();
-
-   for (j = 0; j < dofs.numFaceDofs; j++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
-      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-      // s.t. this value will not matter.
-      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
-      else
-      {
-         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                                           : x_nd(nbr_dof_id - size_x);
-      }
-      xDiff(j) = xNeighbor - x(dofInd);
-   }
-
-   for (i = 0; i < dofs.numFaceDofs; i++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      for (j = 0; j < dofs.numFaceDofs; j++)
-      {
-         // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
-         // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
-                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
-                       alpha(dofs.BdrDofs(i,BdrID)) *
-                       alpha(dofs.BdrDofs(j,BdrID)));
-      }
-   }
-}
-
-void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
-                                     const int BdrID, const Vector &x,
-                                     Vector &y, const Vector &alpha) const
+void Assembly::NonlinFluxLumping(const int k, const int nd,
+                                 const int BdrID, const Vector &x,
+                                 Vector &y, const Vector &x_nd,
+                                 const Vector &alpha) const
 {
    int i, j, dofInd;
    double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
    const int size_x = x.Size();
-   Vector &x_nd = x_gf.FaceNbrData();
    Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
    BdrTermCorr = 0.;
 
@@ -1266,9 +1278,9 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
       for (j = 0; j < dofs.numFaceDofs; j++)
       {
-         y(dofInd) += asmbl.bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
-         BdrTermCorr(i) += asmbl.bdrInt(k, BdrID,
-                                        i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
+         y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
+         BdrTermCorr(i) += bdrInt(k, BdrID,
+                                  i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
       }
       BdrTermCorr(i) *= alpha(dofs.BdrDofs(i,BdrID));
       SumCorrP += max(0., BdrTermCorr(i));
@@ -1292,449 +1304,6 @@ void FE_Evolution::NonlinFluxLumping(const int k, const int nd,
    }
 }
 
-void FE_Evolution::ComputeLowOrderSolution(const Vector &x, Vector &y) const
-{
-   const FiniteElement* dummy = lom.fes->GetFE(0);
-   int i, j, k, dofInd, nd = dummy->GetDof(), ne = lom.fes->GetNE();
-   Vector alpha(nd); alpha = 0.;
-
-   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
-   {
-      // Reassemble on the new mesh (given by mesh_pos).
-      if (exec_mode == 1)
-      {
-         if (!lom.OptScheme)
-         {
-            ComputeDiscreteUpwindingMatrix(K, lom.smap, lom.D);
-         }
-         else
-         {
-            lom.pk->BilinearForm::operator=(0.0);
-            lom.pk->Assemble();
-            ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
-         }
-      }
-
-      // Discretization and monotonicity terms.
-      lom.D.Mult(x, y);
-
-      // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
-      for (k = 0; k < ne; k++)
-      {
-         // Boundary contributions
-         for (i = 0; i < dofs.numBdrs; i++)
-         {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
-         }
-
-         // Compute min / max over elements (needed for FCT).
-         dofs.xe_min(k) = numeric_limits<double>::infinity();
-         dofs.xe_max(k) = -dofs.xe_min(k);
-         for (j = 0; j < nd; j++)
-         {
-            dofInd = k*nd+j;
-            dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
-            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
-            y(dofInd) /= lumpedM(dofInd);
-         }
-      }
-   }
-   else if (lom.MonoType == ResDist || lom.MonoType == ResDist_FCT) // RD(S)
-   {
-      int m, loc;
-      double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
-             gamma = 10., eps = 1.E-15;
-      Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
-
-      // Discretization terms
-      y = 0.;
-      K.Mult(x, z);
-
-      // Monotonicity terms
-      for (k = 0; k < ne; k++)
-      {
-         // Boundary contributions
-         for (i = 0; i < dofs.numBdrs; i++)
-         {
-            LinearFluxLumping(k, nd, i, x, y, alpha);
-         }
-
-         // Element contributions
-         dofs.xe_min(k) =   numeric_limits<double>::infinity();
-         dofs.xe_max(k) = - numeric_limits<double>::infinity();
-         rhoP = rhoN = xSum = 0.;
-
-         for (j = 0; j < nd; j++)
-         {
-            dofInd = k*nd+j;
-            dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
-            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
-            xSum += x(dofInd);
-            rhoP += max(0., z(dofInd));
-            rhoN += min(0., z(dofInd));
-         }
-
-         sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
-         sumWeightsN = nd*dofs.xe_min(k) - xSum - eps;
-
-         if (lom.OptScheme)
-         {
-            fluctSubcellP.SetSize(dofs.numSubcells);
-            fluctSubcellN.SetSize(dofs.numSubcells);
-            xMaxSubcell.SetSize(dofs.numSubcells);
-            xMinSubcell.SetSize(dofs.numSubcells);
-            sumWeightsSubcellP.SetSize(dofs.numSubcells);
-            sumWeightsSubcellN.SetSize(dofs.numSubcells);
-            nodalWeightsP.SetSize(nd);
-            nodalWeightsN.SetSize(nd);
-            sumFluctSubcellP = sumFluctSubcellN = 0.;
-            nodalWeightsP = 0.; nodalWeightsN = 0.;
-
-            // compute min-/max-values and the fluctuation for subcells
-            for (m = 0; m < dofs.numSubcells; m++)
-            {
-               xMinSubcell(m) =   numeric_limits<double>::infinity();
-               xMaxSubcell(m) = - numeric_limits<double>::infinity();;
-               fluct = xSum = 0.;
-
-               if (exec_mode == 1)
-               {
-                  asmbl.ComputeSubcellWeights(k, m);
-               }
-
-               for (i = 0; i < dofs.numDofsSubcell; i++)
-               {
-                  dofInd = k*nd + dofs.Sub2Ind(m, i);
-                  fluct += asmbl.SubcellWeights(k)(m,i) * x(dofInd);
-                  xMaxSubcell(m) = max(xMaxSubcell(m), x(dofInd));
-                  xMinSubcell(m) = min(xMinSubcell(m), x(dofInd));
-                  xSum += x(dofInd);
-               }
-               sumWeightsSubcellP(m) = dofs.numDofsSubcell
-                                       * xMaxSubcell(m) - xSum + eps;
-               sumWeightsSubcellN(m) = dofs.numDofsSubcell
-                                       * xMinSubcell(m) - xSum - eps;
-
-               fluctSubcellP(m) = max(0., fluct);
-               fluctSubcellN(m) = min(0., fluct);
-               sumFluctSubcellP += fluctSubcellP(m);
-               sumFluctSubcellN += fluctSubcellN(m);
-            }
-
-            for (m = 0; m < dofs.numSubcells; m++)
-            {
-               for (i = 0; i < dofs.numDofsSubcell; i++)
-               {
-                  loc = dofs.Sub2Ind(m, i);
-                  dofInd = k*nd + loc;
-                  nodalWeightsP(loc) += fluctSubcellP(m)
-                                        * ((xMaxSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellP(m)); // eq. (58)
-                  nodalWeightsN(loc) += fluctSubcellN(m)
-                                        * ((xMinSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellN(m)); // eq. (59)
-               }
-            }
-         }
-
-         for (i = 0; i < nd; i++)
-         {
-            dofInd = k*nd+i;
-            weightP = (dofs.xe_max(k) - x(dofInd)) / sumWeightsP;
-            weightN = (dofs.xe_min(k) - x(dofInd)) / sumWeightsN;
-
-            if (lom.OptScheme)
-            {
-               aux = gamma / (rhoP + eps);
-               weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
-               weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP(i);
-
-               aux = gamma / (rhoN - eps);
-               weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
-               weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
-            }
-
-            y(dofInd) = (y(dofInd) + weightP * rhoP + weightN * rhoN)
-                        / lumpedM(dofInd);
-         }
-      }
-   }
-   else // RD(S)-Monolithic
-   {
-      int m, loc, it, CtrIt, ctr = 0, max_iter = 100;
-      double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-             sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
-             uDotMin, uDotMax, diff, MassP, MassN, alphaGlob, tmp, bndN, bndP,
-             gamma = 10., beta = 10., tol = 1.E-8, eps = 1.E-15;
-      Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
-             fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN, d,
-             m_it(nd), uDot(nd), res(nd), alpha1(nd);
-
-      bool UseMassLim = problem_num != 6 && problem_num != 7;
-      double* Mij = M.GetData();
-
-      if (!UseMassLim) { max_iter = -1; }
-      alpha1 = 1.;
-      for (k = 0; k < ne; k++)
-      {
-         dofs.xe_min(k) = numeric_limits<double>::infinity();
-         dofs.xe_max(k) = -dofs.xe_min(k);
-
-         for (i = 0; i < nd; i++)
-         {
-            dofInd = k*nd+i;
-            dofs.xe_max(k) = max(dofs.xe_max(k), x(dofInd));
-            dofs.xe_min(k) = min(dofs.xe_min(k), x(dofInd));
-         }
-      }
-
-      dofs.ComputeBounds();
-
-      // Smoothness indicator.
-      ParGridFunction si_val;
-      if (smth_indicator)
-      {
-         smth_indicator->ComputeSmoothnessIndicator(x, si_val);
-      }
-
-      // Discretization terms.
-      y = 0.;
-      K.Mult(x, z);
-      d = z;
-
-      // Monotonicity terms
-      for (k = 0; k < ne; k++)
-      {
-         for (j = 0; j < nd; j++)
-         {
-            dofInd = k*nd+j;
-            alpha(j) = min( 1., beta * min(dofs.xi_max(dofInd) - x(dofInd),
-                                           x(dofInd) - dofs.xi_min(dofInd))
-                            / (max(dofs.xi_max(dofInd) - x(dofInd),
-                                   x(dofInd) - dofs.xi_min(dofInd)) + eps) );
-
-            if (smth_indicator)
-            {
-               tmp = smth_indicator->DG2CG(dofInd) < 0. ? 1. : si_val(smth_indicator->DG2CG(dofInd));
-               bndN = max( 0., tmp * (2.*x(dofInd) - dofs.xi_max(dofInd)) +
-                           (1.-tmp) * dofs.xi_min(dofInd) );
-               bndP = min( 1., tmp * (2.*x(dofInd) - dofs.xi_min(dofInd)) +
-                           (1.-tmp) * dofs.xi_max(dofInd) );
-
-               if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) > 2.*x(dofInd) + eps)
-               {
-                  alpha(j) = min(1., beta*(x(dofInd) - bndN) /
-                                     (dofs.xi_max(dofInd) - x(dofInd) + eps));
-               }
-               else if (dofs.xi_min(dofInd)+dofs.xi_max(dofInd) < 2.*x(dofInd) - eps)
-               {
-                  alpha(j) = min(1., beta*(bndP - x(dofInd)) /
-                                     (x(dofInd) - dofs.xi_min(dofInd) + eps));
-               }
-            }
-
-            // Splitting for volume term.
-            y(dofInd) += alpha(j) * z(dofInd);
-            z(dofInd) -= alpha(j) * z(dofInd);
-         }
-
-         // Boundary contributions
-         for (i = 0; i < dofs.numBdrs; i++)
-         {
-            NonlinFluxLumping(k, nd, i, x, y, alpha);
-            NonlinFluxLumping(k, nd, i, x, d, alpha1);
-         }
-
-         // Element contributions
-         rhoP = rhoN = xSum = 0.;
-
-         for (j = 0; j < nd; j++)
-         {
-            dofInd = k*nd+j;
-            xSum += x(dofInd);
-            rhoP += max(0., z(dofInd));
-            rhoN += min(0., z(dofInd));
-         }
-
-         sumWeightsP = nd*dofs.xe_max(k) - xSum + eps;
-         sumWeightsN = nd*dofs.xe_min(k) - xSum - eps;
-
-         if (lom.OptScheme)
-         {
-            fluctSubcellP.SetSize(dofs.numSubcells);
-            fluctSubcellN.SetSize(dofs.numSubcells);
-            xMaxSubcell.SetSize(dofs.numSubcells);
-            xMinSubcell.SetSize(dofs.numSubcells);
-            sumWeightsSubcellP.SetSize(dofs.numSubcells);
-            sumWeightsSubcellN.SetSize(dofs.numSubcells);
-            nodalWeightsP.SetSize(nd);
-            nodalWeightsN.SetSize(nd);
-            sumFluctSubcellP = sumFluctSubcellN = 0.;
-            nodalWeightsP = 0.; nodalWeightsN = 0.;
-
-            // compute min-/max-values and the fluctuation for subcells
-            for (m = 0; m < dofs.numSubcells; m++)
-            {
-               xMinSubcell(m) =   numeric_limits<double>::infinity();
-               xMaxSubcell(m) = - numeric_limits<double>::infinity();;
-               fluct = xSum = 0.;
-
-               if (exec_mode == 1)
-               {
-                  asmbl.ComputeSubcellWeights(k, m);
-               }
-
-               for (i = 0; i < dofs.numDofsSubcell; i++)
-               {
-                  dofInd = k*nd + dofs.Sub2Ind(m, i);
-                  fluct += asmbl.SubcellWeights(k)(m,i) * x(dofInd);
-                  xMaxSubcell(m) = max(xMaxSubcell(m), x(dofInd));
-                  xMinSubcell(m) = min(xMinSubcell(m), x(dofInd));
-                  xSum += x(dofInd);
-               }
-               sumWeightsSubcellP(m) = dofs.numDofsSubcell
-                                       * xMaxSubcell(m) - xSum + eps;
-               sumWeightsSubcellN(m) = dofs.numDofsSubcell
-                                       * xMinSubcell(m) - xSum - eps;
-
-               fluctSubcellP(m) = max(0., fluct);
-               fluctSubcellN(m) = min(0., fluct);
-               sumFluctSubcellP += fluctSubcellP(m);
-               sumFluctSubcellN += fluctSubcellN(m);
-            }
-
-            for (m = 0; m < dofs.numSubcells; m++)
-            {
-               for (i = 0; i < dofs.numDofsSubcell; i++)
-               {
-                  loc = dofs.Sub2Ind(m, i);
-                  dofInd = k*nd + loc;
-                  nodalWeightsP(loc) += fluctSubcellP(m)
-                                        * ((xMaxSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellP(m)); // eq. (58)
-                  nodalWeightsN(loc) += fluctSubcellN(m)
-                                        * ((xMinSubcell(m) - x(dofInd))
-                                           / sumWeightsSubcellN(m)); // eq. (59)
-               }
-            }
-         }
-
-         for (i = 0; i < nd; i++)
-         {
-            dofInd = k*nd+i;
-            weightP = (dofs.xe_max(k) - x(dofInd)) / sumWeightsP;
-            weightN = (dofs.xe_min(k) - x(dofInd)) / sumWeightsN;
-
-            if (lom.OptScheme)
-            {
-               aux = gamma / (rhoP + eps);
-               weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
-               weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP(i);
-
-               aux = gamma / (rhoN - eps);
-               weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
-               weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
-            }
-
-            y(dofInd) += weightP * rhoP + weightN * rhoN;
-         }
-
-         // Time derivative and mass matrix, if UseMassLim = false, max_iter has
-         // been set to -1, and the iteration loop is not entered.
-         m_it = uDot = 0.;
-         for (it = 0; it <= max_iter; it++)
-         {
-            for (i = 0; i < nd; i++)
-            {
-               dofInd = k*nd+i;
-               uDot(i) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
-            }
-
-            CtrIt = ctr;
-
-            uDotMin = numeric_limits<double>::infinity();
-            uDotMax = -uDotMin;
-
-            for (i = 0; i < nd; i++) // eq. (28)
-            {
-               uDotMin = min(uDotMin, uDot(i));
-               uDotMax = max(uDotMax, uDot(i));
-
-               dofInd = k*nd+i;
-               m_it(i) = 0.;
-               // NOTE: This will only work in serial.
-               for (j = nd-1; j >= 0; j--) // run backwards through columns
-               {
-                  // use knowledge of how M looks like
-                  m_it(i) += Mij[ctr] * (uDot(i) - uDot(j));
-                  ctr++;
-               }
-               diff = d(dofInd) - y(dofInd);
-
-               tmp = 0.;
-               if (smth_indicator)
-               {
-                  tmp = smth_indicator->DG2CG(dofInd) < 0. ? 1. : si_val(smth_indicator->DG2CG(dofInd));
-               }
-               m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
-                          * diff; // eq. (27) - (29)
-            }
-
-            ctr = CtrIt;
-            MassP = MassN = 0.;
-
-            for (i = 0; i < nd; i++)
-            {
-               dofInd = k*nd+i;
-               alpha(i) = min(1., beta * lom.scale(k) * min(dofs.xi_max(dofInd) - x(dofInd),
-                                                            x(dofInd) - dofs.xi_min(dofInd))
-                              / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-
-               if (smth_indicator)
-               {
-                  alphaGlob = min( 1., beta * lom.scale(k) * min(1. - x(dofInd), x(dofInd) - 0.)
-                                   / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-                  tmp = smth_indicator->DG2CG(dofInd) < 0. ? 1. : si_val(smth_indicator->DG2CG(dofInd));
-                  alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
-               }
-
-               m_it(i) *= alpha(i);
-               MassP += max(0., m_it(i));
-               MassN += min(0., m_it(i));
-            }
-
-            for (i = 0; i < nd; i++)
-            {
-               if (MassP + MassN > eps)
-               {
-                  m_it(i) = min(0., m_it(i)) - max(0., m_it(i)) * MassN / MassP;
-               }
-               else if (MassP + MassN < -eps)
-               {
-                  m_it(i) = max(0., m_it(i)) - min(0., m_it(i)) * MassP / MassN;
-               }
-            }
-
-            for (i = 0; i < nd; i++)
-            {
-               dofInd = k*nd+i;
-               res(i) = m_it(i) + y(dofInd) - lumpedM(dofInd) * uDot(i);
-            }
-
-            if (res.Norml2() <= tol) { break; }
-         }
-
-         for (i = 0; i < nd; i++)
-         {
-            dofInd = k*nd+i;
-            y(dofInd) = (y(dofInd) + m_it(i)) / lumpedM(dofInd);
-         }
-      }
-   }
-}
-
 // Implementation of class FE_Evolution
 FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            BilinearForm &_ml, Vector &_lumpedM,
@@ -1745,8 +1314,9 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            GridFunction &vel, GridFunction &sub_vel,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
-                           SmoothnessIndicator *si, HOSolver &hos,
-                           FCTSolver *fct) :
+                           SmoothnessIndicator *si,
+                           HOSolver &hos, LOSolver *los, FCTSolver *fct,
+                           MonolithicSolver *mos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
    M_HO(M_HO_), K_HO(K_HO_),
@@ -1756,7 +1326,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
    mesh_vel(vel), submesh_vel(sub_vel),
    z(_M.Size()), x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs), smth_indicator(si),
-   ho_solver(hos), fct_solver(fct) { }
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
 void FE_Evolution::Mult(const Vector &x, Vector &y) const
 {
@@ -1788,6 +1358,12 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
 
+      if (lom.pk)
+      {
+         lom.pk->BilinearForm::operator=(0.0);
+         lom.pk->Assemble();
+      }
+
       // Face contributions.
       asmbl.bdrInt = 0.;
       Mesh *mesh = lom.fes->GetMesh();
@@ -1811,6 +1387,13 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
    x_gf = x;
    x_gf.ExchangeFaceNbrData();
+
+   if (mono_solver)
+   {
+      mono_solver->CalcSolution(x, y);
+      return;
+   }
+
    if (lom.MonoType == 0)
    {
       ho_solver.CalcHOSolution(x, y);
@@ -1819,14 +1402,14 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    {
       if (lom.MonoType % 2 == 1)
       {
-         // NOTE: Right now this is called for monolithic limiting.
-         ComputeLowOrderSolution(x, y);
+         lo_solver->CalcLOSolution(x, y);
       }
       else if (lom.MonoType % 2 == 0)
       {
          Vector yH(x.Size()), yL(x.Size());
 
-         ComputeLowOrderSolution(x, yL);
+         lo_solver->CalcLOSolution(x, yL);
+
          ho_solver.CalcHOSolution(x, yH);
 
          dofs.ComputeBounds();
