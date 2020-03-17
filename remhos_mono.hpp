@@ -33,6 +33,8 @@ protected:
 public:
    MonolithicSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
+   virtual ~MonolithicSolver() { }
+
    virtual void CalcSolution(const Vector &u, Vector &du) const = 0;
 };
 

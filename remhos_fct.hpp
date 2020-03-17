@@ -37,6 +37,8 @@ public:
              SmoothnessIndicator *si, double dt_)
       : pfes(space), smth_indicator(si), dt(dt_) { }
 
+   virtual ~FCTSolver() { }
+
    virtual void UpdateTimeStep(double dt_) { dt = dt_; }
 
    // Calculate du that satisfies the following:

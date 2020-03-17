@@ -31,6 +31,8 @@ protected:
 public:
    LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
+   virtual ~LOSolver() { }
+
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
 };
 

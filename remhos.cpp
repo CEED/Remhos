@@ -29,40 +29,6 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 //
-//    Using lua problem definition file
-//    ./remhos -p balls-and-jacks.lua -r 4 -dt 0.001 -tf 5.0
-//
-//    Transport mode:
-//    ./remhos -m ./data/periodic-segment.mesh -p 0 -r 2 -dt 0.005
-//    ./remhos -m ./data/periodic-square.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    ./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    ./remhos -m ./data/periodic-square.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/periodic-hexagon.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/star-q3.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 9
-//    ./remhos -m ./data/disc-nurbs.mesh -p 2 -r 3 -dt 0.005 -tf 9
-//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 4 -dt 0.0025 -tf 9 -vs 20
-//    ./remhos -m ./data/periodic-cube.mesh -p 0 -r 2 -o 2 -dt 0.02 -tf 8
-//    ./remhos -m ./data/periodic-square.mesh -p 4 -r 4 -dt 0.001 -o 2 -mt 3
-//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 2 -dt 0.0025 -o 15 -tf 9 -mt 4
-//    ./remhos -m ./data/periodic-square.mesh -p 5 -r 4 -dt 0.002 -o 2 -tf 0.8 -mt 4
-//    ./remhos -m ./data/periodic-cube.mesh -p 5 -r 5 -dt 0.0001 -o 1 -tf 0.8 -mt 4
-//
-//    Remap mode:
-//    ./remhos -m ./data/periodic-square.mesh -p 10 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//    ./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//
-// Description:  This example code solves the time-dependent advection equation
-//               du/dt + v.grad(u) = 0, where v is a given fluid velocity, and
-//               u0(x)=u(0,x) is a given initial condition.
-//
-//               The example demonstrates the use of Discontinuous Galerkin (DG)
-//               bilinear forms in MFEM (face integrators), the use of explicit
-//               ODE time integrators, the definition of periodic boundary
-//               conditions through periodic meshes, as well as the use of GLVis
-//               for persistent visualization of a time-evolving solution. The
-//               saving of time-dependent data files for external visualization
-//               with VisIt (visit.llnl.gov) is also illustrated.
 
 #include "mfem.hpp"
 #include "miniapps/common/mfem-common.hpp"
@@ -82,9 +48,9 @@ using namespace mfem;
 lua_State* L;
 #endif
 
-enum class HOSolverType {Neumann, CG, LocalInverse};
+enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class LOSolverType {None, DiscrUpwind, ResidDist};
-enum class FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
+enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
 enum class MonolithicSolverType {None, RDMonolithic};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
@@ -296,7 +262,7 @@ private:
    SmoothnessIndicator *smth_indicator;
    DofInfo &dofs;
 
-   HOSolver &ho_solver;
+   HOSolver *ho_solver;
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
@@ -311,7 +277,7 @@ public:
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
                 SmoothnessIndicator *si,
-                HOSolver &hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
+                HOSolver *hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -347,10 +313,9 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = MONOTYPE::None;
-   HOSolverType ho_type   = HOSolverType::Neumann;
-   LOSolverType lo_type   = LOSolverType::None;
-   FCTSolverType fct_type = FCTSolverType::ClipScale;
+   HOSolverType ho_type           = HOSolverType::Neumann;
+   LOSolverType lo_type           = LOSolverType::None;
+   FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
    bool OptScheme = true;
@@ -386,25 +351,20 @@ int main(int argc, char *argv[])
    args.AddOption(&ode_solver_type, "-s", "--ode-solver",
                   "ODE solver: 1 - Forward Euler,\n\t"
                   "            2 - RK2 SSP, 3 - RK3 SSP, 4 - RK4, 6 - RK6.");
-   args.AddOption((int*)(&MonoType), "-mt", "--MonoType",
-                  "Monotonicity scheme: 0 - no monotonicity treatment,\n\t"
-                  "                     1 - discrete upwinding - LO,\n\t"
-                  "                     2 - discrete upwinding - FCT,\n\t"
-                  "                     3 - residual distribution - LO,\n\t"
-                  "                     4 - residual distribution - FCT,n\t"
-                  "                     5 - residual distribution - monolithic.");
    args.AddOption((int*)(&ho_type), "-ho", "--ho-type",
-                  "High-Order Solver: 0 - Neumann iteration,\n\t"
-                  "                   1 - CG solver,\n\t"
-                  "                   2 - Local inverse.");
+                  "High-Order Solver: 0 - No HO solver,\n\t"
+                  "                   1 - Neumann iteration,\n\t"
+                  "                   2 - CG solver,\n\t"
+                  "                   3 - Local inverse.");
    args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
-                  "Low-Order Solver: 0 - None,\n\t"
+                  "Low-Order Solver: 0 - No LO solver,\n\t"
                   "                  1 - Discrete Upwind,\n\t"
                   "                  2 - Residual Distribution.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
-                  "Correction type: 0 - Flux-based FCT,\n\t"
-                  "                 1 - Local clip + scale,\n\t"
-                  "                 2 - Local clip + nonlinear penalization.");
+                  "Correction type: 0 - No nonlinear correction,\n\t"
+                  "                 1 - Flux-based FCT,\n\t"
+                  "                 2 - Local clip + scale,\n\t"
+                  "                 3 - Local clip + nonlinear penalization.");
    args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
                   "                   1 - Residual distribution.");
@@ -461,20 +421,6 @@ int main(int argc, char *argv[])
    }
    exec_mode = (int)lua_tonumber(L, -1);
 #endif
-
-   // TODO remove MONOTYPE and use the other enums.
-   if (MonoType == MONOTYPE::DiscUpw || MonoType == MONOTYPE::DiscUpw_FCT)
-   {
-      lo_type = LOSolverType::DiscrUpwind;
-   }
-   else if (MonoType == MONOTYPE::ResDist || MonoType == MONOTYPE::ResDist_FCT)
-   {
-      lo_type = LOSolverType::ResidDist;
-   }
-   if (MonoType == MONOTYPE::ResDist_Monolithic)
-   {
-      mono_type = MonolithicSolverType::RDMonolithic;
-   }
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -576,29 +522,28 @@ int main(int argc, char *argv[])
 
    // Check for meaningful combinations of parameters.
    bool fail = false;
-   if (MonoType != MONOTYPE::None)
+   const bool forced_bounds = lo_type   != LOSolverType::None ||
+                              mono_type != MonolithicSolverType::None;
+   if (forced_bounds)
    {
-      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
-      {
-         if (myid == 0) { cout << "Unsupported option for monotonicity treatment." << endl; }
-         fail = true;
-      }
-      if (btype != 2)
-      {
-         if (myid == 0) { cout << "Monotonicity treatment requires Bernstein basis." << endl; }
-         fail = true;
-      }
+      MFEM_VERIFY(btype == 2,
+                  "Monotonicity treatment requires Bernstein basis.");
+
       if (order == 0)
       {
          // Disable monotonicity treatment for piecewise constants.
          if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
-         MonoType = MONOTYPE::None;
+         lo_type = LOSolverType::None;
+         fct_type = FCTSolverType::None;
+         mono_type = MonolithicSolverType::None;
          OptScheme = false;
       }
    }
    else { OptScheme = false; }
 
-   if ((MonoType > 2) && (order==1) && OptScheme)
+   const bool useRD = lo_type   == LOSolverType::ResidDist ||
+                      mono_type == MonolithicSolverType::RDMonolithic;
+   if (useRD && order==1 && OptScheme)
    {
       // Avoid subcell methods for linear elements.
       if (myid == 0) { mfem_warning("For -o 1, subcell scheme is disabled."); }
@@ -714,14 +659,14 @@ int main(int argc, char *argv[])
    // into a separate routine. I am using a struct now because the various
    // schemes require quite different information.
    LowOrderMethod lom;
-   lom.MonoType = MonoType;
    lom.OptScheme = OptScheme;
    lom.fes = &pfes;
+   lom.subcell_scheme = useRD && OptScheme;
 
    lom.pk = NULL;
-   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
+   if (lo_type == LOSolverType::DiscrUpwind)
    {
-      if (!lom.OptScheme)
+      if (!OptScheme)
       {
          lom.smap = SparseMatrix_Build_smap(k.SpMat());
          lom.D = k.SpMat();
@@ -854,7 +799,7 @@ int main(int argc, char *argv[])
    const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
-   if (lom.MonoType == ResDist_Monolithic)
+   if (mono_type == MonolithicSolverType::RDMonolithic)
    {
       lom.scale.SetSize(ne);
 
@@ -911,7 +856,7 @@ int main(int argc, char *argv[])
                                                pfes, u, dofs);
    }
 
-   HOSolver *ho_solver;
+   HOSolver *ho_solver = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
       ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
@@ -924,8 +869,6 @@ int main(int argc, char *argv[])
    {
       ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
    }
-   else { MFEM_ABORT("Wrong high-order solver type specification."); }
-
 
    MonolithicSolver *mono_solver = NULL;
    if (mono_type == MonolithicSolverType::RDMonolithic)
@@ -1008,44 +951,39 @@ int main(int argc, char *argv[])
 
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
-   if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
+   if (fct_type == FCTSolverType::FluxBased)
    {
-      if (fct_type == FCTSolverType::FluxBased)
-      {
-         MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
+      MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
 
-         K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-         const int fct_iterations = 1;
-         fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                       K_HO_smap, M_HO.SpMat(), fct_iterations);
-      }
-      else if (fct_type == FCTSolverType::ClipScale)
-      {
-         fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
-      }
-      else if (fct_type == FCTSolverType::NonlinearPenalty)
-      {
-         fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
-      }
+      K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      const int fct_iterations = 1;
+      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+                                    K_HO_smap, M_HO.SpMat(), fct_iterations);
+   }
+   else if (fct_type == FCTSolverType::ClipScale)
+   {
+      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+   }
+   else if (fct_type == FCTSolverType::NonlinearPenalty)
+   {
+      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
-                                        k, k.SpMat(), M_HO, K_HO,
-                                        b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, smth_indicator,
-                                        *ho_solver, lo_solver,
-                                        fct_solver, mono_solver);
+   FE_Evolution adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), M_HO, K_HO,
+                    b, inflow_gf, x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                    smth_indicator,
+                    ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
-   adv->SetTime(t);
-   ode_solver->Init(*adv);
+   adv.SetTime(t);
+   ode_solver->Init(adv);
 
    double umin, umax;
    GetMinMax(u, umin, umax);
 
    if (exec_mode == 1)
    {
-      adv->SetRemapStartPos(x0, x0_sub);
+      adv.SetRemapStartPos(x0, x0_sub);
 
       // For remap, the pseudotime always evolves from 0 to 1.
       t_final = 1.0;
@@ -1059,13 +997,13 @@ int main(int argc, char *argv[])
    {
       double dt_real = min(dt, t_final - t);
 
-      adv->SetDt(dt_real);
+      adv.SetDt(dt_real);
 
       ode_solver->Step(u, t, dt_real);
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (MonoType != MONOTYPE::None && smth_indicator == NULL)
+      if (forced_bounds && smth_indicator == NULL)
       {
          double umin_new, umax_new;         
          GetMinMax(u, umin_new, umax_new);
@@ -1222,7 +1160,6 @@ int main(int argc, char *argv[])
    }
 
    // 10. Free the used memory.
-   delete adv;
    delete mono_solver;
    delete fct_solver;
    delete smth_indicator;
@@ -1315,7 +1252,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator *si,
-                           HOSolver &hos, LOSolver *los, FCTSolver *fct,
+                           HOSolver *hos, LOSolver *los, FCTSolver *fct,
                            MonolithicSolver *mos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
@@ -1388,35 +1325,26 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    x_gf = x;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver)
+   if (mono_solver) { mono_solver->CalcSolution(x, y); return; }
+
+   if (fct_solver)
    {
-      mono_solver->CalcSolution(x, y);
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      Vector yH(x.Size()), yL(x.Size());
+      lo_solver->CalcLOSolution(x, yL);
+      ho_solver->CalcHOSolution(x, yH);
+      dofs.ComputeBounds();
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
+                                  dofs.xi_min, dofs.xi_max, y);
       return;
    }
 
-   if (lom.MonoType == 0)
-   {
-      ho_solver.CalcHOSolution(x, y);
-   }
-   else
-   {
-      if (lom.MonoType % 2 == 1)
-      {
-         lo_solver->CalcLOSolution(x, y);
-      }
-      else if (lom.MonoType % 2 == 0)
-      {
-         Vector yH(x.Size()), yL(x.Size());
+   if (lo_solver) { lo_solver->CalcLOSolution(x, y); return; }
 
-         lo_solver->CalcLOSolution(x, yL);
+   if (ho_solver) { ho_solver->CalcHOSolution(x, y); return; }
 
-         ho_solver.CalcHOSolution(x, yH);
-
-         dofs.ComputeBounds();
-         fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                     dofs.xi_min, dofs.xi_max, y);
-      }
-   }
+   MFEM_ABORT("No solver was chosen.");
 }
 
 #ifdef USE_LUA
