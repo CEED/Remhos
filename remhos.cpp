@@ -741,7 +741,7 @@ int main(int argc, char *argv[])
    const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
-   if (mono_type == MonolithicSolverType::ResDistMono)
+   if (mono_type == MonolithicSolverType::ResDistMono || mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       lom.scale.SetSize(ne);
 
@@ -952,7 +952,7 @@ int main(int argc, char *argv[])
       // Monotonicity check for debug purposes mainly.
       if (forced_bounds && smth_indicator == NULL)
       {
-         double umin_new, umax_new;         
+         double umin_new, umax_new;
          GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {

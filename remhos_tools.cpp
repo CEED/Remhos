@@ -626,7 +626,7 @@ int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
 void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
 {
    switch (gtype)
-   {  
+   {
       case Geometry::SEGMENT:
       {
          dofs.SetSize(1, 2);
