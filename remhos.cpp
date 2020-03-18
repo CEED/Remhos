@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::Neumann;
+   HOSolverType ho_type           = HOSolverType::LocalInverse;
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
@@ -741,7 +741,8 @@ int main(int argc, char *argv[])
    const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
-   if (mono_type == MonolithicSolverType::ResDistMono || mono_type == MonolithicSolverType::ResDistMonoSubcell)
+   if (mono_type == MonolithicSolverType::ResDistMono ||
+       mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       lom.scale.SetSize(ne);
 
