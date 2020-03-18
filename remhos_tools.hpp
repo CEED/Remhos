@@ -62,7 +62,6 @@ public:
 
 struct LowOrderMethod
 {
-   bool OptScheme;
    bool subcell_scheme;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;

@@ -44,9 +44,10 @@ using namespace std;
 using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class LOSolverType {None, DiscrUpwind, ResidDist};
+enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec,
+                               ResDist, ResDistSubcell};
 enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
-enum class MonolithicSolverType {None, RDMonolithic};
+enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -303,7 +304,6 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
-   bool OptScheme = true;
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
@@ -350,8 +350,6 @@ int main(int argc, char *argv[])
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
-   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
-                  "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
                   "Smoothness indicator: 0 - no smoothness indicator,\n\t"
                   "                      1 - approx_quadratic,\n\t"
@@ -480,7 +478,6 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
 
    // Check for meaningful combinations of parameters.
-   bool fail = false;
    const bool forced_bounds = lo_type   != LOSolverType::None ||
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
@@ -495,25 +492,15 @@ int main(int argc, char *argv[])
          lo_type = LOSolverType::None;
          fct_type = FCTSolverType::None;
          mono_type = MonolithicSolverType::None;
-         OptScheme = false;
       }
    }
-   else { OptScheme = false; }
 
-   const bool useRD = lo_type   == LOSolverType::ResidDist ||
-                      mono_type == MonolithicSolverType::RDMonolithic;
-   if (useRD && order==1 && OptScheme)
-   {
-      // Avoid subcell methods for linear elements.
-      if (myid == 0) { mfem_warning("For -o 1, subcell scheme is disabled."); }
-      OptScheme = false;
-   }
+   const bool use_subcell_RD =
+         ( lo_type   == LOSolverType::ResDistSubcell ||
+           mono_type == MonolithicSolverType::ResDistMonoSubcell );
 
-   if (fail)
-   {
-      delete ode_solver;
-      return 5;
-   }
+   if (use_subcell_RD && order==1)
+   { MFEM_ABORT("Subcell schemes are not applicable to linear FE."); }
 
    const int prob_size = pfes.GlobalTrueVSize();
    if (myid == 0) { cout << "Number of unknowns: " << prob_size << endl; }
@@ -618,46 +605,42 @@ int main(int argc, char *argv[])
    // into a separate routine. I am using a struct now because the various
    // schemes require quite different information.
    LowOrderMethod lom;
-   lom.OptScheme = OptScheme;
    lom.fes = &pfes;
-   lom.subcell_scheme = useRD && OptScheme;
+   lom.subcell_scheme = use_subcell_RD;
 
    lom.pk = NULL;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      if (!OptScheme)
-      {
-         lom.smap = SparseMatrix_Build_smap(k.SpMat());
-         lom.D = k.SpMat();
+      lom.smap = SparseMatrix_Build_smap(k.SpMat());
+      lom.D = k.SpMat();
 
-         if (exec_mode == 0)
-         {
-            ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
-         }
+      if (exec_mode == 0)
+      {
+         ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
       }
-      else
+   }
+   else if (lo_type == LOSolverType::DiscrUpwindPrec)
+   {
+      lom.pk = new ParBilinearForm(&pfes);
+      if (exec_mode == 0)
       {
-         lom.pk = new ParBilinearForm(&pfes);
-         if (exec_mode == 0)
-         {
-            lom.pk->AddDomainIntegrator(
-               new PrecondConvectionIntegrator(velocity, -1.0) );
-         }
-         else if (exec_mode == 1)
-         {
-            lom.pk->AddDomainIntegrator(
-               new PrecondConvectionIntegrator(v_coef) );
-         }
-         lom.pk->Assemble(skip_zeros);
-         lom.pk->Finalize(skip_zeros);
+         lom.pk->AddDomainIntegrator(
+                  new PrecondConvectionIntegrator(velocity, -1.0) );
+      }
+      else if (exec_mode == 1)
+      {
+         lom.pk->AddDomainIntegrator(
+                  new PrecondConvectionIntegrator(v_coef) );
+      }
+      lom.pk->Assemble(skip_zeros);
+      lom.pk->Finalize(skip_zeros);
 
-         lom.smap = SparseMatrix_Build_smap(lom.pk->SpMat());
-         lom.D = lom.pk->SpMat();
+      lom.smap = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lom.D = lom.pk->SpMat();
 
-         if (exec_mode == 0)
-         {
-            ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
-         }
+      if (exec_mode == 0)
+      {
+         ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
    if (exec_mode == 1) { lom.coef = &v_coef; }
@@ -758,7 +741,7 @@ int main(int argc, char *argv[])
    const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
-   if (mono_type == MonolithicSolverType::RDMonolithic)
+   if (mono_type == MonolithicSolverType::ResDistMono)
    {
       lom.scale.SetSize(ne);
 
@@ -784,20 +767,30 @@ int main(int argc, char *argv[])
 
    LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
+   const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      SparseMatrix *lo_spmat = (OptScheme) ? &lom.pk->SpMat() : &k.SpMat();
-      lo_smap = SparseMatrix_Build_smap(*lo_spmat);
-      bool update_D = (exec_mode == 0) ? false : true;
-      lo_solver = new DiscreteUpwind(pfes, *lo_spmat, lo_smap,
-                                     lumpedM, asmbl, update_D);
+      lo_smap = SparseMatrix_Build_smap(k.SpMat());
+      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                     lumpedM, asmbl, time_dep);
    }
-   else if (lo_type == LOSolverType::ResidDist)
+   else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      bool subcell = (OptScheme) ? true : false;
-      bool dynamic = (exec_mode == 0) ? false : true;
+      lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
+                                     lumpedM, asmbl, time_dep);
+   }
+   else if (lo_type == LOSolverType::ResDist)
+   {
+      const bool subcell_scheme = false;
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell, dynamic);
+                                           subcell_scheme, time_dep);
+   }
+   else if (lo_type == LOSolverType::ResDistSubcell)
+   {
+      const bool subcell_scheme = true;
+      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                           subcell_scheme, time_dep);
    }
 
    // Initial condition.
@@ -830,14 +823,20 @@ int main(int argc, char *argv[])
    }
 
    MonolithicSolver *mono_solver = NULL;
-   if (mono_type == MonolithicSolverType::RDMonolithic)
+   bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+   if (mono_type == MonolithicSolverType::ResDistMono)
    {
-      bool subcell = (OptScheme) ? true : false;
-      bool dynamic = (exec_mode == 0) ? false : true;
-      bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+      const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, lom.scale,
-                                     subcell, dynamic, mass_lim);
+                                     subcell_scheme, time_dep, mass_lim);
+   }
+   else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
+   {
+      const bool subcell_scheme = true;
+      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+                                     asmbl, smth_indicator, lom.scale,
+                                     subcell_scheme, time_dep, mass_lim);
    }
 
    // Print the starting meshes and initial condition.
