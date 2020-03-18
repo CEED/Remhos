@@ -29,40 +29,6 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 //
-//    Using lua problem definition file
-//    ./remhos -p balls-and-jacks.lua -r 4 -dt 0.001 -tf 5.0
-//
-//    Transport mode:
-//    ./remhos -m ./data/periodic-segment.mesh -p 0 -r 2 -dt 0.005
-//    ./remhos -m ./data/periodic-square.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    ./remhos -m ./data/periodic-hexagon.mesh -p 0 -r 2 -dt 0.01 -tf 10
-//    ./remhos -m ./data/periodic-square.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/periodic-hexagon.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/star-q3.mesh -p 1 -r 2 -dt 0.005 -tf 9
-//    ./remhos -m ./data/disc-nurbs.mesh -p 1 -r 3 -dt 0.005 -tf 9
-//    ./remhos -m ./data/disc-nurbs.mesh -p 2 -r 3 -dt 0.005 -tf 9
-//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 4 -dt 0.0025 -tf 9 -vs 20
-//    ./remhos -m ./data/periodic-cube.mesh -p 0 -r 2 -o 2 -dt 0.02 -tf 8
-//    ./remhos -m ./data/periodic-square.mesh -p 4 -r 4 -dt 0.001 -o 2 -mt 3
-//    ./remhos -m ./data/periodic-square.mesh -p 3 -r 2 -dt 0.0025 -o 15 -tf 9 -mt 4
-//    ./remhos -m ./data/periodic-square.mesh -p 5 -r 4 -dt 0.002 -o 2 -tf 0.8 -mt 4
-//    ./remhos -m ./data/periodic-cube.mesh -p 5 -r 5 -dt 0.0001 -o 1 -tf 0.8 -mt 4
-//
-//    Remap mode:
-//    ./remhos -m ./data/periodic-square.mesh -p 10 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//    ./remhos -m ./data/periodic-square.mesh -p 14 -r 3 -dt 0.005 -tf 0.5 -mt 4 -vs 10
-//
-// Description:  This example code solves the time-dependent advection equation
-//               du/dt + v.grad(u) = 0, where v is a given fluid velocity, and
-//               u0(x)=u(0,x) is a given initial condition.
-//
-//               The example demonstrates the use of Discontinuous Galerkin (DG)
-//               bilinear forms in MFEM (face integrators), the use of explicit
-//               ODE time integrators, the definition of periodic boundary
-//               conditions through periodic meshes, as well as the use of GLVis
-//               for persistent visualization of a time-evolving solution. The
-//               saving of time-dependent data files for external visualization
-//               with VisIt (visit.llnl.gov) is also illustrated.
 
 #include "mfem.hpp"
 #include "miniapps/common/mfem-common.hpp"
@@ -77,15 +43,11 @@
 using namespace std;
 using namespace mfem;
 
-#ifdef USE_LUA
-#include "lua.hpp"
-lua_State* L;
-#endif
-
-enum class HOSolverType {Neumann, CG, LocalInverse};
-enum class LOSolverType {None, DiscrUpwind, ResidDist};
-enum class FCTSolverType {FluxBased, ClipScale, NonlinearPenalty};
-enum class MonolithicSolverType {None, RDMonolithic};
+enum class HOSolverType {None, Neumann, CG, LocalInverse};
+enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec,
+                               ResDist, ResDistSubcell};
+enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
+enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -296,7 +258,7 @@ private:
    SmoothnessIndicator *smth_indicator;
    DofInfo &dofs;
 
-   HOSolver &ho_solver;
+   HOSolver *ho_solver;
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
@@ -311,7 +273,7 @@ public:
                 GridFunction &vel, GridFunction &sub_vel,
                 Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
                 SmoothnessIndicator *si,
-                HOSolver &hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
+                HOSolver *hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -325,41 +287,28 @@ public:
    virtual ~FE_Evolution() { }
 };
 
-FE_Evolution* adv;
-
 int main(int argc, char *argv[])
 {
    // Initialize MPI.
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   // Parse command-line options.
-#ifdef USE_LUA
-   L = luaL_newstate();
-   luaL_openlibs(L);
-   const char* problem_file = "problem.lua";
-#else
-   problem_num = 4;
-#endif
    const char *mesh_file = "data/periodic-square.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   MONOTYPE MonoType = MONOTYPE::None;
-   HOSolverType ho_type   = HOSolverType::Neumann;
-   LOSolverType lo_type   = LOSolverType::None;
-   FCTSolverType fct_type = FCTSolverType::ClipScale;
+   HOSolverType ho_type           = HOSolverType::LocalInverse;
+   LOSolverType lo_type           = LOSolverType::None;
+   FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
-   bool OptScheme = true;
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
-   bool binary = false;
    int vis_steps = 100;
 
    int precision = 8;
@@ -368,13 +317,8 @@ int main(int argc, char *argv[])
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
-#ifdef USE_LUA
-   args.AddOption(&problem_file, "-p", "--problem",
-                  "lua problem definition file.");
-#else
    args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
-#endif
    args.AddOption(&rs_levels, "-rs", "--refine-serial",
                   "Number of times to refine the mesh uniformly in serial.");
    args.AddOption(&rp_levels, "-rp", "--refine-parallel",
@@ -386,33 +330,26 @@ int main(int argc, char *argv[])
    args.AddOption(&ode_solver_type, "-s", "--ode-solver",
                   "ODE solver: 1 - Forward Euler,\n\t"
                   "            2 - RK2 SSP, 3 - RK3 SSP, 4 - RK4, 6 - RK6.");
-   args.AddOption((int*)(&MonoType), "-mt", "--MonoType",
-                  "Monotonicity scheme: 0 - no monotonicity treatment,\n\t"
-                  "                     1 - discrete upwinding - LO,\n\t"
-                  "                     2 - discrete upwinding - FCT,\n\t"
-                  "                     3 - residual distribution - LO,\n\t"
-                  "                     4 - residual distribution - FCT,n\t"
-                  "                     5 - residual distribution - monolithic.");
    args.AddOption((int*)(&ho_type), "-ho", "--ho-type",
-                  "High-Order Solver: 0 - Neumann iteration,\n\t"
-                  "                   1 - CG solver,\n\t"
-                  "                   2 - Local inverse.");
+                  "High-Order Solver: 0 - No HO solver,\n\t"
+                  "                   1 - Neumann iteration,\n\t"
+                  "                   2 - CG solver,\n\t"
+                  "                   3 - Local inverse.");
    args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
-                  "Low-Order Solver: 0 - None,\n\t"
+                  "Low-Order Solver: 0 - No LO solver,\n\t"
                   "                  1 - Discrete Upwind,\n\t"
                   "                  2 - Residual Distribution.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
-                  "Correction type: 0 - Flux-based FCT,\n\t"
-                  "                 1 - Local clip + scale,\n\t"
-                  "                 2 - Local clip + nonlinear penalization.");
+                  "Correction type: 0 - No nonlinear correction,\n\t"
+                  "                 1 - Flux-based FCT,\n\t"
+                  "                 2 - Local clip + scale,\n\t"
+                  "                 3 - Local clip + nonlinear penalization.");
    args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
                   "                   1 - Residual distribution.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
-   args.AddOption(&OptScheme, "-sc", "--subcell", "-el", "--element",
-                  "Optimized low order scheme: PDU / RDS VS DU / RD.");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
                   "Smoothness indicator: 0 - no smoothness indicator,\n\t"
                   "                      1 - approx_quadratic,\n\t"
@@ -427,9 +364,6 @@ int main(int argc, char *argv[])
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
-   args.AddOption(&binary, "-binary", "--binary-datafiles", "-ascii",
-                  "--ascii-datafiles",
-                  "Use binary (Sidre) or ascii format for VisIt data files.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -444,37 +378,6 @@ int main(int argc, char *argv[])
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
-
-#ifdef USE_LUA
-   // When using lua, exec mode is read from lua file
-   if (luaL_dofile(L, problem_file))
-   {
-      printf("Error opening lua file: %s\n",problem_file);
-      exit(1);
-   }
-
-   lua_getglobal(L, "exec_mode");
-   if (!lua_isnumber(L, -1))
-   {
-      printf("Did not find exec_mode in lua input.\n");
-      return 1;
-   }
-   exec_mode = (int)lua_tonumber(L, -1);
-#endif
-
-   // TODO remove MONOTYPE and use the other enums.
-   if (MonoType == MONOTYPE::DiscUpw || MonoType == MONOTYPE::DiscUpw_FCT)
-   {
-      lo_type = LOSolverType::DiscrUpwind;
-   }
-   else if (MonoType == MONOTYPE::ResDist || MonoType == MONOTYPE::ResDist_FCT)
-   {
-      lo_type = LOSolverType::ResidDist;
-   }
-   if (MonoType == MONOTYPE::ResDist_Monolithic)
-   {
-      mono_type = MonolithicSolverType::RDMonolithic;
-   }
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -575,41 +478,29 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
 
    // Check for meaningful combinations of parameters.
-   bool fail = false;
-   if (MonoType != MONOTYPE::None)
+   const bool forced_bounds = lo_type   != LOSolverType::None ||
+                              mono_type != MonolithicSolverType::None;
+   if (forced_bounds)
    {
-      if (((int)MonoType != MonoType) || (MonoType < 0) || (MonoType > 5))
-      {
-         if (myid == 0) { cout << "Unsupported option for monotonicity treatment." << endl; }
-         fail = true;
-      }
-      if (btype != 2)
-      {
-         if (myid == 0) { cout << "Monotonicity treatment requires Bernstein basis." << endl; }
-         fail = true;
-      }
+      MFEM_VERIFY(btype == 2,
+                  "Monotonicity treatment requires Bernstein basis.");
+
       if (order == 0)
       {
          // Disable monotonicity treatment for piecewise constants.
          if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
-         MonoType = MONOTYPE::None;
-         OptScheme = false;
+         lo_type = LOSolverType::None;
+         fct_type = FCTSolverType::None;
+         mono_type = MonolithicSolverType::None;
       }
    }
-   else { OptScheme = false; }
 
-   if ((MonoType > 2) && (order==1) && OptScheme)
-   {
-      // Avoid subcell methods for linear elements.
-      if (myid == 0) { mfem_warning("For -o 1, subcell scheme is disabled."); }
-      OptScheme = false;
-   }
+   const bool use_subcell_RD =
+         ( lo_type   == LOSolverType::ResDistSubcell ||
+           mono_type == MonolithicSolverType::ResDistMonoSubcell );
 
-   if (fail)
-   {
-      delete ode_solver;
-      return 5;
-   }
+   if (use_subcell_RD && order==1)
+   { MFEM_ABORT("Subcell schemes are not applicable to linear FE."); }
 
    const int prob_size = pfes.GlobalTrueVSize();
    if (myid == 0) { cout << "Number of unknowns: " << prob_size << endl; }
@@ -714,46 +605,42 @@ int main(int argc, char *argv[])
    // into a separate routine. I am using a struct now because the various
    // schemes require quite different information.
    LowOrderMethod lom;
-   lom.MonoType = MonoType;
-   lom.OptScheme = OptScheme;
    lom.fes = &pfes;
+   lom.subcell_scheme = use_subcell_RD;
 
    lom.pk = NULL;
-   if (lom.MonoType == DiscUpw || lom.MonoType == DiscUpw_FCT)
+   if (lo_type == LOSolverType::DiscrUpwind)
    {
-      if (!lom.OptScheme)
-      {
-         lom.smap = SparseMatrix_Build_smap(k.SpMat());
-         lom.D = k.SpMat();
+      lom.smap = SparseMatrix_Build_smap(k.SpMat());
+      lom.D = k.SpMat();
 
-         if (exec_mode == 0)
-         {
-            ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
-         }
+      if (exec_mode == 0)
+      {
+         ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
       }
-      else
+   }
+   else if (lo_type == LOSolverType::DiscrUpwindPrec)
+   {
+      lom.pk = new ParBilinearForm(&pfes);
+      if (exec_mode == 0)
       {
-         lom.pk = new ParBilinearForm(&pfes);
-         if (exec_mode == 0)
-         {
-            lom.pk->AddDomainIntegrator(
-               new PrecondConvectionIntegrator(velocity, -1.0) );
-         }
-         else if (exec_mode == 1)
-         {
-            lom.pk->AddDomainIntegrator(
-               new PrecondConvectionIntegrator(v_coef) );
-         }
-         lom.pk->Assemble(skip_zeros);
-         lom.pk->Finalize(skip_zeros);
+         lom.pk->AddDomainIntegrator(
+                  new PrecondConvectionIntegrator(velocity, -1.0) );
+      }
+      else if (exec_mode == 1)
+      {
+         lom.pk->AddDomainIntegrator(
+                  new PrecondConvectionIntegrator(v_coef) );
+      }
+      lom.pk->Assemble(skip_zeros);
+      lom.pk->Finalize(skip_zeros);
 
-         lom.smap = SparseMatrix_Build_smap(lom.pk->SpMat());
-         lom.D = lom.pk->SpMat();
+      lom.smap = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lom.D = lom.pk->SpMat();
 
-         if (exec_mode == 0)
-         {
-            ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
-         }
+      if (exec_mode == 0)
+      {
+         ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
    if (exec_mode == 1) { lom.coef = &v_coef; }
@@ -854,7 +741,8 @@ int main(int argc, char *argv[])
    const int ne = pmesh.GetNE();
 
    // Monolithic limiting correction factors.
-   if (lom.MonoType == ResDist_Monolithic)
+   if (mono_type == MonolithicSolverType::ResDistMono ||
+       mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       lom.scale.SetSize(ne);
 
@@ -880,20 +768,30 @@ int main(int argc, char *argv[])
 
    LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
+   const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      SparseMatrix *lo_spmat = (OptScheme) ? &lom.pk->SpMat() : &k.SpMat();
-      lo_smap = SparseMatrix_Build_smap(*lo_spmat);
-      bool update_D = (exec_mode == 0) ? false : true;
-      lo_solver = new DiscreteUpwind(pfes, *lo_spmat, lo_smap,
-                                     lumpedM, asmbl, update_D);
+      lo_smap = SparseMatrix_Build_smap(k.SpMat());
+      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                     lumpedM, asmbl, time_dep);
    }
-   else if (lo_type == LOSolverType::ResidDist)
+   else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      bool subcell = (OptScheme) ? true : false;
-      bool dynamic = (exec_mode == 0) ? false : true;
+      lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
+                                     lumpedM, asmbl, time_dep);
+   }
+   else if (lo_type == LOSolverType::ResDist)
+   {
+      const bool subcell_scheme = false;
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell, dynamic);
+                                           subcell_scheme, time_dep);
+   }
+   else if (lo_type == LOSolverType::ResDistSubcell)
+   {
+      const bool subcell_scheme = true;
+      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                           subcell_scheme, time_dep);
    }
 
    // Initial condition.
@@ -911,7 +809,7 @@ int main(int argc, char *argv[])
                                                pfes, u, dofs);
    }
 
-   HOSolver *ho_solver;
+   HOSolver *ho_solver = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
       ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
@@ -924,18 +822,22 @@ int main(int argc, char *argv[])
    {
       ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
    }
-   else { MFEM_ABORT("Wrong high-order solver type specification."); }
-
 
    MonolithicSolver *mono_solver = NULL;
-   if (mono_type == MonolithicSolverType::RDMonolithic)
+   bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+   if (mono_type == MonolithicSolverType::ResDistMono)
    {
-      bool subcell = (OptScheme) ? true : false;
-      bool dynamic = (exec_mode == 0) ? false : true;
-      bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+      const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, lom.scale,
-                                     subcell, dynamic, mass_lim);
+                                     subcell_scheme, time_dep, mass_lim);
+   }
+   else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
+   {
+      const bool subcell_scheme = true;
+      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+                                     asmbl, smth_indicator, lom.scale,
+                                     subcell_scheme, time_dep, mass_lim);
    }
 
    // Print the starting meshes and initial condition.
@@ -959,19 +861,8 @@ int main(int argc, char *argv[])
    DataCollection *dc = NULL;
    if (visit)
    {
-      if (binary)
-      {
-#ifdef MFEM_USE_SIDRE
-         dc = new SidreDataCollection("Example9", &pmesh);
-#else
-         MFEM_ABORT("Must build with MFEM_USE_SIDRE=YES for binary output.");
-#endif
-      }
-      else
-      {
-         dc = new VisItDataCollection("Example9", &pmesh);
-         dc->SetPrecision(precision);
-      }
+      dc = new VisItDataCollection("Remhos", &pmesh);
+      dc->SetPrecision(precision);
       dc->RegisterField("solution", &u);
       dc->SetCycle(0);
       dc->SetTime(0.0);
@@ -1008,44 +899,39 @@ int main(int argc, char *argv[])
 
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
-   if (MonoType == DiscUpw_FCT || MonoType == ResDist_FCT)
+   if (fct_type == FCTSolverType::FluxBased)
    {
-      if (fct_type == FCTSolverType::FluxBased)
-      {
-         MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
+      MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
 
-         K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-         const int fct_iterations = 1;
-         fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                       K_HO_smap, M_HO.SpMat(), fct_iterations);
-      }
-      else if (fct_type == FCTSolverType::ClipScale)
-      {
-         fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
-      }
-      else if (fct_type == FCTSolverType::NonlinearPenalty)
-      {
-         fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
-      }
+      K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      const int fct_iterations = 1;
+      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+                                    K_HO_smap, M_HO.SpMat(), fct_iterations);
+   }
+   else if (fct_type == FCTSolverType::ClipScale)
+   {
+      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+   }
+   else if (fct_type == FCTSolverType::NonlinearPenalty)
+   {
+      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   FE_Evolution* adv = new FE_Evolution(m, m.SpMat(), ml, lumpedM,
-                                        k, k.SpMat(), M_HO, K_HO,
-                                        b, inflow_gf, x, xsub, v_gf, v_sub_gf,
-                                        asmbl, lom, dofs, smth_indicator,
-                                        *ho_solver, lo_solver,
-                                        fct_solver, mono_solver);
+   FE_Evolution adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), M_HO, K_HO,
+                    b, inflow_gf, x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                    smth_indicator,
+                    ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
-   adv->SetTime(t);
-   ode_solver->Init(*adv);
+   adv.SetTime(t);
+   ode_solver->Init(adv);
 
    double umin, umax;
    GetMinMax(u, umin, umax);
 
    if (exec_mode == 1)
    {
-      adv->SetRemapStartPos(x0, x0_sub);
+      adv.SetRemapStartPos(x0, x0_sub);
 
       // For remap, the pseudotime always evolves from 0 to 1.
       t_final = 1.0;
@@ -1059,15 +945,15 @@ int main(int argc, char *argv[])
    {
       double dt_real = min(dt, t_final - t);
 
-      adv->SetDt(dt_real);
+      adv.SetDt(dt_real);
 
       ode_solver->Step(u, t, dt_real);
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (MonoType != MONOTYPE::None && smth_indicator == NULL)
+      if (forced_bounds && smth_indicator == NULL)
       {
-         double umin_new, umax_new;         
+         double umin_new, umax_new;
          GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
@@ -1222,7 +1108,6 @@ int main(int argc, char *argv[])
    }
 
    // 10. Free the used memory.
-   delete adv;
    delete mono_solver;
    delete fct_solver;
    delete smth_indicator;
@@ -1315,7 +1200,7 @@ FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
                            Assembly &_asmbl,
                            LowOrderMethod &_lom, DofInfo &_dofs,
                            SmoothnessIndicator *si,
-                           HOSolver &hos, LOSolver *los, FCTSolver *fct,
+                           HOSolver *hos, LOSolver *los, FCTSolver *fct,
                            MonolithicSolver *mos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
@@ -1388,93 +1273,31 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
    x_gf = x;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver)
+   if (mono_solver) { mono_solver->CalcSolution(x, y); return; }
+
+   if (fct_solver)
    {
-      mono_solver->CalcSolution(x, y);
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      Vector yH(x.Size()), yL(x.Size());
+      lo_solver->CalcLOSolution(x, yL);
+      ho_solver->CalcHOSolution(x, yH);
+      dofs.ComputeBounds();
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
+                                  dofs.xi_min, dofs.xi_max, y);
       return;
    }
 
-   if (lom.MonoType == 0)
-   {
-      ho_solver.CalcHOSolution(x, y);
-   }
-   else
-   {
-      if (lom.MonoType % 2 == 1)
-      {
-         lo_solver->CalcLOSolution(x, y);
-      }
-      else if (lom.MonoType % 2 == 0)
-      {
-         Vector yH(x.Size()), yL(x.Size());
+   if (lo_solver) { lo_solver->CalcLOSolution(x, y); return; }
 
-         lo_solver->CalcLOSolution(x, yL);
+   if (ho_solver) { ho_solver->CalcHOSolution(x, y); return; }
 
-         ho_solver.CalcHOSolution(x, yH);
-
-         dofs.ComputeBounds();
-         fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                     dofs.xi_min, dofs.xi_max, y);
-      }
-   }
+   MFEM_ABORT("No solver was chosen.");
 }
-
-#ifdef USE_LUA
-void lua_velocity_function(const Vector &x, Vector &v)
-{
-   lua_getglobal(L, "velocity_function");
-   int dim = x.Size();
-
-   lua_pushnumber(L, x(0));
-   if (dim > 1)
-   {
-      lua_pushnumber(L, x(1));
-   }
-   if (dim > 2)
-   {
-      lua_pushnumber(L, x(2));
-   }
-
-   double v0 = 0;
-   double v1 = 0;
-   double v2 = 0;
-   lua_call(L, dim, dim);
-   v0 = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-   if (dim > 1)
-   {
-      v1 = (double)lua_tonumber(L, -1);
-      lua_pop(L, 1);
-   }
-   if (dim > 2)
-   {
-      v2 = (double)lua_tonumber(L, -1);
-      lua_pop(L, 1);
-   }
-
-   v(0) = v0;
-   if (dim > 1)
-   {
-      v(0) = v1;
-      v(1) = v0;
-   }
-   if (dim > 2)
-   {
-      v(0) = v2;
-      v(1) = v1;
-      v(2) = v0;
-   }
-}
-#endif
 
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
-#ifdef USE_LUA
-   lua_velocity_function(x, v);
-   return;
-#endif
-
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -1712,38 +1535,9 @@ double ring(double rin, double rout, Vector c, Vector y)
    }
 }
 
-// Initial condition as defined by lua function
-#ifdef USE_LUA
-double lua_u0_function(const Vector &x)
-{
-   lua_getglobal(L, "initial_function");
-   int dim = x.Size();
-
-   lua_pushnumber(L, x(0));
-   if (dim > 1)
-   {
-      lua_pushnumber(L, x(1));
-   }
-   if (dim > 2)
-   {
-      lua_pushnumber(L, x(2));
-   }
-
-   lua_call(L, dim, 1);
-   double u = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-
-   return u;
-}
-#endif
-
 // Initial condition: lua function or hard-coded functions
 double u0_function(const Vector &x)
 {
-#ifdef USE_LUA
-   return lua_u0_function(x);
-#endif
-
    int dim = x.Size();
 
    // map to the reference [-1,1] domain
@@ -1898,36 +1692,8 @@ double u0_function(const Vector &x)
    return 0.0;
 }
 
-#ifdef USE_LUA
-double lua_inflow_function(const Vector& x)
-{
-   lua_getglobal(L, "boundary_condition");
-
-   int dim = x.Size();
-
-   double t;
-   adv ? t = adv->GetTime() : t = 0.0;
-
-   for (int d = 0; d < dim; d++)
-   {
-      lua_pushnumber(L, x(d));
-   }
-   lua_pushnumber(L, t);
-
-   lua_call(L, dim+1, 1);
-   double u = (double)lua_tonumber(L, -1);
-   lua_pop(L, 1);
-
-   return u;
-}
-#endif
-
 double inflow_function(const Vector &x)
 {
-#ifdef USE_LUA
-   return lua_inflow_function(x);
-#endif
-
    double r = x.Norml2();
    if ((problem_num % 10) == 6 && x.Size() == 2)
    {

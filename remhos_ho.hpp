@@ -32,6 +32,8 @@ protected:
 public:
    HOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
+   virtual ~HOSolver() { }
+
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
 };
 

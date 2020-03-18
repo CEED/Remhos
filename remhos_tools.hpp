@@ -22,11 +22,6 @@
 namespace mfem
 {
 
-enum MONOTYPE { None,
-                DiscUpw, DiscUpw_FCT,
-                ResDist, ResDist_FCT,
-                ResDist_Monolithic };
-
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs);
@@ -67,8 +62,7 @@ public:
 
 struct LowOrderMethod
 {
-   MONOTYPE MonoType;
-   bool OptScheme;
+   bool subcell_scheme;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Array <int> smap;
    SparseMatrix D;
@@ -410,14 +404,10 @@ public:
       Array <int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      const bool NeedSubWgts = lom.OptScheme && (lom.MonoType == ResDist ||
-                                                 lom.MonoType == ResDist_FCT
-                                                 || lom.MonoType == ResDist_Monolithic );
-
       bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
       bdrInt = 0.;
 
-      if (NeedSubWgts)
+      if (lom.subcell_scheme)
       {
          VolumeTerms = lom.VolumeTerms;
          SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
@@ -442,7 +432,7 @@ public:
                ComputeFluxTerms(k, i, Trans, lom);
             }
 
-            if (NeedSubWgts)
+            if (lom.subcell_scheme)
             {
                for (m = 0; m < dofs.numSubcells; m++)
                {

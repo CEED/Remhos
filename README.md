@@ -62,18 +62,18 @@ Remhos has the following external dependencies:
 To make sure the results are correct, we verify the final mass (`mass`) and
 maximum value (`max`) for the runs listed below:
 
-1.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 2`
-2.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -mt 4`
-3.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 2`
-4.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -mt 4`
-5.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.005 -tf 0.8 -mt 2`
-6.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.002 -tf 0.8 -mt 4`
-7.  `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -mt 4`
-8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -mt 4`
-9.  `mpirun -np 8 remhos -m ./data/square01_quad.mesh -p 14 -rs 2 -dt 0.001 -tf 0.75 -mt 4`
-10. `mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -mt 4`
-11. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mt 5 -si 2`
-12. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mt 5 -si 1`
+1.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -ho 1 -lo 2 -fct 2`
+2.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -ho 1 -lo 4 -fct 2`
+3.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -ho 1 -lo 2 -fct 2`
+4.  `mpirun -np 8 remhos -m ./data/disc-nurbs.mesh -p 1 -rs 3 -dt 0.005 -tf 3 -ho 1 -lo 4 -fct 2`
+5.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.005 -tf 0.8 -ho 1 -lo 2 -fct 2`
+6.  `mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.002 -tf 0.8 -ho 1 -lo 4 -fct 2`
+7.  `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -ho 1 -lo 4 -fct 2`
+8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 1 -lo 4 -fct 2`
+9.  `mpirun -np 8 remhos -m ./data/square01_quad.mesh -p 14 -rs 2 -dt 0.001 -tf 0.75 -ho 1 -lo 4 -fct 2`
+10. `mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -ho 1 -lo 4 -fct 2`
+11. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2`
+12. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1`
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
