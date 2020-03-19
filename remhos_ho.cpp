@@ -30,6 +30,7 @@ CGHOSolver::CGHOSolver(ParFiniteElementSpace &space,
 void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
    Vector rhs(u.Size());
+   du = 0.0;
 
    // Invert by preconditioned CG.
    CGSolver M_solver(pfes.GetComm());
@@ -55,9 +56,9 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       M_prec = new HypreSmoother(*M_mat, HypreSmoother::Jacobi);
    }
    M_solver.SetPreconditioner(*M_prec);
-   M_solver.SetRelTol(1e-9);
+   M_solver.SetRelTol(1e-8);
    M_solver.SetAbsTol(0.0);
-   M_solver.SetMaxIter(100);
+   M_solver.SetMaxIter(50);
    M_solver.SetPrintLevel(0);
 
    M_solver.Mult(rhs, du);

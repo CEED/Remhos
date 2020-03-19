@@ -1,0 +1,85 @@
+os: linux
+
+language: cpp
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - gcc-7
+            - g++-7
+            - libopenmpi-dev
+            - openmpi-bin
+      before_cache:
+        - cd $TRAVIS_BUILD_DIR/../metis-4.0;
+          mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
+
+install:
+   # Save Remhos top directory
+  - export REMHOS_DIR=$PWD
+
+  # Back out of the directory to install the libraries
+  - cd ..
+
+  # HYPRE (cached 2.10.0b build)
+  - if [ ! -e hypre-2.10.0b/src/hypre/lib/libHYPRE.a ]; then
+      wget https://computation.llnl.gov/project/linear_solvers/download/hypre-2.10.0b.tar.gz --no-check-certificate;
+      rm -rf hypre-2.10.0b;
+      tar xvzf hypre-2.10.0b.tar.gz;
+      cd hypre-2.10.0b/src;
+      ./configure --disable-fortran --without-fei CC=mpicc CXX=mpic++;
+      make -j3;
+      cd ../..;
+    else
+      echo "Reusing cached hypre-2.10.0b/";
+    fi;
+  - ln -s hypre-2.10.0b hypre
+
+  # METIS (cached 4.0 build)
+  - if [ ! -e metis-4.0/libmetis.a ]; then
+      wget http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/OLD/metis-4.0.3.tar.gz;
+      tar xvzf metis-4.0.3.tar.gz;
+      make -j3 -C metis-4.0.3/Lib CC="$CC" OPTFLAGS="-O2";
+      rm -rf metis-4.0;
+      mv metis-4.0.3 metis-4.0;
+    else
+      echo "Reusing cached metis-4.0/";
+    fi;
+
+  # MFEM (master branch)
+  - if [ ! -e mfem/libmfem.a ]; then
+      rm -rf mfem;
+      git clone --depth 1 https://github.com/mfem/mfem.git;
+      cd mfem;
+      make -j3 parallel;
+      make info;
+        cd ..;
+     else
+        echo "Reusing cached mfem";
+     fi;
+
+   # Back to Remhos
+  - cd $REMHOS_DIR
+
+branches:
+  only:
+  - master
+
+script:
+   - make -j
+   - cd autotest
+   - ./test.sh
+   - diff --report-identical-files out_test.dat out_baseline.dat
+
+
+cache:
+   directories:
+     - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/lib
+     - $TRAVIS_BUILD_DIR/../hypre-2.10.0b/src/hypre/include
+     - $TRAVIS_BUILD_DIR/../metis-4.0
+
