@@ -309,6 +309,7 @@ int main(int argc, char *argv[])
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
+   bool verify_bounds = false;
    int vis_steps = 100;
 
    int precision = 8;
@@ -364,6 +365,9 @@ int main(int argc, char *argv[])
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
+   args.AddOption(&verify_bounds, "-vb", "--verify-bounds", "-no-vb",
+                  "--no-verify-bounds",
+                  "Verify solution bounds after each time step.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -951,7 +955,7 @@ int main(int argc, char *argv[])
       ti++;
 
       // Monotonicity check for debug purposes mainly.
-      if (forced_bounds && smth_indicator == NULL)
+      if (verify_bounds && forced_bounds && smth_indicator == NULL)
       {
          double umin_new, umax_new;
          GetMinMax(u, umin_new, umax_new);

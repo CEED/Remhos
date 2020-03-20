@@ -51,11 +51,33 @@ Remhos has the following external dependencies:
 
 ## Running
 
-#### Test problem 1
-...
+#### Remap example
 
-#### Test problem 2
-...
+A sample remap test:
+```sh
+mpirun -np 8 remhos -m ./data/square01_quad.mesh -p 14 -rs 3 -rp 1 -dt 0.0005 -tf 0.6 -ho 1 -lo 4 -fct 3
+```
+This run can produce the following plots (notice the `-vis` option)
+
+<table border="0">
+<td> <img src="data/remap_0.png">
+<td> <img src="data/remap_1.png">
+<td> <img src="data/remap_2.png">
+</table>
+
+#### Transport example
+
+A sample transport test:
+```sh
+mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -rp 1 -dt 0.00025 -tf 0.8 -ho 1 -lo 4 -fct 3
+```
+This run can produce the following plots (notice the `-vis` option)
+
+<table border="0">
+<td> <img src="data/transport_0.png">
+<td> <img src="data/transport_1.png">
+<td> <img src="data/transport_2.png">
+</table>
 
 ## Verification of Results
 
