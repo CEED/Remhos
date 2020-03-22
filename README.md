@@ -221,8 +221,9 @@ This first of the above runs can produce the following plots (notice the `-vis` 
 
 ## Verification of Results
 
-To make sure the results are correct, we verify the final mass (`mass`) and
-maximum value (`max`) for the runs listed below:
+To perform throrough testing, run the script `Remhos\autotest\test.sh` and
+compare its output, `out_test.dat`, to `out_baseline.dat`.
+Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the runs listed below:
 
 1.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -ho 1 -lo 2 -fct 2`
 2.  `mpirun -np 8 remhos -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -ho 1 -lo 4 -fct 2`
@@ -256,11 +257,12 @@ An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.
 
 ## Performance Timing and FOM
-...
+
+To appear soon.
 
 ## Versions
-...
 
+To appear soon.
 
 ## Contact
 
