@@ -1,7 +1,7 @@
 file="out_test.dat"
 
-command="mpirun -np 6 ../remhos -no-vis"
-vis_command="mpirun -np 6 remhos"
+command="mpirun -np 6 ../remhos -no-vis --verify-bounds"
+vis_command="mpirun -np 6 remhos --verify-bounds"
 
 methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
           "-ho 3 -lo 4 -fct 2"   # Hennes 2
