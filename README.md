@@ -121,8 +121,71 @@ Other computational motives in Remhos include the following:
 
 Remhos has the following external dependencies:
 
-- MFEM - parallel build of the matrix-free-FCT branch
-  <br> https://github.com/mfem/mfem.
+- *hypre*, used for parallel linear algebra, we recommend version 2.10.0b<br>
+   https://computation.llnl.gov/casc/hypre/software.html
+
+-  METIS, used for parallel domain decomposition (optional), we recommend [version 4.0.3](http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/OLD/metis-4.0.3.tar.gz) <br>
+   http://glaros.dtc.umn.edu/gkhome/metis/metis/download
+
+- MFEM, used for (high-order) finite element discretization, its GitHub master branch <br>
+  https://github.com/mfem/mfem
+
+To build the miniapp, first download *hypre* and METIS from the links above
+and put everything on the same level as the `Remhos` directory:
+```sh
+~> ls
+Remhos/  hypre-2.10.0b.tar.gz  metis-4.0.tar.gz
+```
+
+Build *hypre*:
+```sh
+~> tar -zxvf hypre-2.10.0b.tar.gz
+~> cd hypre-2.10.0b/src/
+~/hypre-2.10.0b/src> ./configure --disable-fortran
+~/hypre-2.10.0b/src> make -j
+~/hypre-2.10.0b/src> cd ../..
+```
+For large runs (problem size above 2 billion unknowns), add the
+`--enable-bigint` option to the above `configure` line.
+
+Build METIS:
+```sh
+~> tar -zxvf metis-4.0.3.tar.gz
+~> cd metis-4.0.3
+~/metis-4.0.3> make
+~/metis-4.0.3> cd ..
+~> ln -s metis-4.0.3 metis-4.0
+```
+
+Clone and build the parallel version of MFEM, together with it's *common* tools:
+```sh
+~> git clone https://github.com/mfem/mfem.git ./mfem
+~> cd mfem/
+~/mfem> make parallel -j
+~/mfem> cd miniapps/common/
+~/mfem/miniapps/common> make
+~/mfem/miniapps/common> cd ../../../
+```
+The above uses the `master` branch of MFEM. See the [MFEM
+building page](http://mfem.org/building/) for additional details.
+
+(Optional) Clone and build GLVis:
+```sh
+~> git clone https://github.com/GLVis/glvis.git ./glvis
+~> cd glvis/
+~/glvis> make
+~/glvis> cd ..
+```
+The easiest way to visualize Remhos results is to have GLVis running in a
+separate terminal. Then the `-vis` option in Remhos will stream results directly
+to the GLVis socket.
+
+Build Remhos
+```sh
+~> cd Remhos/
+~/Remhos> make
+```
+See `make help` for additional options.
 
 ## Running
 
