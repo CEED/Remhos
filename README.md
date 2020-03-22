@@ -83,6 +83,26 @@ necessary operations. As the local action is defined by utilizing the tensor
 structure of the finite element spaces, the amount of data storage, memory
 transfers, and FLOPs are lower (especially for higher orders).
 
+Other computational motives in Remhos include the following:
+
+- Support for unstructured meshes, in 2D and 3D, with quadrilateral and
+  hexahedral elements.. Serial and parallel mesh refinement options can be
+  set via a command-line flag.
+- Explicit time-stepping loop with a variety of time integrator options. Laghos
+  supports Runge-Kutta ODE solvers of orders 1, 2, 3, 4 and 6.
+- Discontinuous high-order finite element discretization spaces
+  of runtime-specified order.
+- Moving (high-order) meshes.
+- Mass operator that is local per each zone. It is inverted by iterative or exact
+  methods at each time step. This operator is constant in time (transport mode) or
+  changing in time (remap mode). Options for full or partial assembly.
+- Advection operator that couples neighboring zones. It is applied once at each
+  time step. This operator is constant in time (transport mode) or
+  changing in time (remap mode). Options for full or partial assembly.
+- Domain-decomposed MPI parallelism.
+- Optional in-situ visualization with [GLVis](http:/glvis.org) and data output
+  for visualization and data analysis with [VisIt](http://visit.llnl.gov).
+
 ## Code Structure
 
 - The file `remhos.cpp` contains the main driver with the time integration loop
