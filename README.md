@@ -31,12 +31,12 @@ Remhos combines discretization methods described in the following articles:
 > [High-order multi-material ALE hydrodynamics](https://doi.org/10.1137/17M1116453) <br>
 > *SIAM Journal on Scientific Computing* 40(1), 2018, pp. B32-B58.
 
-> H. Hajduk, D. Kuzmin, T. Kolev and R. Abgrall <br>
+> H. Hajduk, D. Kuzmin, Tz. Kolev and R. Abgrall <br>
 > [Matrix-free subcell residual distribution for Bernstein finite element
    discretizations of linear advection equations](https://doi.org/10.1016/j.cma.2019.112658) <br>
 > *Computer Methods in Applied Mechanics and Engineering* 359, 2020.
 
-> H. Hajduk, D. Kuzmin, T. Kolev, V. Tomov, I. Tomas and J. Shadid <br>
+> H. Hajduk, D. Kuzmin, Tz. Kolev, V. Tomov, I. Tomas and J. Shadid <br>
 > [Matrix-free subcell residual distribution for Bernstein finite elements:
    Monolithic limiting](https://doi.org/10.1016/j.compfluid.2020.104451) <br>
 > *Computers and Fluids* 200, 2020.
@@ -59,7 +59,7 @@ testbed platforms, in support of the nation’s exascale computing imperative.
 ## Characteristics
 
 The problem that Remhos is solving is formulated as a time-dependent system of
-ordinary differential equations (ODEs) for the unknown coefficients of a 
+ordinary differential equations (ODEs) for the unknown coefficients of a
 high-order finite element (FE) function. The left-hand side of this system is
 controlled by a *mass matrix*, while the right-hand side is constructed
 from a *advection matrix*. These matrices change in time for the remap tests,
@@ -221,7 +221,7 @@ This first of the above runs can produce the following plots (notice the `-vis` 
 
 ## Verification of Results
 
-To perform throrough testing, run the script `Remhos\autotest\test.sh` and
+To perform thorough testing, run the script `Remhos\autotest\test.sh` and
 compare its output, `out_test.dat`, to `out_baseline.dat`.
 Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the runs listed below:
 
