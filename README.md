@@ -58,8 +58,30 @@ testbed platforms, in support of the nation’s exascale computing imperative.
 
 ## Characteristics
 
-The problem that Remhos is solving is formulated as a big (block) system of
-ordinary differential equations (ODEs) for the ...
+The problem that Remhos is solving is formulated as a time-dependent system of
+ordinary differential equations (ODEs) for the unknown coefficients of a 
+high-order finite element (FE) function. The left-hand side of this system is
+controlled by a *mass matrix*, while the right-hand side is constructed
+from a *advection matrix*. These matrices change in time for the remap tests,
+and they are constant in time for the advection tests.
+
+Remhos supports two execution modes, namely, *transport* and *remap*, which
+result in slightly different algebraic operators. The main difference
+between the two modes is that in the case of remap, the mass and advection
+matrices change in time, while they are constant for the transport case.
+
+Remhos supports two options for deriving and solving the ODE system, namely the
+*full assembly* and the *partial assembly* methods. Partial assembly is the main
+algorithm of interest for high orders. For low orders (e.g. 2nd order in 3D),
+both algorithms are of interest.
+
+The full assembly option relies on constructing and utilizing global mass and
+advection matrices stored in compressed sparse row (CSR) format.  In contrast, the
+[partial assembly](http://ceed.exascaleproject.org/ceed-code) option defines
+only the local action of those matrices, which is then used to perform all
+necessary operations. As the local action is defined by utilizing the tensor
+structure of the finite element spaces, the amount of data storage, memory
+transfers, and FLOPs are lower (especially for higher orders).
 
 ## Code Structure
 
