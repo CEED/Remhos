@@ -189,13 +189,14 @@ See `make help` for additional options.
 
 ## Running
 
-#### Remap example
+#### Sample remap examples
 
-A sample remap test:
+Some *remap* mode sample runs for in 2D and 3D respectively are:
 ```sh
 mpirun -np 8 remhos -m ./data/square01_quad.mesh -p 14 -rs 3 -rp 1 -dt 0.0005 -tf 0.6 -ho 1 -lo 4 -fct 3
+mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -ho 1 -lo 4 -fct 2
 ```
-This run can produce the following plots (notice the `-vis` option)
+This first of the above runs can produce the following plots (notice the `-vis` option)
 
 <table border="0">
 <td> <img src="data/remap_0.png">
@@ -203,13 +204,14 @@ This run can produce the following plots (notice the `-vis` option)
 <td> <img src="data/remap_2.png">
 </table>
 
-#### Transport example
+#### Sample transport examples
 
-A sample transport test:
+Some *transport* mode sample runs for in 2D and 3D respectively are:
 ```sh
 mpirun -np 8 remhos -m ./data/periodic-square.mesh -p 5 -rs 3 -rp 1 -dt 0.00025 -tf 0.8 -ho 1 -lo 4 -fct 3
+mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -ho 1 -lo 4 -fct 2
 ```
-This run can produce the following plots (notice the `-vis` option)
+This first of the above runs can produce the following plots (notice the `-vis` option)
 
 <table border="0">
 <td> <img src="data/transport_0.png">
