@@ -105,8 +105,17 @@ Other computational motives in Remhos include the following:
 
 ## Code Structure
 
-- The file `remhos.cpp` contains the main driver with the time integration loop
-  starting around line ...
+- The file `remhos.cpp` contains the main driver with the time integration loop.
+- The files `remhos_ho.hpp` and `remhos_ho.cpp` contain all methods that
+  are used to obtain high-order (but not bounds-preserving) solutions of the problem.
+- The files `remhos_lo.hpp` and `remhos_lo.cpp` contain all methods that
+  are used to obtain low-order (but bounds-preserving) solutions
+  of the problem.
+- The files `remhos_fct.hpp` and `remhos_fct.cpp` contain all methods that
+  combine already computed high-order and low-order solutions, thus obtaining a
+  high-order and bounds-preserving solutions of the problem.
+- The files `remhos_tools.hpp` and `remhos_tools.cpp` contain helper functions
+  utilized by the main classes of the miniapp.
 
 ## Building
 
