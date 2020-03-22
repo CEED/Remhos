@@ -14,9 +14,33 @@ advection equations that are used to perform discontinuous field interpolation
 (remap) as part of the Eulerian phase in Arbitrary-Lagrangian Eulerian (ALE)
 simulations.
 
-Remhos is based on the discretization method described in the following article:
+Remhos combines discretization methods described in the following articles:
 
-...
+> R. Anderson, V. Dobrev, Tz. Kolev and R. Rieben <br>
+> [Monotonicity in high-order curvilinear finite element arbitrary
+   Lagrangian-Eulerian remap](https://doi.org/10.1002/fld.3965) <br>
+> *International Journal for Numerical Methods in Fluids* 77(5), 2015, pp. 249-273.
+
+> R. Anderson, V. Dobrev, Tz. Kolev, D. Kuzmin,
+  M. Quezada de Luna, R. Rieben and V. Tomov <br>
+> [High-order local maximum principle preserving (MPP) discontinuous Galerkin
+   finite element method for the transport equation](https://doi.org/10.1016/j.jcp.2016.12.031) <br>
+> *Journal of Computational Physics* 334, 2017, pp. 102-124.
+
+> R. Anderson, V. Dobrev, Tz. Kolev, R. Rieben and V. Tomov <br>
+> [High-order multi-material ALE hydrodynamics](https://doi.org/10.1137/17M1116453) <br>
+> *SIAM Journal on Scientific Computing* 40(1), 2018, pp. B32-B58.
+
+> H. Hajduk, D. Kuzmin, T. Kolev and R. Abgrall <br>
+> [Matrix-free subcell residual distribution for Bernstein finite element
+   discretizations of linear advection equations](https://doi.org/10.1016/j.cma.2019.112658) <br>
+> *Computer Methods in Applied Mechanics and Engineering* 359, 2020.
+
+> H. Hajduk, D. Kuzmin, T. Kolev, V. Tomov, I. Tomas and J. Shadid <br>
+> [Matrix-free subcell residual distribution for Bernstein finite elements:
+   Monolithic limiting](https://doi.org/10.1016/j.compfluid.2020.104451) <br>
+> *Computers and Fluids* 200, 2020.
+
 
 The Remhos miniapp is part of the [CEED software suite](http://ceed.exascaleproject.org/software),
 a collection of software benchmarks, miniapps, libraries and APIs for
