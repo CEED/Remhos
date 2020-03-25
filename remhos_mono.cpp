@@ -23,12 +23,12 @@ namespace mfem
 {
 
 MonoRDSolver::MonoRDSolver(ParFiniteElementSpace &space,
-                                       const SparseMatrix &adv_mat,
-                                       const SparseMatrix &mass_mat, const Vector &Mlump,
-                                       Assembly &asmbly,
-                                       SmoothnessIndicator *si,
-                                       const Vector &mono_scale,
-                                       bool subcell, bool timedep, bool masslim)
+                           const SparseMatrix &adv_mat,
+                           const SparseMatrix &mass_mat, const Vector &Mlump,
+                           Assembly &asmbly,
+                           SmoothnessIndicator *si,
+                           const Vector &mono_scale,
+                           bool subcell, bool timedep, bool masslim)
    : MonolithicSolver(space),
      K_mat(adv_mat), M_mat(mass_mat), M_lumped(Mlump),
      assembly(asmbly), smth_indicator(si), scale(mono_scale),

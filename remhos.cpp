@@ -69,172 +69,7 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
-void GetMinMax(const ParGridFunction &g, double &min, double &max);
-
-// Utility function to build a map to the offset of the symmetric entry in a
-// sparse matrix.
-Array<int> SparseMatrix_Build_smap(const SparseMatrix &A)
-{
-   // Assuming that A is finalized
-   const int *I = A.GetI(), *J = A.GetJ(), n = A.Size();
-   Array<int> smap(I[n]);
-
-   for (int row = 0, j = 0; row < n; row++)
-   {
-      for (int end = I[row+1]; j < end; j++)
-      {
-         int col = J[j];
-         // Find the offset, _j, of the (col,row) entry and store it in smap[j].
-         for (int _j = I[col], _end = I[col+1]; true; _j++)
-         {
-            MFEM_VERIFY(_j != _end, "Can't find the symmetric entry!");
-
-            if (J[_j] == row) { smap[j] = _j; break; }
-         }
-      }
-   }
-   return smap;
-}
-
-// Given a matrix K, matrix D (initialized with same sparsity as K) is computed,
-// such that (K+D)_ij >= 0 for i != j.
-void ComputeDiscreteUpwindingMatrix(const SparseMatrix &K,
-                                    Array<int> smap, SparseMatrix& D)
-{
-   const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
-   const double *Kp = K.GetData();
-
-   double *Dp = D.GetData();
-
-   for (int i = 0, k = 0; i < n; i++)
-   {
-      double rowsum = 0.;
-      for (int end = Ip[i+1]; k < end; k++)
-      {
-         int j = Jp[k];
-         double kij = Kp[k];
-         double kji = Kp[smap[k]];
-         double dij = fmax(fmax(0.0,-kij),-kji);
-         Dp[k] = kij + dij;
-         Dp[smap[k]] = kji + dij;
-         if (i != j) { rowsum += dij; }
-      }
-      D(i,i) = K(i,i) -rowsum;
-   }
-}
-
-// Appropriate quadrature rule for faces according to DGTraceIntegrator.
-const IntegrationRule *GetFaceIntRule(FiniteElementSpace *fes)
-{
-   int i, order;
-   // Use the first mesh face and element as indicator.
-   const FaceElementTransformations *Trans =
-      fes->GetMesh()->GetFaceElementTransformations(0);
-   const FiniteElement *el = fes->GetFE(0);
-
-   if (Trans->Elem2No >= 0)
-   {
-      order = min(Trans->Elem1->OrderW(), Trans->Elem2->OrderW()) + 2*el->GetOrder();
-   }
-   else
-   {
-      order = Trans->Elem1->OrderW() + 2*el->GetOrder();
-   }
-   if (el->Space() == FunctionSpace::Pk)
-   {
-      order++;
-   }
-   return &IntRules.Get(Trans->FaceGeom, order);
-}
-
-// Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped
-// and consistent mass matrices and K is the convection matrix. The spaces are
-// assumed to be L2 conforming.
-class PrecondConvectionIntegrator: public BilinearFormIntegrator
-{
-private:
-#ifndef MFEM_THREAD_SAFE
-   DenseMatrix dshape, adjJ, Q_ir;
-   Vector shape, vec2, BdFidxT;
-#endif
-   VectorCoefficient &Q;
-   double alpha;
-
-public:
-   PrecondConvectionIntegrator(VectorCoefficient &q, double a = 1.0)
-      : Q(q) { alpha = a; }
-   virtual void AssembleElementMatrix(const FiniteElement &,
-                                      ElementTransformation &,
-                                      DenseMatrix &);
-};
-
-// alpha (q . grad u, v)
-class MixedConvectionIntegrator : public BilinearFormIntegrator
-{
-private:
-#ifndef MFEM_THREAD_SAFE
-   DenseMatrix dshape, adjJ, Q_ir;
-   Vector shape, vec2, BdFidxT;
-#endif
-   VectorCoefficient &Q;
-   double alpha;
-
-public:
-   MixedConvectionIntegrator(VectorCoefficient &q, double a = 1.0)
-      : Q(q) { alpha = a; }
-   virtual void AssembleElementMatrix2(const FiniteElement &tr_el,
-                                       const FiniteElement &te_el,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat)
-   {
-      int tr_nd = tr_el.GetDof();
-      int te_nd = te_el.GetDof();
-      int dim = te_el.GetDim(); // Using test geometry.
-
-#ifdef MFEM_THREAD_SAFE
-      DenseMatrix dshape, adjJ, Q_ir;
-      Vector shape, vec2, BdFidxT;
-#endif
-      elmat.SetSize(te_nd, tr_nd);
-      dshape.SetSize(tr_nd,dim);
-      adjJ.SetSize(dim);
-      shape.SetSize(te_nd);
-      vec2.SetSize(dim);
-      BdFidxT.SetSize(tr_nd);
-
-      Vector vec1;
-
-      // Using midpoint rule and test geometry.
-      const IntegrationRule *ir = &IntRules.Get(te_el.GetGeomType(), 1);
-
-      Q.Eval(Q_ir, Trans, *ir);
-
-      elmat = 0.0;
-      for (int i = 0; i < ir->GetNPoints(); i++)
-      {
-         const IntegrationPoint &ip = ir->IntPoint(i);
-         tr_el.CalcDShape(ip, dshape);
-         te_el.CalcShape(ip, shape);
-
-         Trans.SetIntPoint(&ip);
-         CalcAdjugate(Trans.Jacobian(), adjJ);
-         Q_ir.GetColumnReference(i, vec1);
-         vec1 *= alpha * ip.weight;
-
-         adjJ.Mult(vec1, vec2);
-         dshape.Mult(vec2, BdFidxT);
-
-         AddMultVWt(shape, BdFidxT, elmat);
-      }
-   }
-};
-
-/** A time-dependent operator for the right-hand side of the ODE. The DG weak
-    form of du/dt = -v.grad(u) is M du/dt = K u + b, where M and K are the mass
-    and advection matrices, and b describes the flow on the boundary. This can
-    be written as a general ODE, du/dt = M^{-1} (K u + b), and this class is
-    used to evaluate the right-hand side. */
-class FE_Evolution : public TimeDependentOperator
+class AdvectionOperator : public TimeDependentOperator
 {
 private:
    BilinearForm &Mbf, &ml;
@@ -242,20 +77,16 @@ private:
    SparseMatrix &M, &K;
    ParBilinearForm &M_HO, &K_HO;
    Vector &lumpedM;
-   const GridFunction &inflow_gf;
-   const Vector &b;
 
    Vector start_mesh_pos, start_submesh_pos;
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
 
-   mutable Vector z;
    mutable ParGridFunction x_gf;
 
    double dt;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
-   SmoothnessIndicator *smth_indicator;
    DofInfo &dofs;
 
    HOSolver *ho_solver;
@@ -264,16 +95,15 @@ private:
    MonolithicSolver *mono_solver;
 
 public:
-   FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
-                Vector &_lumpedM,
-                ParBilinearForm &Kbf_, SparseMatrix &_K,
-                ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                const Vector &_b, const GridFunction &inflow,
-                GridFunction &pos, GridFunction *sub_pos,
-                GridFunction &vel, GridFunction &sub_vel,
-                Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                SmoothnessIndicator *si,
-                HOSolver *hos, LOSolver *los, FCTSolver *fct, MonolithicSolver *mos);
+   AdvectionOperator(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
+                     Vector &_lumpedM,
+                     ParBilinearForm &Kbf_, SparseMatrix &_K,
+                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                     GridFunction &pos, GridFunction *sub_pos,
+                     GridFunction &vel, GridFunction &sub_vel,
+                     Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
+                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                     MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -284,7 +114,7 @@ public:
       start_submesh_pos = sm_pos;
    }
 
-   virtual ~FE_Evolution() { }
+   virtual ~AdvectionOperator() { }
 };
 
 int main(int argc, char *argv[])
@@ -396,8 +226,8 @@ int main(int argc, char *argv[])
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
 
-   // 3. Define the ODE solver used for time integration. Several explicit
-   //    Runge-Kutta methods are available.
+   // Define the ODE solver used for time integration. Several explicit
+   // Runge-Kutta methods are available.
    ODESolver *ode_solver = NULL;
    switch (ode_solver_type)
    {
@@ -470,8 +300,8 @@ int main(int argc, char *argv[])
       x = x0;
    }
 
-   // 5. Define the discontinuous DG finite element space of the given
-   //    polynomial order on the refined mesh.
+   // Define the discontinuous DG finite element space of the given
+   // polynomial order on the refined mesh.
    const int btype = BasisType::Positive;
    DG_FECollection fec(order, dim, btype);
    ParFiniteElementSpace pfes(&pmesh, &fec);
@@ -521,7 +351,6 @@ int main(int argc, char *argv[])
       inflow_gf.ProjectGridFunction(l2_inflow);
    }
    else { inflow_gf.ProjectCoefficient(inflow); }
-
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
@@ -583,10 +412,6 @@ int main(int argc, char *argv[])
       K_HO.Finalize(0);
    }
 
-   ParLinearForm b(&pfes);
-   b.AddBdrFaceIntegrator(
-      new BoundaryFlowIntegrator(inflow, v_coef, -1.0, -0.5));
-
    // Compute the lumped mass matrix.
    Vector lumpedM;
    ParBilinearForm ml(&pfes);
@@ -600,7 +425,6 @@ int main(int argc, char *argv[])
    int skip_zeros = 0;
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
-   b.Assemble();
 
    // Store topological dof data.
    DofInfo dofs(&pfes, &pfes_bounds);
@@ -609,7 +433,6 @@ int main(int argc, char *argv[])
    // into a separate routine. I am using a struct now because the various
    // schemes require quite different information.
    LowOrderMethod lom;
-   lom.fes = &pfes;
    lom.subcell_scheme = use_subcell_RD;
 
    lom.pk = NULL;
@@ -650,7 +473,13 @@ int main(int argc, char *argv[])
    if (exec_mode == 1) { lom.coef = &v_coef; }
    else                { lom.coef = &velocity; }
 
-   lom.irF = GetFaceIntRule(&pfes);
+   // Face integration rule.
+   const FaceElementTransformations *ft =
+         pmesh.GetFaceElementTransformations(0);
+   const int el_order = pfes.GetFE(0)->GetOrder();
+   int ft_order = ft->Elem1->OrderW() + 2 * el_order;
+   if (pfes.GetFE(0)->Space() == FunctionSpace::Pk) { ft_order++; }
+   lom.irF = &IntRules.Get(ft->FaceGeom, ft_order);
 
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
@@ -658,9 +487,9 @@ int main(int argc, char *argv[])
    lom.subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
-   FiniteElementCollection *fec_sub;
-   ParFiniteElementSpace *pfes_sub;
-   ParGridFunction *xsub;
+   FiniteElementCollection *fec_sub = NULL;
+   ParFiniteElementSpace *pfes_sub = NULL;;
+   ParGridFunction *xsub = NULL;
    ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
@@ -845,20 +674,18 @@ int main(int argc, char *argv[])
    }
 
    // Print the starting meshes and initial condition.
+   ofstream meshHO("meshHO_init.mesh");
+   meshHO.precision(precision);
+   pmesh.PrintAsOne(meshHO);
+   if (lom.subcell_mesh)
    {
-      ofstream meshHO("meshHO_init.mesh");
-      meshHO.precision(precision);
-      pmesh.PrintAsOne(meshHO);
-      if (lom.subcell_mesh)
-      {
-         ofstream meshLO("meshLO_init.mesh");
-         meshLO.precision(precision);
-         lom.subcell_mesh->PrintAsOne(meshLO);
-      }
-      ofstream sltn("sltn_init.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
+      ofstream meshLO("meshLO_init.mesh");
+      meshLO.precision(precision);
+      lom.subcell_mesh->PrintAsOne(meshLO);
    }
+   ofstream sltn("sltn_init.gf");
+   sltn.precision(precision);
+   u.SaveAsOne(sltn);
 
    // Create data collection for solution output: either VisItDataCollection for
    // ascii data files, or SidreDataCollection for binary data files.
@@ -897,9 +724,9 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&initialMass_loc, &initialMass, 1, MPI_DOUBLE, MPI_SUM,
                  pmesh.GetComm());
 
-   // 8. Define the time-dependent evolution operator describing the ODE
-   //    right-hand side, and perform time-integration (looping over the time
-   //    iterations, ti, with a time-step dt).
+   // Define the time-dependent evolution operator describing the ODE
+   // right-hand side, and perform time-integration (looping over the time
+   // iterations, ti, with a time-step dt).
 
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
@@ -921,10 +748,9 @@ int main(int argc, char *argv[])
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   FE_Evolution adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), M_HO, K_HO,
-                    b, inflow_gf, x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
-                    smth_indicator,
-                    ho_solver, lo_solver, fct_solver, mono_solver);
+   AdvectionOperator adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), M_HO, K_HO,
+                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                         ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1136,88 +962,27 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-void Assembly::NonlinFluxLumping(const int k, const int nd,
-                                 const int BdrID, const Vector &x,
-                                 Vector &y, const Vector &x_nd,
-                                 const Vector &alpha) const
-{
-   int i, j, dofInd;
-   double xNeighbor, SumCorrP = 0., SumCorrN = 0., eps = 1.E-15;
-   const int size_x = x.Size();
-   Vector xDiff(dofs.numFaceDofs), BdrTermCorr(dofs.numFaceDofs);
-   BdrTermCorr = 0.;
-
-   for (j = 0; j < dofs.numFaceDofs; j++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
-      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-      // s.t. this value will not matter.
-      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
-      else
-      {
-         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                     : x_nd(nbr_dof_id - size_x);
-      }
-      xDiff(j) = xNeighbor - x(dofInd);
-   }
-
-   for (i = 0; i < dofs.numFaceDofs; i++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      for (j = 0; j < dofs.numFaceDofs; j++)
-      {
-         y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i);
-         BdrTermCorr(i) += bdrInt(k, BdrID,
-                                  i*dofs.numFaceDofs + j) * (xDiff(j)-xDiff(i));
-      }
-      BdrTermCorr(i) *= alpha(dofs.BdrDofs(i,BdrID));
-      SumCorrP += max(0., BdrTermCorr(i));
-      SumCorrN += min(0., BdrTermCorr(i));
-   }
-
-   for (i = 0; i < dofs.numFaceDofs; i++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      if (SumCorrP + SumCorrN > eps)
-      {
-         BdrTermCorr(i) = min(0., BdrTermCorr(i)) -
-                          max(0., BdrTermCorr(i)) * SumCorrN / SumCorrP;
-      }
-      else if (SumCorrP + SumCorrN < -eps)
-      {
-         BdrTermCorr(i) = max(0., BdrTermCorr(i)) -
-                          min(0., BdrTermCorr(i)) * SumCorrP / SumCorrN;
-      }
-      y(dofInd) += BdrTermCorr(i);
-   }
-}
-
-// Implementation of class FE_Evolution
-FE_Evolution::FE_Evolution(BilinearForm &Mbf_, SparseMatrix &_M,
-                           BilinearForm &_ml, Vector &_lumpedM,
-                           ParBilinearForm &Kbf_, SparseMatrix &_K,
-                           ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                           const Vector &_b, const GridFunction &inflow,
-                           GridFunction &pos, GridFunction *sub_pos,
-                           GridFunction &vel, GridFunction &sub_vel,
-                           Assembly &_asmbl,
-                           LowOrderMethod &_lom, DofInfo &_dofs,
-                           SmoothnessIndicator *si,
-                           HOSolver *hos, LOSolver *los, FCTSolver *fct,
-                           MonolithicSolver *mos) :
+AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_, SparseMatrix &_M,
+                                     BilinearForm &_ml, Vector &_lumpedM,
+                                     ParBilinearForm &Kbf_, SparseMatrix &_K,
+                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     GridFunction &pos, GridFunction *sub_pos,
+                                     GridFunction &vel, GridFunction &sub_vel,
+                                     Assembly &_asmbl,
+                                     LowOrderMethod &_lom, DofInfo &_dofs,
+                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                                     MonolithicSolver *mos) :
    TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
    M(_M), K(_K), lumpedM(_lumpedM),
    M_HO(M_HO_), K_HO(K_HO_),
-   inflow_gf(inflow), b(_b),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
-   z(_M.Size()), x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs), smth_indicator(si),
+   x_gf(Kbf.ParFESpace()),
+   asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
-void FE_Evolution::Mult(const Vector &x, Vector &y) const
+void AdvectionOperator::Mult(const Vector &x, Vector &y) const
 {
    if (exec_mode == 1)
    {
@@ -1255,8 +1020,8 @@ void FE_Evolution::Mult(const Vector &x, Vector &y) const
 
       // Face contributions.
       asmbl.bdrInt = 0.;
-      Mesh *mesh = lom.fes->GetMesh();
-      const int dim = mesh->Dimension(), ne = lom.fes->GetNE();
+      Mesh *mesh = M_HO.FESpace()->GetMesh();
+      const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
@@ -1418,45 +1183,6 @@ void velocity_function(const Vector &x, Vector &v)
             v(2) = 0.0;
          }
          break;
-      }
-   }
-}
-
-void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
-                                 const Vector &x, Vector &y, const Vector &x_nd,
-                                 const Vector &alpha) const
-{
-   int i, j, dofInd;
-   double xNeighbor;
-   Vector xDiff(dofs.numFaceDofs);
-   const int size_x = x.Size();
-
-   for (j = 0; j < dofs.numFaceDofs; j++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-      const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
-      // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-      // s.t. this value will not matter.
-      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
-      else
-      {
-         xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                                           : x_nd(nbr_dof_id - size_x);
-      }
-      xDiff(j) = xNeighbor - x(dofInd);
-   }
-
-   for (i = 0; i < dofs.numFaceDofs; i++)
-   {
-      dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      for (j = 0; j < dofs.numFaceDofs; j++)
-      {
-         // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
-         // 0 < alpha < 1 can be used for limiting within the low order method.
-         y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
-                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
-                       alpha(dofs.BdrDofs(i,BdrID)) *
-                       alpha(dofs.BdrDofs(j,BdrID)));
       }
    }
 }
@@ -1714,69 +1440,4 @@ double inflow_function(const Vector &x)
       return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
    }
    else { return 0.0; }
-}
-
-void PrecondConvectionIntegrator::AssembleElementMatrix(
-   const FiniteElement &el, ElementTransformation &Trans, DenseMatrix &elmat)
-{
-   int i, nd = el.GetDof(), dim = el.GetDim();
-
-#ifdef MFEM_THREAD_SAFE
-   DenseMatrix dshape, adjJ, Q_ir;
-   Vector shape, vec2, BdFidxT;
-#endif
-   elmat.SetSize(nd);
-   dshape.SetSize(nd,dim);
-   adjJ.SetSize(dim);
-   shape.SetSize(nd);
-   vec2.SetSize(dim);
-   BdFidxT.SetSize(nd);
-
-   double w;
-   Vector vec1;
-   DenseMatrix mass(nd,nd), conv(nd,nd), lumpedM(nd,nd), tmp(nd,nd);
-
-   const IntegrationRule *ir = IntRule;
-   if (ir == NULL)
-   {
-      int order = Trans.OrderGrad(&el) + Trans.Order() + el.GetOrder();
-      order = max(order, 2 * el.GetOrder() + Trans.OrderW());
-      ir = &IntRules.Get(el.GetGeomType(), order);
-   }
-
-   Q.Eval(Q_ir, Trans, *ir);
-
-   conv = mass = 0.0;
-   for (i = 0; i < ir->GetNPoints(); i++)
-   {
-      const IntegrationPoint &ip = ir->IntPoint(i);
-      el.CalcDShape(ip, dshape);
-      el.CalcShape(ip, shape);
-
-      Trans.SetIntPoint(&ip);
-      CalcAdjugate(Trans.Jacobian(), adjJ);
-      Q_ir.GetColumnReference(i, vec1);
-      vec1 *= alpha * ip.weight;
-
-      adjJ.Mult(vec1, vec2);
-      dshape.Mult(vec2, BdFidxT);
-
-      AddMultVWt(shape, BdFidxT, conv);
-
-      w = Trans.Weight() * ip.weight;
-      AddMult_a_VVt(w, shape, mass);
-   }
-   lumpedM = mass;
-   lumpedM.Lump();
-   mass.Invert();
-
-   MultABt(mass, lumpedM, tmp);
-   MultAtB(tmp, conv, elmat); // using symmetry of mass matrix
-}
-
-void GetMinMax(const ParGridFunction &g, double &min, double &max)
-{
-   double min_loc = g.Min(), max_loc = g.Max();
-   MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
-   MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 }
