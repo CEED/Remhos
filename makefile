@@ -185,3 +185,7 @@ style:
 	@if ! $(ASTYLE) $(FORMAT_FILES) | grep Formatted; then\
 	   echo "No source files were changed.";\
 	fi
+
+tests:
+	@ cd autotest; ./test.sh;
+	diff --report-identical-files autotest/out_test.dat autotest/out_baseline.dat;

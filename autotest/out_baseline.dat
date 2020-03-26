@@ -78,12 +78,12 @@ Max value:  0.9997484909
 - Transport bump per-unstruct-2D
 mpirun -np 6 remhos --verify-bounds -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 10 -ho 2 -lo 3 -fct 3
 Final mass: 0.3888354914
-Max value:  0.9535638023
+Max value:  0.9535638035
 
 - Transport balls-jacks per-struct-2D
 mpirun -np 6 remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 -ho 2 -lo 3 -fct 3
-Final mass: 0.1623283005
-Max value:  0.6445863867
+Final mass: 0.1623343809
+Max value:  0.644589232
 
 - Transport bump per-struct-3D
 mpirun -np 6 remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 8 -ho 2 -lo 3 -fct 3

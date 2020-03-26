@@ -62,8 +62,7 @@ The problem that Remhos is solving is formulated as a time-dependent system of
 ordinary differential equations (ODEs) for the unknown coefficients of a
 high-order finite element (FE) function. The left-hand side of this system is
 controlled by a *mass matrix*, while the right-hand side is constructed
-from a *advection matrix*. These matrices change in time for the remap tests,
-and they are constant in time for the advection tests.
+from a *advection matrix*.
 
 Remhos supports two execution modes, namely, *transport* and *remap*, which
 result in slightly different algebraic operators. The main difference
@@ -76,8 +75,8 @@ algorithm of interest for high orders. For low orders (e.g. 2nd order in 3D),
 both algorithms are of interest.
 
 The full assembly option relies on constructing and utilizing global mass and
-advection matrices stored in compressed sparse row (CSR) format.  In contrast, the
-[partial assembly](http://ceed.exascaleproject.org/ceed-code) option defines
+advection matrices stored in compressed sparse row (CSR) format.  In contrast,
+the [partial assembly](http://ceed.exascaleproject.org/ceed-code) option defines
 only the local action of those matrices, which is then used to perform all
 necessary operations. As the local action is defined by utilizing the tensor
 structure of the finite element spaces, the amount of data storage, memory
@@ -88,7 +87,7 @@ Other computational motives in Remhos include the following:
 - Support for unstructured meshes, in 2D and 3D, with quadrilateral and
   hexahedral elements.. Serial and parallel mesh refinement options can be
   set via a command-line flag.
-- Explicit time-stepping loop with a variety of time integrator options. Laghos
+- Explicit time-stepping loop with a variety of time integrator options. Remhos
   supports Runge-Kutta ODE solvers of orders 1, 2, 3, 4 and 6.
 - Discontinuous high-order finite element discretization spaces
   of runtime-specified order.
