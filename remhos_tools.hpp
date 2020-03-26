@@ -45,7 +45,9 @@ class SmoothnessIndicator
 private:
    const int type;
    const double param;
-   ParFiniteElementSpace &pfes_CG_sub, &pfes_DG;
+   H1_FECollection fec_sub;
+   ParFiniteElementSpace pfes_CG_sub;
+   ParFiniteElementSpace &pfes_DG;
    SparseMatrix Mmat, LaplaceOp, *MassMixed;
    BilinearFormIntegrator *MassInt;
    Vector lumpedMH1;
@@ -58,7 +60,7 @@ private:
 
 public:
    SmoothnessIndicator(int type_id,
-                       ParFiniteElementSpace &pfes_CG_sub_,
+                       ParMesh &subcell_mesh,
                        ParFiniteElementSpace &pfes_DG_,
                        ParGridFunction &u,
                        DofInfo &dof_info);
@@ -82,8 +84,6 @@ struct LowOrderMethod
    VectorCoefficient* coef;
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
-   ParMesh* subcell_mesh;
-   Vector scale;
 };
 
 // Class storing information on dofs needed for the low order methods and FCT.
@@ -132,14 +132,14 @@ private:
    mutable ParGridFunction x_gf;
    BilinearFormIntegrator *VolumeTerms;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
+   Mesh *subcell_mesh;
 
 public:
    Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,
-            ParFiniteElementSpace &pfes, int mode);
+            ParFiniteElementSpace &pfes, ParMesh *submesh, int mode);
 
    // Auxiliary member variables that need to be accessed during time-stepping.
    DofInfo &dofs;
-   Mesh *subcell_mesh;
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.

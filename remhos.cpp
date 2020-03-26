@@ -358,8 +358,7 @@ int main(int argc, char *argv[])
    m.AddDomainIntegrator(new MassIntegrator);
 
    ParBilinearForm M_HO(&pfes);
-   ConstantCoefficient one(1.0);
-   M_HO.AddDomainIntegrator(new MassIntegrator(one));
+   M_HO.AddDomainIntegrator(new MassIntegrator);
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -484,7 +483,7 @@ int main(int argc, char *argv[])
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
 
-   lom.subcell_mesh = NULL;
+   ParMesh *subcell_mesh = NULL;
    lom.SubFes0 = NULL;
    lom.SubFes1 = NULL;
    FiniteElementCollection *fec_sub = NULL;
@@ -501,7 +500,7 @@ int main(int argc, char *argv[])
       MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
 
       // Get a uniformly refined mesh.
-      lom.subcell_mesh = new ParMesh(&pmesh, order, BasisType::ClosedUniform);
+      subcell_mesh = new ParMesh(&pmesh, order, BasisType::ClosedUniform);
 
       // Check if the mesh is periodic.
       const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
@@ -511,10 +510,10 @@ int main(int argc, char *argv[])
          // Standard non-periodic mesh.
          // Note that the fine mesh is always linear.
          fec_sub = new H1_FECollection(1, dim, BasisType::ClosedUniform);
-         pfes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         pfes_sub = new ParFiniteElementSpace(subcell_mesh, fec_sub, dim);
          xsub = new ParGridFunction(pfes_sub);
-         lom.subcell_mesh->SetCurvature(1);
-         lom.subcell_mesh->SetNodalGridFunction(xsub);
+         subcell_mesh->SetCurvature(1);
+         subcell_mesh->SetNodalGridFunction(xsub);
       }
       else
       {
@@ -522,20 +521,20 @@ int main(int argc, char *argv[])
          // to the above Mesh constructor. Note that the fine mesh is always
          // linear.
          const bool disc_nodes = true;
-         lom.subcell_mesh->SetCurvature(1, disc_nodes);
+         subcell_mesh->SetCurvature(1, disc_nodes);
 
          fec_sub = new L2_FECollection(1, dim, BasisType::ClosedUniform);
-         pfes_sub = new ParFiniteElementSpace(lom.subcell_mesh, fec_sub, dim);
+         pfes_sub = new ParFiniteElementSpace(subcell_mesh, fec_sub, dim);
          xsub = new ParGridFunction(pfes_sub);
-         lom.subcell_mesh->SetNodalGridFunction(xsub);
+         subcell_mesh->SetNodalGridFunction(xsub);
 
          GridFunction *coarse = pmesh.GetNodes();
          InterpolationGridTransfer transf(*coarse->FESpace(), *pfes_sub);
          transf.ForwardOperator().Mult(*coarse, *xsub);
       }
 
-      lom.SubFes0 = new FiniteElementSpace(lom.subcell_mesh, &fec0);
-      lom.SubFes1 = new FiniteElementSpace(lom.subcell_mesh, &fec1);
+      lom.SubFes0 = new FiniteElementSpace(subcell_mesh, &fec0);
+      lom.SubFes1 = new FiniteElementSpace(subcell_mesh, &fec1);
 
       // Submesh velocity.
       v_sub_gf.SetSpace(pfes_sub);
@@ -543,9 +542,9 @@ int main(int argc, char *argv[])
 
       // Zero it out on boundaries (not moving boundaries).
       Array<int> ess_bdr, ess_vdofs;
-      if (lom.subcell_mesh->bdr_attributes.Size() > 0)
+      if (subcell_mesh->bdr_attributes.Size() > 0)
       {
-         ess_bdr.SetSize(lom.subcell_mesh->bdr_attributes.Max());
+         ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
       }
       ess_bdr = 1;
       xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
@@ -568,36 +567,9 @@ int main(int argc, char *argv[])
          lom.VolumeTerms = new MixedConvectionIntegrator(v_sub_coef);
       }
    }
-   else { lom.subcell_mesh = &pmesh; }
+   else { subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs, lom, inflow_gf, pfes, exec_mode);
-   const int ne = pmesh.GetNE();
-
-   // Monolithic limiting correction factors.
-   if (mono_type == MonolithicSolverType::ResDistMono ||
-       mono_type == MonolithicSolverType::ResDistMonoSubcell)
-   {
-      lom.scale.SetSize(ne);
-
-      for (int e = 0; e < ne; e++)
-      {
-         const FiniteElement* el = pfes.GetFE(e);
-         DenseMatrix velEval;
-         Vector vval;
-         double vmax = 0.;
-         ElementTransformation *tr = pmesh.GetElementTransformation(e);
-         int qOrdE = tr->OrderW() + 2*el->GetOrder() + 2*max(tr->OrderGrad(el), 0);
-         const IntegrationRule *irE = &IntRules.Get(el->GetGeomType(), qOrdE);
-         velocity.Eval(velEval, *tr, *irE);
-
-         for (int l = 0; l < irE->GetNPoints(); l++)
-         {
-            velEval.GetColumnReference(l, vval);
-            vmax = max(vmax, vval.Norml2());
-         }
-         lom.scale(e) = vmax / (2. * (sqrt(dim) * pmesh.GetElementSize(e) / order));
-      }
-   }
+   Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
    LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
@@ -633,12 +605,10 @@ int main(int argc, char *argv[])
    u.ProjectCoefficient(u0);
 
    // Smoothness indicator.
-   H1_FECollection H1fec(1, dim, btype);
-   ParFiniteElementSpace H1fes(lom.subcell_mesh, &H1fec);
    SmoothnessIndicator *smth_indicator = NULL;
    if (smth_ind_type)
    {
-      smth_indicator = new SmoothnessIndicator(smth_ind_type, H1fes,
+      smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
                                                pfes, u, dofs);
    }
 
@@ -662,14 +632,14 @@ int main(int argc, char *argv[])
    {
       const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
-                                     asmbl, smth_indicator, lom.scale,
+                                     asmbl, smth_indicator, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       const bool subcell_scheme = true;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
-                                     asmbl, smth_indicator, lom.scale,
+                                     asmbl, smth_indicator, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
 
@@ -677,11 +647,11 @@ int main(int argc, char *argv[])
    ofstream meshHO("meshHO_init.mesh");
    meshHO.precision(precision);
    pmesh.PrintAsOne(meshHO);
-   if (lom.subcell_mesh)
+   if (subcell_mesh)
    {
       ofstream meshLO("meshLO_init.mesh");
       meshLO.precision(precision);
-      lom.subcell_mesh->PrintAsOne(meshLO);
+      subcell_mesh->PrintAsOne(meshLO);
    }
    ofstream sltn("sltn_init.gf");
    sltn.precision(precision);
@@ -857,11 +827,11 @@ int main(int argc, char *argv[])
       ofstream meshHO("meshHO_final.mesh");
       meshHO.precision(precision);
       pmesh.PrintAsOne(meshHO);
-      if (asmbl.subcell_mesh)
+      if (subcell_mesh)
       {
          ofstream meshLO("meshLO_final.mesh");
          meshLO.precision(precision);
-         asmbl.subcell_mesh->Print(meshLO);
+         subcell_mesh->PrintAsOne(meshLO);
       }
       ofstream sltn("sltn_final.gf");
       sltn.precision(precision);
@@ -950,7 +920,7 @@ int main(int argc, char *argv[])
 
    if (order > 1)
    {
-      delete lom.subcell_mesh;
+      delete subcell_mesh;
       delete fec_sub;
       delete pfes_sub;
       delete xsub;

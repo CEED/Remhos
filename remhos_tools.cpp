@@ -23,12 +23,14 @@ namespace mfem
 
 
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
-                                         ParFiniteElementSpace &pfes_CG_sub_,
+                                         ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,
                                          ParGridFunction &u,
                                          DofInfo &dof_info)
    : type(type_id), param(type == 1 ? 5.0 : 3.0),
-     pfes_CG_sub(pfes_CG_sub_), pfes_DG(pfes_DG_)
+     fec_sub(1, pfes_DG_.GetMesh()->Dimension(), BasisType::Positive),
+     pfes_CG_sub(&subcell_mesh, &fec_sub),
+     pfes_DG(pfes_DG_)
 {
    // TODO assemble SI matrices every RK stage for remap.
 
@@ -621,11 +623,11 @@ void DofInfo::FillSubcell2CellDof()
 
 Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
                    const GridFunction &inflow,
-                   ParFiniteElementSpace &pfes, int mode)
+                   ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
    : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
      VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     dofs(_dofs), subcell_mesh(NULL)
+     dofs(_dofs), subcell_mesh(submesh)
 {
    Mesh *mesh = fes->GetMesh();
    int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
@@ -643,7 +645,6 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
 
       SubFes0 = lom.SubFes0;
       SubFes1 = lom.SubFes1;
-      subcell_mesh = lom.subcell_mesh;
    }
 
    // Initialization for transport mode.

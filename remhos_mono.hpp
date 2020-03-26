@@ -48,7 +48,7 @@ protected:
    const Vector &M_lumped;
    Assembly &assembly;
    SmoothnessIndicator *smth_indicator;
-   const Vector &scale;
+   Vector scale;
    bool subcell_scheme;
    const bool time_dep;
    const bool mass_lim;
@@ -58,7 +58,7 @@ public:
                 const SparseMatrix &adv_mat, const SparseMatrix &mass_mat,
                 const Vector &Mlump,
                 Assembly &asmbly, SmoothnessIndicator *si,
-                const Vector &mono_scale,
+                VectorFunctionCoefficient &velocity,
                 bool subcell, bool timedep, bool masslim);
 
    void CalcSolution(const Vector &u, Vector &du) const;

@@ -27,13 +27,35 @@ MonoRDSolver::MonoRDSolver(ParFiniteElementSpace &space,
                            const SparseMatrix &mass_mat, const Vector &Mlump,
                            Assembly &asmbly,
                            SmoothnessIndicator *si,
-                           const Vector &mono_scale,
+                           VectorFunctionCoefficient &velocity,
                            bool subcell, bool timedep, bool masslim)
    : MonolithicSolver(space),
      K_mat(adv_mat), M_mat(mass_mat), M_lumped(Mlump),
-     assembly(asmbly), smth_indicator(si), scale(mono_scale),
+     assembly(asmbly), smth_indicator(si), scale(pfes.GetNE()),
      subcell_scheme(subcell), time_dep(timedep), mass_lim(masslim)
-{ }
+{
+   const int ne = pfes.GetNE(), dim = pfes.GetMesh()->Dimension();
+   const int order = pfes.GetOrder(0);
+   for (int e = 0; e < ne; e++)
+   {
+      const FiniteElement* el = pfes.GetFE(e);
+      DenseMatrix velEval;
+      Vector vval;
+      double vmax = 0.;
+      ElementTransformation *tr = pfes.GetMesh()->GetElementTransformation(e);
+      int qOrdE = tr->OrderW() + 2*el->GetOrder() + 2*max(tr->OrderGrad(el), 0);
+      const IntegrationRule *irE = &IntRules.Get(el->GetGeomType(), qOrdE);
+      velocity.Eval(velEval, *tr, *irE);
+
+      for (int l = 0; l < irE->GetNPoints(); l++)
+      {
+         velEval.GetColumnReference(l, vval);
+         vmax = max(vmax, vval.Norml2());
+      }
+      const double el_size = pfes.GetMesh()->GetElementSize(e);
+      scale(e) = vmax / (2. * (sqrt(dim) * el_size / order));
+   }
+}
 
 void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
 {
