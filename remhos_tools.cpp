@@ -371,8 +371,7 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
 
 void DofInfo::ComputeBounds()
 {
-   ParFiniteElementSpace *pfesCG = x_min.ParFESpace();
-   GroupCommunicator &gcomm = pfesCG->GroupComm();
+   GroupCommunicator &gcomm = pfes_bounds.GroupComm();
    Array<int> dofsCG;
 
    // Form min/max at each CG dof, considering element overlaps.
@@ -396,7 +395,7 @@ void DofInfo::ComputeBounds()
 
    // Use (x_min, x_max) to fill (xi_min, xi_max) for each DG dof.
    const TensorBasisElement *fe_cg =
-      dynamic_cast<const TensorBasisElement *>(pfesCG->GetFE(0));
+      dynamic_cast<const TensorBasisElement *>(pfes_bounds.GetFE(0));
    const Array<int> &dof_map = fe_cg->GetDofMap();
    const int ndofs = dof_map.Size();
    for (int i = 0; i < pmesh->GetNE(); i++)
