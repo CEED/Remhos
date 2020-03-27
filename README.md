@@ -85,7 +85,7 @@ transfers, and FLOPs are lower (especially for higher orders).
 Other computational motives in Remhos include the following:
 
 - Support for unstructured meshes, in 2D and 3D, with quadrilateral and
-  hexahedral elements.. Serial and parallel mesh refinement options can be
+  hexahedral elements. Serial and parallel mesh refinement options can be
   set via a command-line flag.
 - Explicit time-stepping loop with a variety of time integrator options. Remhos
   supports Runge-Kutta ODE solvers of orders 1, 2, 3, 4 and 6.

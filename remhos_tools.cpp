@@ -346,12 +346,13 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    gcomm.Bcast(maxvals);
 }
 
-DofInfo::DofInfo(ParFiniteElementSpace *fes_sltn,
-                 ParFiniteElementSpace *fes_bounds)
-   : pmesh(fes_sltn->GetParMesh()), pfes(fes_sltn),
-     x_min(fes_bounds), x_max(fes_bounds)
+DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
+   : pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
+     fec_bounds(pfes.GetOrder(0), pmesh->Dimension(), BasisType::GaussLobatto),
+     pfes_bounds(pmesh, &fec_bounds),
+     x_min(&pfes_bounds), x_max(&pfes_bounds)
 {
-   int n = pfes->GetVSize();
+   int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
 
    xi_min.SetSize(n);
@@ -359,8 +360,8 @@ DofInfo::DofInfo(ParFiniteElementSpace *fes_sltn,
    xe_min.SetSize(ne);
    xe_max.SetSize(ne);
 
-   ExtractBdrDofs(pfes->GetFE(0)->GetOrder(),
-                  pfes->GetFE(0)->GetGeomType(), BdrDofs);
+   ExtractBdrDofs(pfes.GetOrder(0),
+                  pfes.GetFE(0)->GetGeomType(), BdrDofs);
    numFaceDofs = BdrDofs.Height();
    numBdrs = BdrDofs.Width();
 
@@ -412,7 +413,7 @@ void DofInfo::ComputeBounds()
 void DofInfo::FillNeighborDofs()
 {
    // Use the first mesh element as indicator.
-   const FiniteElement &dummy = *pfes->GetFE(0);
+   const FiniteElement &dummy = *pfes.GetFE(0);
    const int dim = pmesh->Dimension();
    int i, j, k, nbr, ne = pmesh->GetNE();
    int nd = dummy.GetDof(), p = dummy.GetOrder();
@@ -565,7 +566,7 @@ void DofInfo::FillNeighborDofs()
 
 void DofInfo::FillSubcell2CellDof()
 {
-   const int dim = pmesh->Dimension(), p = pfes->GetFE(0)->GetOrder();
+   const int dim = pmesh->Dimension(), p = pfes.GetFE(0)->GetOrder();
 
    if (dim==1)
    {

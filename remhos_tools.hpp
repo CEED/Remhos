@@ -91,7 +91,12 @@ class DofInfo
 {
 private:
    ParMesh *pmesh;
-   ParFiniteElementSpace *pfes;
+   ParFiniteElementSpace &pfes;
+
+   // The min and max bounds are represented as CG functions of the same order
+   // as the solution, thus having 1:1 dof correspondence inside each element.
+   H1_FECollection fec_bounds;
+   ParFiniteElementSpace pfes_bounds;
    ParGridFunction x_min, x_max;
 
    // For each DOF on an element boundary, the global index of the DOF on the
@@ -116,7 +121,7 @@ public:
 
    int numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
-   DofInfo(ParFiniteElementSpace *fes_sltn, ParFiniteElementSpace *fes_bounds);
+   DofInfo(ParFiniteElementSpace &pfes_sltn);
 
    // Computes the admissible interval of values for each DG dof from the values
    // of all elements that feature the dof at its physical location.

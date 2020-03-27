@@ -306,11 +306,6 @@ int main(int argc, char *argv[])
    DG_FECollection fec(order, dim, btype);
    ParFiniteElementSpace pfes(&pmesh, &fec);
 
-   // The min and max bounds are represented as CG functions of the same order
-   // as the solution, thus having 1:1 dof correspondence inside each element.
-   H1_FECollection fec_bounds(max(order, 1), dim, BasisType::GaussLobatto);
-   ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
-
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
                               mono_type != MonolithicSolverType::None;
@@ -426,7 +421,7 @@ int main(int argc, char *argv[])
    k.Finalize(skip_zeros);
 
    // Store topological dof data.
-   DofInfo dofs(&pfes, &pfes_bounds);
+   DofInfo dofs(pfes);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
