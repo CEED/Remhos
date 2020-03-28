@@ -11,8 +11,8 @@ matrix:
           # sources:
           # - ubuntu-toolchain-r-test
           packages:
-            - gcc-7
-            - g++-7
+            # - gcc-7
+            # - g++-7
             # MPICH
             - mpich
             - libmpich-dev
