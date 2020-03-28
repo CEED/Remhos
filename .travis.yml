@@ -9,12 +9,12 @@ matrix:
       addons:
         apt:
           # sources:
-            # - ubuntu-toolchain-r-test
+          # - ubuntu-toolchain-r-test
           packages:
             - gcc-7
             - g++-7
-	    # MPICH
-	    - mpich
+            # MPICH
+            - mpich
             - libmpich-dev
             # OpenMPI
             # - libopenmpi-dev
