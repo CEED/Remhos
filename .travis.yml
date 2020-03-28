@@ -57,7 +57,7 @@ install:
       git clone --depth 1 https://github.com/mfem/mfem.git;
       cd mfem;
       make -j3 parallel;
-      cd miniapps/common
+      cd miniapps/common;
       make;
       cd ../..;
       make info;
