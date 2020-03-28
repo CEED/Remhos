@@ -61,6 +61,9 @@ install:
       git clone --depth 1 https://github.com/mfem/mfem.git;
       cd mfem;
       make -j3 parallel;
+      cd miniapps/common;
+      make;
+      cd ../..;
       make info;
       cd ..;
     else
@@ -77,7 +80,7 @@ branches:
 script:
    - make -j
    - cd autotest
-   - ./test.sh
+   - ./test.sh 2
    - diff --report-identical-files out_test.dat out_baseline.dat
 
 
