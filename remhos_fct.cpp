@@ -305,15 +305,12 @@ void get_z(double lambda, Vector &w, Vector &flux, Vector &zz)
 
 double get_lambda_times_sum_z(double lambda, Vector &w, Vector &flux)
 {
-   //double tol=1e-30;
    Vector lambda_times_z(w.Size());
    double lambda_times_sum_z=0.;
    for (int j=0; j<w.Size(); j++)
    {
-      //if (abs(flux(j)) > tol) //flux(j)!=0
       if (flux(j)!=0)
       {
-         //lambda_times_z(j) = lambda*w(j) + flux(j)*min(0.,1-lambda*w(j)/flux(j));
          lambda_times_z(j)
             = ((abs(flux(j)) >= lambda*abs(w(j))) ? lambda*w(j) : flux(j));
       }
@@ -337,7 +334,7 @@ double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
    double factor=1.;
 
    // compute starting F
-   F= delta - get_lambda_times_sum_z(lambda,w,flux);
+   F = delta - get_lambda_times_sum_z(lambda,w,flux);
    // check F at extremum of lambda {0,1}
    double F0 = delta-get_lambda_times_sum_z(0,w,flux);
    double F1 = delta-get_lambda_times_sum_z(1,w,flux);
@@ -361,28 +358,15 @@ double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
       do
       {
          factor*=2;
-         //look for other lambda to have opposite sign in F
+         // look for other lambda to have opposite sign in F
          lambdaLower = lambda/factor;
          lambdaUpper = factor*lambda;
          FLower=delta-get_lambda_times_sum_z(lambdaLower,w,flux);
          FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,flux);
-
-         //cout << "****************" << endl;
-         //cout << lambdaLower << ", " << lambdaUpper << endl;
-         //cout << FLower << ", " << FUpper << endl;
-         //cout << "delta: " << delta << endl;
-         //w.Print(cout,12);
-         //flux.Print(cout,12);
-         //cout << "****************" << endl;
       }
       while ((F*FLower > 0) && (F*FUpper > 0));
-      //cout << "******************************************" << endl;
 
-      //cout << lambdaLower << ", " << lambdaUpper << endl;
-      //cout << FLower << ", " << FUpper << endl;
-      //abort();
-
-      // Check if either of lambdaLower or lambdaUpper hit the solution
+      // check if either of lambdaLower or lambdaUpper hit the solution
       if (FLower==0)
       {
          get_z(lambdaLower, w, flux, zz);
@@ -395,7 +379,7 @@ double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
       }
       else
       {
-         // Get STARTING lower and upper bounds for lambda
+         // get STARTING lower and upper bounds for lambda
          if (F*FLower < 0) // F>0
          {
             lambdaUpper = lambda;
@@ -409,8 +393,6 @@ double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
          FLower=delta-get_lambda_times_sum_z(lambdaLower,w,flux);
          FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,flux);
 
-         //cout << FLower << ", " << FUpper << endl;
-         //abort();
          do
          {
             // compute new lambda and new F
@@ -428,7 +410,6 @@ double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
             }
          }
          while (abs(F)>tol);
-         //cout << "*******************************************" << endl;
 
          lambda = 0.5*(lambdaLower+lambdaUpper);
          get_z(lambda, w, flux, zz);
