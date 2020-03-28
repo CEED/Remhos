@@ -29,7 +29,6 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
-
 #include "mfem.hpp"
 #include "miniapps/common/mfem-common.hpp"
 #include <fstream>
