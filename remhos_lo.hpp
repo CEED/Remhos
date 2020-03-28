@@ -44,9 +44,9 @@ protected:
    const SparseMatrix &K;
    mutable SparseMatrix D;
    const Array<int> &K_smap;
-   const bool update_D;
-   Assembly &assembly;
    const Vector &M_lumped;
+   Assembly &assembly;
+   const bool update_D;
 
    void ComputeDiscreteUpwindMatrix() const;
 

@@ -627,7 +627,7 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
    : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
      VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     dofs(_dofs), subcell_mesh(submesh)
+     subcell_mesh(submesh), dofs(_dofs)
 {
    Mesh *mesh = fes->GetMesh();
    int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
@@ -963,7 +963,7 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
-   int k1, k2;
+   int k1 = 0, k2 = 0;
    const int kf1 = face_dof_id % face_dof1D_cnt;
    const int kf2 = face_dof_id / face_dof1D_cnt;
    switch (loc_face_id)

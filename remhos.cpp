@@ -74,7 +74,6 @@ class AdvectionOperator : public TimeDependentOperator
 private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
-   SparseMatrix &M, &K;
    ParBilinearForm &M_HO, &K_HO;
    Vector &lumpedM;
 
@@ -95,9 +94,9 @@ private:
    MonolithicSolver *mono_solver;
 
 public:
-   AdvectionOperator(BilinearForm &Mbf_, SparseMatrix &_M, BilinearForm &_ml,
+   AdvectionOperator(BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
-                     ParBilinearForm &Kbf_, SparseMatrix &_K,
+                     ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
@@ -713,7 +712,7 @@ int main(int argc, char *argv[])
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   AdvectionOperator adv(m, m.SpMat(), ml, lumpedM, k, k.SpMat(), M_HO, K_HO,
+   AdvectionOperator adv(m, ml, lumpedM, k, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -927,9 +926,9 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_, SparseMatrix &_M,
+AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
-                                     ParBilinearForm &Kbf_, SparseMatrix &_K,
+                                     ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
@@ -937,9 +936,9 @@ AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_, SparseMatrix &_M,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(_M.Size()), Mbf(Mbf_), Kbf(Kbf_), ml(_ml),
-   M(_M), K(_K), lumpedM(_lumpedM),
+   TimeDependentOperator(Mbf_.Size()), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
+   lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
