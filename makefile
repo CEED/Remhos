@@ -187,5 +187,5 @@ style:
 	fi
 
 tests:
-	@ cd autotest; ./test.sh;
+	@ cd autotest; ./test.sh 6;
 	diff --report-identical-files autotest/out_test.dat autotest/out_baseline.dat;
