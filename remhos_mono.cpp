@@ -122,21 +122,24 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
 
          if (smth_indicator)
          {
-            tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(dof_id));
+            tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+                                                                      dof_id));
             bndN = max( 0., tmp * (2.*u(dof_id) - assembly.dofs.xi_max(dof_id)) +
                         (1.-tmp) * assembly.dofs.xi_min(dof_id) );
             bndP = min( 1., tmp * (2.*u(dof_id) - assembly.dofs.xi_min(dof_id)) +
                         (1.-tmp) * assembly.dofs.xi_max(dof_id) );
 
-            if (assembly.dofs.xi_min(dof_id)+assembly.dofs.xi_max(dof_id) > 2.*u(dof_id) + eps)
+            if (assembly.dofs.xi_min(dof_id)+assembly.dofs.xi_max(dof_id) > 2.*u(
+                   dof_id) + eps)
             {
                alpha(j) = min(1., beta*(u(dof_id) - bndN) /
-                                  (assembly.dofs.xi_max(dof_id) - u(dof_id) + eps));
+                              (assembly.dofs.xi_max(dof_id) - u(dof_id) + eps));
             }
-            else if (assembly.dofs.xi_min(dof_id)+assembly.dofs.xi_max(dof_id) < 2.*u(dof_id) - eps)
+            else if (assembly.dofs.xi_min(dof_id)+assembly.dofs.xi_max(dof_id) < 2.*u(
+                        dof_id) - eps)
             {
                alpha(j) = min(1., beta*(bndP - u(dof_id)) /
-                                  (u(dof_id) - assembly.dofs.xi_min(dof_id) + eps));
+                              (u(dof_id) - assembly.dofs.xi_min(dof_id) + eps));
             }
          }
 
@@ -281,7 +284,8 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
             tmp = 0.;
             if (smth_indicator)
             {
-               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(dof_id));
+               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+                                                                         dof_id));
             }
             m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
                        * diff; // eq. (27) - (29)
@@ -293,15 +297,17 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
          for (int i = 0; i < ndof; i++)
          {
             dof_id = k*ndof+i;
-            alpha(i) = min(1., beta * scale(k) * min(assembly.dofs.xi_max(dof_id) - u(dof_id),
-                                                         u(dof_id) - assembly.dofs.xi_min(dof_id))
+            alpha(i) = min(1., beta * scale(k) * min(assembly.dofs.xi_max(dof_id) - u(
+                                                        dof_id),
+                                                     u(dof_id) - assembly.dofs.xi_min(dof_id))
                            / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
 
             if (smth_indicator)
             {
                alphaGlob = min( 1., beta * scale(k) * min(1. - u(dof_id), u(dof_id) - 0.)
                                 / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(dof_id));
+               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+                                                                         dof_id));
                alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
             }
 
@@ -338,6 +344,5 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
       }
    }
 }
-
 
 } // namespace mfem

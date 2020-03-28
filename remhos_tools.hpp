@@ -209,7 +209,6 @@ public:
                                        DenseMatrix &elmat);
 };
 
-
 } // namespace mfem
 
 #endif // MFEM_REMHOS_TOOLS

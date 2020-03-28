@@ -21,7 +21,6 @@ using namespace std;
 namespace mfem
 {
 
-
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,
@@ -175,8 +174,8 @@ void SmoothnessIndicator::ComputeSmoothnessIndicator(const Vector &u,
       for (int e = 0; e < N; e++)
       {
          si_vals_u(e) = min(1.0, param *
-                                 max(0., gmin(e)*gmax(e)) /
-                                 (max(gmin(e)*gmin(e),gmax(e)*gmax(e)) + eps) );
+                            max(0., gmin(e)*gmax(e)) /
+                            (max(gmin(e)*gmin(e),gmax(e)*gmax(e)) + eps) );
       }
    }
 }
@@ -185,8 +184,7 @@ void SmoothnessIndicator::UpdateBounds(int dof_id, double u_HO,
                                        const ParGridFunction &si_vals,
                                        double &u_min, double &u_max)
 {
-   const double tmp = (DG2CG(dof_id) < 0.0) ? 1.0
-                                            : si_vals(DG2CG(dof_id));
+   const double tmp = (DG2CG(dof_id) < 0.0) ? 1.0 : si_vals(DG2CG(dof_id));
    u_min = max(0.0, tmp * u_HO + (1.0 - tmp) * u_min);
    u_max = min(1.0, tmp * u_HO + (1.0 - tmp) * u_max);
 }
@@ -387,7 +385,7 @@ void DofInfo::ComputeBounds()
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+         maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -780,7 +778,7 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
       else
       {
          xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                                           : x_nd(nbr_dof_id - size_x);
+                     : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
    }
@@ -916,8 +914,8 @@ void PrecondConvectionIntegrator::AssembleElementMatrix(
 }
 
 void MixedConvectionIntegrator::AssembleElementMatrix2(
-      const FiniteElement &tr_el, const FiniteElement &te_el,
-      ElementTransformation &Trans, DenseMatrix &elmat)
+   const FiniteElement &tr_el, const FiniteElement &te_el,
+   ElementTransformation &Trans, DenseMatrix &elmat)
 {
    int tr_nd = tr_el.GetDof();
    int te_nd = te_el.GetDof();
@@ -968,247 +966,247 @@ int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
    const int kf2 = face_dof_id / face_dof1D_cnt;
    switch (loc_face_id)
    {
-      case 0://BOTTOM
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
+      case 0: // BOTTOM
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 1://{0, 3, 2, 1}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
+      case 1: // SOUTH
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 2://{1, 2, 3, 0}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
+      case 2: // EAST
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 3://{1, 0, 3, 2}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
+      case 3: // NORTH
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 4://{2, 3, 0, 1}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
+      case 4: // WEST
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 5://{2, 1, 0, 3}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
+      case 5: // TOP
+         switch (face_orient)
+         {
+            case 0: // {0, 1, 2, 3}
+               k1 = kf1;
+               k2 = kf2;
+               break;
+            case 1: // {0, 3, 2, 1}
+               k1 = kf2;
+               k2 = kf1;
+               break;
+            case 2: // {1, 2, 3, 0}
+               k1 = kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 3: // {1, 0, 3, 2}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = kf2;
+               break;
+            case 4: // {2, 3, 0, 1}
+               k1 = face_dof1D_cnt-1-kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            case 5: // {2, 1, 0, 3}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = face_dof1D_cnt-1-kf1;
+               break;
+            case 6: // {3, 0, 1, 2}
+               k1 = face_dof1D_cnt-1-kf2;
+               k2 = kf1;
+               break;
+            case 7: // {3, 2, 1, 0}
+               k1 = kf1;
+               k2 = face_dof1D_cnt-1-kf2;
+               break;
+            default:
+               mfem_error("This orientation does not exist in 3D");
+               break;
+         }
          break;
-      case 6://{3, 0, 1, 2}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   case 1://SOUTH
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      case 1://{0, 3, 2, 1}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 2://{1, 2, 3, 0}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 3://{1, 0, 3, 2}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
-         break;
-      case 4://{2, 3, 0, 1}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      case 5://{2, 1, 0, 3}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 6://{3, 0, 1, 2}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   case 2://EAST
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      case 1://{0, 3, 2, 1}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 2://{1, 2, 3, 0}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 3://{1, 0, 3, 2}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
-         break;
-      case 4://{2, 3, 0, 1}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      case 5://{2, 1, 0, 3}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 6://{3, 0, 1, 2}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   case 3://NORTH
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
-         break;
-      case 1://{0, 3, 2, 1}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 2://{1, 2, 3, 0}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 3://{1, 0, 3, 2}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      case 4://{2, 3, 0, 1}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      case 5://{2, 1, 0, 3}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
-         break;
-      case 6://{3, 0, 1, 2}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   case 4://WEST
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
-         break;
-      case 1://{0, 3, 2, 1}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 2://{1, 2, 3, 0}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 3://{1, 0, 3, 2}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      case 4://{2, 3, 0, 1}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      case 5://{2, 1, 0, 3}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
-         break;
-      case 6://{3, 0, 1, 2}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   case 5://TOP
-      switch (face_orient)
-      {
-      case 0://{0, 1, 2, 3}
-         k1 = kf1;
-         k2 = kf2;
-         break;
-      case 1://{0, 3, 2, 1}
-         k1 = kf2;
-         k2 = kf1;
-         break;
-      case 2://{1, 2, 3, 0}
-         k1 = kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 3://{1, 0, 3, 2}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = kf2;
-         break;
-      case 4://{2, 3, 0, 1}
-         k1 = face_dof1D_cnt-1-kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      case 5://{2, 1, 0, 3}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = face_dof1D_cnt-1-kf1;
-         break;
-      case 6://{3, 0, 1, 2}
-         k1 = face_dof1D_cnt-1-kf2;
-         k2 = kf1;
-         break;
-      case 7://{3, 2, 1, 0}
-         k1 = kf1;
-         k2 = face_dof1D_cnt-1-kf2;
-         break;
-      default:
-         mfem_error("This orientation does not exist in 3D");
-         break;
-      }
-      break;
-   default: MFEM_ABORT("This face_id does not exist in 3D");
+      default: MFEM_ABORT("This face_id does not exist in 3D");
    }
    return k1 + face_dof1D_cnt * k2;
 }
@@ -1231,7 +1229,7 @@ int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
             return face_dof1D_cnt - 1 - face_dof_id;
          }
       case 3: return GetLocalFaceDofIndex3D(loc_face_id, face_orient,
-                                            face_dof_id, face_dof1D_cnt);
+                                               face_dof_id, face_dof1D_cnt);
       default: MFEM_ABORT("Dimension too high!"); return 0;
    }
 }
@@ -1269,44 +1267,44 @@ void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
             int o(0);
             switch (bdrID)
             {
-            case 0:
-               for (int i = 0; i < (p+1)*(p+1); i++)
-               {
-                  dofs(o++,bdrID) = i;
-               }
-               break;
-            case 1:
-               for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
-                  for (int j = 0; j < p+1; j++)
+               case 0:
+                  for (int i = 0; i < (p+1)*(p+1); i++)
                   {
-                     dofs(o++,bdrID) = i+j;
+                     dofs(o++,bdrID) = i;
                   }
-               break;
-            case 2:
-               for (int i = p; i < (p+1)*(p+1)*(p+1); i+=p+1)
-               {
-                  dofs(o++,bdrID) = i;
-               }
-               break;
-            case 3:
-               for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
-                  for (int j = p*(p+1); j < (p+1)*(p+1); j++)
+                  break;
+               case 1:
+                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
+                     for (int j = 0; j < p+1; j++)
+                     {
+                        dofs(o++,bdrID) = i+j;
+                     }
+                  break;
+               case 2:
+                  for (int i = p; i < (p+1)*(p+1)*(p+1); i+=p+1)
                   {
-                     dofs(o++,bdrID) = i+j;
+                     dofs(o++,bdrID) = i;
                   }
-               break;
-            case 4:
-               for (int i = 0; i <= (p+1)*((p+1)*(p+1)-1); i+=p+1)
-               {
-                  dofs(o++,bdrID) = i;
-               }
-               break;
-            case 5:
-               for (int i = p*(p+1)*(p+1); i < (p+1)*(p+1)*(p+1); i++)
-               {
-                  dofs(o++,bdrID) = i;
-               }
-               break;
+                  break;
+               case 3:
+                  for (int i = 0; i <= p*(p+1)*(p+1); i+=(p+1)*(p+1))
+                     for (int j = p*(p+1); j < (p+1)*(p+1); j++)
+                     {
+                        dofs(o++,bdrID) = i+j;
+                     }
+                  break;
+               case 4:
+                  for (int i = 0; i <= (p+1)*((p+1)*(p+1)-1); i+=p+1)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
+               case 5:
+                  for (int i = p*(p+1)*(p+1); i < (p+1)*(p+1)*(p+1); i++)
+                  {
+                     dofs(o++,bdrID) = i;
+                  }
+                  break;
             }
          }
          break;

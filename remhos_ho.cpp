@@ -111,7 +111,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,
                                  ParBilinearForm &Mbf, ParBilinearForm &Kbf,
                                  Vector &Mlump, Assembly &a)
-  : HOSolver(space), M(Mbf), K(Kbf), M_lumped(Mlump), assembly(a) { }
+   : HOSolver(space), M(Mbf), K(Kbf), M_lumped(Mlump), assembly(a) { }
 
 void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {

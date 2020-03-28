@@ -28,7 +28,7 @@
 // simulations.
 //
 // Sample runs: see README.md, section 'Verification of Results'.
-//
+
 
 #include "mfem.hpp"
 #include "miniapps/common/mfem-common.hpp"
@@ -45,7 +45,8 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec,
-                               ResDist, ResDistSubcell};
+                         ResDist, ResDistSubcell
+                        };
 enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
@@ -324,8 +325,8 @@ int main(int argc, char *argv[])
    }
 
    const bool use_subcell_RD =
-         ( lo_type   == LOSolverType::ResDistSubcell ||
-           mono_type == MonolithicSolverType::ResDistMonoSubcell );
+      ( lo_type   == LOSolverType::ResDistSubcell ||
+        mono_type == MonolithicSolverType::ResDistMonoSubcell );
 
    if (use_subcell_RD && order==1)
    { MFEM_ABORT("Subcell schemes are not applicable to linear FE."); }
@@ -445,12 +446,12 @@ int main(int argc, char *argv[])
       if (exec_mode == 0)
       {
          lom.pk->AddDomainIntegrator(
-                  new PrecondConvectionIntegrator(velocity, -1.0) );
+            new PrecondConvectionIntegrator(velocity, -1.0) );
       }
       else if (exec_mode == 1)
       {
          lom.pk->AddDomainIntegrator(
-                  new PrecondConvectionIntegrator(v_coef) );
+            new PrecondConvectionIntegrator(v_coef) );
       }
       lom.pk->Assemble(skip_zeros);
       lom.pk->Finalize(skip_zeros);
@@ -468,7 +469,7 @@ int main(int argc, char *argv[])
 
    // Face integration rule.
    const FaceElementTransformations *ft =
-         pmesh.GetFaceElementTransformations(0);
+      pmesh.GetFaceElementTransformations(0);
    const int el_order = pfes.GetFE(0)->GetOrder();
    int ft_order = ft->Elem1->OrderW() + 2 * el_order;
    if (pfes.GetFE(0)->Space() == FunctionSpace::Pk) { ft_order++; }
@@ -652,7 +653,7 @@ int main(int argc, char *argv[])
    u.SaveAsOne(sltn);
 
    // Create data collection for solution output: either VisItDataCollection for
-   // ascii data files, or SidreDataCollection for binary data files.
+   // ASCII data files, or SidreDataCollection for binary data files.
    DataCollection *dc = NULL;
    if (visit)
    {
@@ -727,7 +728,7 @@ int main(int argc, char *argv[])
    {
       adv.SetRemapStartPos(x0, x0_sub);
 
-      // For remap, the pseudotime always evolves from 0 to 1.
+      // For remap, the pseudo-time always evolves from 0 to 1.
       t_final = 1.0;
    }
 
@@ -1109,7 +1110,6 @@ void velocity_function(const Vector &x, Vector &v)
       case 11:
       {
          // Gresho deformation used for mesh motion in remap tests.
-
          const double r = sqrt(x(0)*x(0) + x(1)*x(1));
          if (r < 0.2)
          {

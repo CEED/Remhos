@@ -13,10 +13,3 @@ ln -s metis-4.0.3 metis-4.0 &&
 git clone --recursive https://github.com/mfem/mfem.git &&
 cd mfem && make parallel -j 3
 cd ../Remhos && make -j 3
-
-
-
-
-
-    
-    

@@ -6,6 +6,7 @@
 
                   High-order Remap Miniapp
 
+[![Build Status](https://travis-ci.org/CEED/Remhos.svg?branch=master)](https://travis-ci.org/CEED/Remhos)
 
 ## Purpose
 

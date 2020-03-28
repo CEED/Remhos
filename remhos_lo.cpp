@@ -205,11 +205,11 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
                const int loc_id = assembly.dofs.Sub2Ind(m, i);
                dof_id = k*ndof + loc_id;
                nodalWeightsP(loc_id) += fluctSubcellP(m)
-                                     * ((xMaxSubcell(m) - u(dof_id))
-                                        / sumWeightsSubcellP(m)); // eq. (58)
+                                        * ((xMaxSubcell(m) - u(dof_id))
+                                           / sumWeightsSubcellP(m)); // eq. (58)
                nodalWeightsN(loc_id) += fluctSubcellN(m)
-                                     * ((xMinSubcell(m) - u(dof_id))
-                                        / sumWeightsSubcellN(m)); // eq. (59)
+                                        * ((xMinSubcell(m) - u(dof_id))
+                                           / sumWeightsSubcellN(m)); // eq. (59)
             }
          }
       }
