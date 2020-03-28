@@ -8,13 +8,17 @@ matrix:
       compiler: gcc
       addons:
         apt:
-          sources:
-            - ubuntu-toolchain-r-test
+          # sources:
+            # - ubuntu-toolchain-r-test
           packages:
             - gcc-7
             - g++-7
-            - libopenmpi-dev
-            - openmpi-bin
+	    # MPICH
+	    - mpich
+            - libmpich-dev
+            # OpenMPI
+            # - libopenmpi-dev
+            # - openmpi-bin
       before_cache:
         - cd $TRAVIS_BUILD_DIR/../metis-4.0;
           mv libmetis.a ..; rm -rf *; mv ../libmetis.a .
@@ -58,10 +62,10 @@ install:
       cd mfem;
       make -j3 parallel;
       make info;
-        cd ..;
-     else
-        echo "Reusing cached mfem";
-     fi;
+      cd ..;
+    else
+      echo "Reusing cached mfem";
+    fi;
 
    # Back to Remhos
   - cd $REMHOS_DIR
