@@ -19,7 +19,7 @@ for method in "${methods[@]}"; do
   echo -e '\n'"--- Method "$method >> $file
 
   echo -e '\n'"- Remap pacman nonper-struct-2D" >> $file
-  echo -e $vis_command" -m ./data/square01_quad.mesh -p 14 -rs 2 -dt 0.001 -tf 0.75 "$method >> $file
+  echo -e $vis_command" -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 "$method >> $file
   $command -m ../data/square01_quad.mesh -p 14 -rs 2 -dt 0.001 -tf 0.75 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Remap bump nonper-struct-3D" >> $file
