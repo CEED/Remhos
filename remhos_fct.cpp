@@ -283,13 +283,14 @@ void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
    }
 }
 
-void get_z(double lambda, Vector &w, Vector &flux, Vector &zz)
+void get_z(double lambda, const Vector &w, const Vector &flux, Vector &zz)
 {
-   if (lambda==0)
+   if (lambda == 0.0)
    {
-      zz = 0.;
+      zz = 0.0;
    }
    else
+   {
       for (int j=0; j<w.Size(); j++)
       {
          if (flux(j)!=0)
@@ -301,121 +302,115 @@ void get_z(double lambda, Vector &w, Vector &flux, Vector &zz)
             zz(j) = 0;
          }
       }
+   }
 }
 
-double get_lambda_times_sum_z(double lambda, Vector &w, Vector &flux)
+double get_lambda_times_sum_z(double lambda,
+                              const Vector &w, const Vector &fluxL)
 {
-   Vector lambda_times_z(w.Size());
-   double lambda_times_sum_z=0.;
+   double lambda_times_z;
+   double lambda_times_sum_z = 0.0;
    for (int j=0; j<w.Size(); j++)
    {
-      if (flux(j)!=0)
-      {
-         lambda_times_z(j)
-            = ((abs(flux(j)) >= lambda*abs(w(j))) ? lambda*w(j) : flux(j));
-      }
-      else
-      {
-         lambda_times_z(j) = 0;
-      }
-      lambda_times_sum_z += lambda_times_z(j);
+      // In the second case, lambda * w(j) is set to fluxL(j).
+      lambda_times_z = (abs(fluxL(j)) >= lambda*abs(w(j)))
+                       ? lambda * w(j) : fluxL(j);
+
+      lambda_times_sum_z += lambda_times_z;
    }
    return lambda_times_sum_z;
 }
 
-double get_lambda(double lambda, double delta, Vector &w, Vector &flux,
-                  Vector &zz)
+double get_lambda(double delta, const Vector &w,
+                  const Vector &fluxL, Vector &zz)
 {
    // solve nonlinearity F(lambda)=0
-   double F=0.;
-   double tol=1e-14;
+   double tol=1e-15;
    double lambdaLower=0., lambdaUpper = 0.;
    double FLower=0., FUpper=0.;
    double factor=1.;
 
    // compute starting F
-   F = delta - get_lambda_times_sum_z(lambda,w,flux);
-   // check F at extremum of lambda {0,1}
-   double F0 = delta-get_lambda_times_sum_z(0,w,flux);
-   double F1 = delta-get_lambda_times_sum_z(1,w,flux);
-   if (abs(F)<=tol)
+   double lambda = 1.0;
+   double F = delta - get_lambda_times_sum_z(lambda, w, fluxL);
+   // check F at the extrema of lambda (0 and 1).
+   double F0 = delta-get_lambda_times_sum_z(0.0, w, fluxL);
+   double F1 = delta-get_lambda_times_sum_z(1.0, w, fluxL);
+   if (abs(F) <= tol)
    {
-      get_z(lambda, w, flux, zz);
+      get_z(lambda, w, fluxL, zz);
       return lambda;
    }
    else if (abs(F0)<=tol)
    {
-      get_z(0,w,flux,zz);
+      get_z(0.0, w, fluxL,zz);
       return 0.;
    }
    else if (abs(F1)<=tol)
    {
-      get_z(1,w,flux,zz);
+      get_z(1,w,fluxL,zz);
       return 1.;
    }
-   else // solve non-linearity
+
+   // solve non-linearity
+   do
    {
-      do
+      factor*=2;
+      // look for other lambda to have opposite sign in F
+      lambdaLower = lambda/factor;
+      lambdaUpper = factor*lambda;
+      FLower=delta-get_lambda_times_sum_z(lambdaLower,w,fluxL);
+      FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,fluxL);
+   }
+   while ((F*FLower > 0) && (F*FUpper > 0));
+
+   // check if either of lambdaLower or lambdaUpper hit the solution
+   if (FLower==0)
+   {
+      get_z(lambdaLower, w, fluxL, zz);
+      return lambdaLower;
+   }
+   else if (FUpper==0)
+   {
+      get_z(lambdaUpper, w, fluxL, zz);
+      return lambdaUpper;
+   }
+
+   // get STARTING lower and upper bounds for lambda
+   if (F*FLower < 0) // F>0
+   {
+      lambdaUpper = lambda;
+   }
+   else // F<0
+   {
+      lambdaLower = lambda;
+   }
+
+   // get STARTING lower and upper bounds on F
+   FLower = delta - get_lambda_times_sum_z(lambdaLower,w,fluxL);
+   FUpper = delta - get_lambda_times_sum_z(lambdaUpper,w,fluxL);
+
+   do
+   {
+      // compute new lambda and new F
+      lambda = 0.5*(lambdaLower+lambdaUpper);
+      F = delta - get_lambda_times_sum_z(lambda,w,fluxL);
+      if (F*FLower < 0) // F >= 0
       {
-         factor*=2;
-         // look for other lambda to have opposite sign in F
-         lambdaLower = lambda/factor;
-         lambdaUpper = factor*lambda;
-         FLower=delta-get_lambda_times_sum_z(lambdaLower,w,flux);
-         FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,flux);
+         lambdaUpper = lambda;
+         FUpper = F;
       }
-      while ((F*FLower > 0) && (F*FUpper > 0));
-
-      // check if either of lambdaLower or lambdaUpper hit the solution
-      if (FLower==0)
+      else // F <= 0
       {
-         get_z(lambdaLower, w, flux, zz);
-         return lambdaLower;
-      }
-      else if (FUpper==0)
-      {
-         get_z(lambdaUpper, w, flux, zz);
-         return lambdaUpper;
-      }
-      else
-      {
-         // get STARTING lower and upper bounds for lambda
-         if (F*FLower < 0) // F>0
-         {
-            lambdaUpper = lambda;
-         }
-         else // F<0
-         {
-            lambdaLower = lambda;
-         }
-
-         // get STARTING lower and upper bounds on F
-         FLower=delta-get_lambda_times_sum_z(lambdaLower,w,flux);
-         FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,flux);
-
-         do
-         {
-            // compute new lambda and new F
-            lambda = 0.5*(lambdaLower+lambdaUpper);
-            F = delta - get_lambda_times_sum_z(lambda,w,flux);
-            if (F*FLower < 0) // F >= 0
-            {
-               lambdaUpper = lambda;
-               FUpper = F;
-            }
-            else // F <= 0
-            {
-               lambdaLower = lambda;
-               FLower = F;
-            }
-         }
-         while (abs(F)>tol);
-
-         lambda = 0.5*(lambdaLower+lambdaUpper);
-         get_z(lambda, w, flux, zz);
-         return lambda;
+         lambdaLower = lambda;
+         FLower = F;
       }
    }
+   while (abs(F)>tol);
+
+   lambda = 0.5*(lambdaLower+lambdaUpper);
+   get_z(lambda, w, fluxL, zz);
+   return lambda;
 }
 
 void NonlinearPenaltySolver::CorrectFlux(Vector &fluxL, Vector &fluxH,
@@ -424,22 +419,22 @@ void NonlinearPenaltySolver::CorrectFlux(Vector &fluxL, Vector &fluxH,
    // This consider any definition of wi. If a violation on MPP is created,
    // then wi is s.t. fi=0.
    // The idea is to relax the penalization wi in favor of MPP
-   int num_cells = pfes.GetNE();
-   int xd = pfes.GetFE(0)->GetDof();
+   const int num_cells = pfes.GetNE();
+   const int xd = pfes.GetFE(0)->GetDof();
 
    Array<int> ldofs;
-   Vector flux_z(xd), fluxH_z(xd), flux_correction_z(xd);
+   Vector fluxL_z(xd), fluxH_z(xd), flux_correction_z(xd);
    for (int i = 0; i < num_cells; i++)
    {
       pfes.GetElementDofs(i, ldofs);
-      fluxL.GetSubVector(ldofs, flux_z);
+      fluxL.GetSubVector(ldofs, fluxL_z);
       fluxH.GetSubVector(ldofs, fluxH_z);
 
-      double fp = 0.0, fn= 0.0;
+      double fp = 0.0, fn = 0.0;
       for (int j = 0; j < xd; j++)
       {
-         if (flux_z(j) >= 0.0) { fp += flux_z(j); }
-         else                  { fn += flux_z(j); }
+         if (fluxL_z(j) >= 0.0) { fp += fluxL_z(j); }
+         else                   { fn += fluxL_z(j); }
       }
 
       double delta = fp + fn;
@@ -451,29 +446,29 @@ void NonlinearPenaltySolver::CorrectFlux(Vector &fluxL, Vector &fluxH,
          continue;
       }
 
-      Vector w(xd), zz(xd);
-
-      const double eps = pfes.GetMesh()->GetElementSize(0,0) / pfes.GetOrder(0);
-
       // compute penalization terms wi's as desired
+      Vector w(xd);
+      const double eps = pfes.GetMesh()->GetElementSize(0,0) / pfes.GetOrder(0);
       for (int j = 0; j < xd; j++)
       {
          if (delta > 0.0)
          {
-            w(j) = (flux_z(j) > 0.0) ? eps * abs(flux_z(j)) +
-                   abs(get_max_on_cellNi(fluxH_z))
+            w(j) = (fluxL_z(j) > 0.0)
+                   ? eps * abs(fluxL_z(j)) + abs(get_max_on_cellNi(fluxH_z))
                    : 0.0;
          }
          else
          {
-            w(j) = (flux_z(j) < 0.0) ? - eps * abs(flux_z(j))
-                   - abs(get_max_on_cellNi(fluxH_z))
+            w(j) = (fluxL_z(j) < 0.0)
+                   ? - eps * abs(fluxL_z(j)) - abs(get_max_on_cellNi(fluxH_z))
                    : 0.0;
          }
       }
 
       // compute lambda
-      double lambda = get_lambda(1.0, delta, w, flux_z, zz);
+      Vector zz(xd);
+      double lambda = get_lambda(delta, w, fluxL_z, zz);
+
       // compute flux correction
       for (int j = 0; j < xd; j++)
       {
