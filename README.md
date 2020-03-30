@@ -157,14 +157,12 @@ Build METIS:
 ~> ln -s metis-4.0.3 metis-4.0
 ```
 
-Clone and build the parallel version of MFEM, together with it's *common* tools:
+Clone and build the parallel version of MFEM:
 ```sh
 ~> git clone https://github.com/mfem/mfem.git ./mfem
 ~> cd mfem/
 ~/mfem> make parallel -j
-~/mfem> cd miniapps/common/
-~/mfem/miniapps/common> make
-~/mfem/miniapps/common> cd ../../../
+~/mfem> cd ..
 ```
 The above uses the `master` branch of MFEM. See the [MFEM
 building page](http://mfem.org/building/) for additional details.
