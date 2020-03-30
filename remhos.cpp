@@ -167,7 +167,9 @@ int main(int argc, char *argv[])
    args.AddOption((int*)(&lo_type), "-lo", "--lo-type",
                   "Low-Order Solver: 0 - No LO solver,\n\t"
                   "                  1 - Discrete Upwind,\n\t"
-                  "                  2 - Residual Distribution.");
+                  "                  2 - Preconditioned Discrete Upwind,\n\t"
+                  "                  3 - Residual Distribution,\n\t"
+                  "                  4 - Subcell Residual Distribution.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -175,7 +177,8 @@ int main(int argc, char *argv[])
                   "                 3 - Local clip + nonlinear penalization.");
    args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
-                  "                   1 - Residual distribution.");
+                  "                   1 - Residual Distribution,\n\t"
+                  "                   2 - Subcell Residual Distribution.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
