@@ -39,7 +39,7 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    Array<int> ess_tdof_list;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      MFEM_ABORT("TODO: add PA for DG.");
+      MFEM_ABORT("PA for DG is not yet implemented.");
 
       K.Mult(u, rhs);
 
@@ -80,7 +80,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    HypreParMatrix *K_mat = NULL;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      MFEM_ABORT("TODO: add PA for DG.");
+      MFEM_ABORT("PA for DG is not yet implemented.");
       K.Mult(u, rhs);
    }
    else

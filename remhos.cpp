@@ -369,7 +369,6 @@ int main(int argc, char *argv[])
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
-   // TODO: decide what to do with assembly.LinearFluxLumping.
    if (ho_type == HOSolverType::CG ||
        ho_type == HOSolverType::LocalInverse ||
        fct_type == FCTSolverType::FluxBased)
@@ -753,19 +752,25 @@ int main(int argc, char *argv[])
          GetMinMax(u, umin_new, umax_new);
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
-            MFEM_VERIFY(umin_new > umin - 1e-12,
-                        "Undershoot of " << umin - umin_new);
-            MFEM_VERIFY(umax_new < umax + 1e-12,
-                        "Overshoot of " << umax_new - umax);
+            if (myid == 0)
+            {
+               MFEM_VERIFY(umin_new > umin - 1e-12,
+                           "Undershoot of " << umin - umin_new);
+               MFEM_VERIFY(umax_new < umax + 1e-12,
+                           "Overshoot of " << umax_new - umax);
+            }
             umin = umin_new;
             umax = umax_new;
          }
          else
          {
-            MFEM_VERIFY(umin_new > 0.0 - 1e-12,
-                        "Undershoot of " << 0.0 - umin_new);
-            MFEM_VERIFY(umax_new < 1.0 + 1e-12,
-                        "Overshoot of " << umax_new - 1.0);
+            if (myid == 0)
+            {
+               MFEM_VERIFY(umin_new > 0.0 - 1e-12,
+                           "Undershoot of " << 0.0 - umin_new);
+               MFEM_VERIFY(umax_new < 1.0 + 1e-12,
+                           "Overshoot of " << umax_new - 1.0);
+            }
          }
       }
 
@@ -963,7 +968,6 @@ void AdvectionOperator::Mult(const Vector &x, Vector &y) const
       Mbf.GetFES()->GetMesh()->DeleteGeometricFactors();
 
       // Reassemble on the new mesh. Element contributions.
-      // TODO: remove these.
       // Currently needed to have the sparse matrices used by the LO methods.
       Mbf.BilinearForm::operator=(0.0);
       Mbf.Assemble();
