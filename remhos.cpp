@@ -30,7 +30,6 @@
 // Sample runs: see README.md, section 'Verification of Results'.
 
 #include "mfem.hpp"
-#include "miniapps/common/mfem-common.hpp"
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
@@ -682,8 +681,7 @@ int main(int argc, char *argv[])
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 350, Wh = 350; // window size
-      common::VisualizeField(sout, vishost, visport, u,
-                             "Solution", Wx, Wy, Ww, Wh);
+      VisualizeField(sout, vishost, visport, u, "Solution", Wx, Wy, Ww, Wh);
    }
 
    // check for conservation
@@ -815,8 +813,8 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
-            common::VisualizeField(sout, vishost, visport,
-                                   u, "Solution", Wx, Wy, Ww, Wh);
+            VisualizeField(sout, vishost, visport, u,
+                           "Solution", Wx, Wy, Ww, Wh);
          }
          if (visit)
          {

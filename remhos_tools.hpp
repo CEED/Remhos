@@ -38,6 +38,11 @@ Array<int> SparseMatrix_Build_smap(const SparseMatrix &A);
 void ComputeDiscreteUpwindingMatrix(const SparseMatrix &K,
                                     Array<int> smap, SparseMatrix& D);
 
+void VisualizeField(socketstream &sock, const char *vishost, int visport,
+                    ParGridFunction &gf, const char *title,
+                    int x, int y, int w, int h,
+                    const char *keys = NULL, bool vec = false);
+
 class DofInfo;
 
 class SmoothnessIndicator

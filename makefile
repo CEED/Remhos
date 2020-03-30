@@ -72,9 +72,6 @@ ifeq (,$(filter help clean distclean style,$(MAKECMDGOALS)))
    -include $(CONFIG_MK)
 endif
 
-MFEM_LIBS += -L$(MFEM_DIR)/miniapps/common -lmfem-common -Wl,-rpath,$(abspath\
-   $(MFEM_DIR)/miniapps/common)
-
 CXX = $(MFEM_CXX)
 CPPFLAGS = $(MFEM_CPPFLAGS)
 CXXFLAGS = $(MFEM_CXXFLAGS)
