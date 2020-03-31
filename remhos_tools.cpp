@@ -412,10 +412,9 @@ void DofInfo::FillNeighborDofs()
    // Use the first mesh element as indicator.
    const FiniteElement &dummy = *pfes.GetFE(0);
    const int dim = pmesh->Dimension();
-   int i, j, k, nbr, ne = pmesh->GetNE();
+   int i, j, k, ne = pmesh->GetNE();
    int nd = dummy.GetDof(), p = dummy.GetOrder();
    Array <int> bdrs, orientation;
-   FaceElementTransformations *Trans;
 
    pmesh->ExchangeFaceNbrData();
    Table *face_to_el = pmesh->GetFaceToAllElementTable();
@@ -470,8 +469,6 @@ void DofInfo::FillNeighborDofs()
             }
             nbr_id = (el1_id == k) ? el2_id : el1_id;
 
-            Trans = pmesh->GetFaceElementTransformations(bdrs[i]);
-            nbr = Trans->Elem1No == k ? Trans->Elem2No : Trans->Elem1No;
             NbrDof(k,i,0) = nbr_id*nd + BdrDofs(0, (i+1) % 2);
          }
       }

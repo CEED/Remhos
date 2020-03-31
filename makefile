@@ -122,7 +122,7 @@ HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp remho
 
 remhos: override MFEM_DIR = $(MFEM_DIR1)
 remhos:	$(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
-	$(CCC) -o remhos $(OBJECT_FILES) $(LIBS)
+	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
 
 all: remhos
 
