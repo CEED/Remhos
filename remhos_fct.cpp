@@ -285,23 +285,9 @@ void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
 
 void get_z(double lambda, const Vector &w, const Vector &flux, Vector &zz)
 {
-   if (lambda == 0.0)
+   for (int j=0; j<w.Size(); j++)
    {
-      zz = 0.0;
-   }
-   else
-   {
-      for (int j=0; j<w.Size(); j++)
-      {
-         if (flux(j)!=0)
-         {
-            zz(j) = (abs(flux(j)) >= lambda*abs(w(j))) ? w(j) : flux(j)/lambda;
-         }
-         else
-         {
-            zz(j) = 0;
-         }
-      }
+      zz(j) = (abs(flux(j)) >= lambda*abs(w(j))) ? lambda * w(j) : flux(j);
    }
 }
 
@@ -321,67 +307,56 @@ double get_lambda_times_sum_z(double lambda,
    return lambda_times_sum_z;
 }
 
-double get_lambda(double delta, const Vector &w,
-                  const Vector &fluxL, Vector &zz)
+void get_lambda(double delta, const Vector &w,
+                const Vector &fluxL, Vector &zz)
 {
    // solve nonlinearity F(lambda)=0
    double tol=1e-15;
    double lambdaLower=0., lambdaUpper = 0.;
    double FLower=0., FUpper=0.;
-   double factor=1.;
 
-   // compute starting F
+   // compute starting F and check F at the min (lambda = 0).
    double lambda = 1.0;
    double F = delta - get_lambda_times_sum_z(lambda, w, fluxL);
-   // check F at the extrema of lambda (0 and 1).
    double F0 = delta-get_lambda_times_sum_z(0.0, w, fluxL);
-   double F1 = delta-get_lambda_times_sum_z(1.0, w, fluxL);
    if (abs(F) <= tol)
    {
       get_z(lambda, w, fluxL, zz);
-      return lambda;
    }
    else if (abs(F0)<=tol)
    {
-      get_z(0.0, w, fluxL,zz);
-      return 0.;
-   }
-   else if (abs(F1)<=tol)
-   {
-      get_z(1,w,fluxL,zz);
-      return 1.;
+      get_z(0.0, w, fluxL, zz);
    }
 
    // solve non-linearity
+   // Get lambda values that give Fs on both sides of the zero.
+   double factor = 1.0;
    do
    {
-      factor*=2;
-      // look for other lambda to have opposite sign in F
+      factor *= 2.0;
       lambdaLower = lambda/factor;
       lambdaUpper = factor*lambda;
-      FLower=delta-get_lambda_times_sum_z(lambdaLower,w,fluxL);
-      FUpper=delta-get_lambda_times_sum_z(lambdaUpper,w,fluxL);
+      FLower = delta - get_lambda_times_sum_z(lambdaLower,w,fluxL);
+      FUpper = delta - get_lambda_times_sum_z(lambdaUpper,w,fluxL);
    }
-   while ((F*FLower > 0) && (F*FUpper > 0));
+   while (F*FLower > 0 && F*FUpper > 0);
 
    // check if either of lambdaLower or lambdaUpper hit the solution
-   if (FLower==0)
+   if (FLower==0.0)
    {
       get_z(lambdaLower, w, fluxL, zz);
-      return lambdaLower;
    }
-   else if (FUpper==0)
+   else if (FUpper==0.0)
    {
       get_z(lambdaUpper, w, fluxL, zz);
-      return lambdaUpper;
    }
 
    // get STARTING lower and upper bounds for lambda
-   if (F*FLower < 0) // F>0
+   if (F*FLower < 0)
    {
       lambdaUpper = lambda;
    }
-   else // F<0
+   else
    {
       lambdaLower = lambda;
    }
@@ -395,12 +370,12 @@ double get_lambda(double delta, const Vector &w,
       // compute new lambda and new F
       lambda = 0.5*(lambdaLower+lambdaUpper);
       F = delta - get_lambda_times_sum_z(lambda,w,fluxL);
-      if (F*FLower < 0) // F >= 0
+      if (F*FLower < 0)
       {
          lambdaUpper = lambda;
          FUpper = F;
       }
-      else // F <= 0
+      else
       {
          lambdaLower = lambda;
          FLower = F;
@@ -410,7 +385,6 @@ double get_lambda(double delta, const Vector &w,
 
    lambda = 0.5*(lambdaLower+lambdaUpper);
    get_z(lambda, w, fluxL, zz);
-   return lambda;
 }
 
 void NonlinearPenaltySolver::CorrectFlux(Vector &fluxL, Vector &fluxH,
@@ -465,15 +439,9 @@ void NonlinearPenaltySolver::CorrectFlux(Vector &fluxL, Vector &fluxH,
          }
       }
 
-      // compute lambda
-      Vector zz(xd);
-      double lambda = get_lambda(delta, w, fluxL_z, zz);
-
-      // compute flux correction
-      for (int j = 0; j < xd; j++)
-      {
-         flux_correction_z(j) = -lambda * zz(j);
-      }
+      // compute lambda and the flux correction.
+      get_lambda(delta, w, fluxL_z, flux_correction_z);
+      flux_correction_z.Neg();
 
       flux_fix.SetSubVector(ldofs, flux_correction_z);
    }
