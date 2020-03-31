@@ -10,10 +10,10 @@
 
 ## Purpose
 
-**Remhos** (REMap High-Order Solver) is a miniapp that solves the pure
-advection equations that are used to perform discontinuous field interpolation
-(remap) as part of the Eulerian phase in Arbitrary-Lagrangian Eulerian (ALE)
-simulations.
+**Remhos** (REMap High-Order Solver) is a miniapp that solves the pure advection
+equations that are used to perform monotonic and conservative discontinuous
+field interpolation (remap) as part of the Eulerian phase in Arbitrary
+Lagrangian Eulerian (ALE) simulations.
 
 Remhos combines discretization methods described in the following articles:
 
