@@ -40,7 +40,7 @@ for method in "${methods[@]}"; do
 
   echo -e '\n'"- Transport bump nonper-unstruct-3D" >> $file
   echo -e $vis_command" -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 "$method >> $file
-  $command -m ../../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 $method | grep -e 'Final' -e 'value'>> $file
+  $command -m ../data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 $method | grep -e 'Final' -e 'value'>> $file
 
 done
 
