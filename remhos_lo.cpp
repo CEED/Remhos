@@ -112,10 +112,10 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    Vector alpha(ndof); alpha = 0.0;
    Vector z(u.Size());
 
+   const double gamma = 1.0;
    int dof_id;
    double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-          sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct,
-          gamma = 10., eps = 1.E-15;
+          sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct, eps = 1.E-15;
    Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
           fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
 

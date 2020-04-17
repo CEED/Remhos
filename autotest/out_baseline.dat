@@ -40,37 +40,37 @@ Max value:  0.9999889315
 
 - Remap pacman nonper-struct-2D
 remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 4 -fct 2
-Final mass: 0.08479547294
-Max value:  0.7703009569
+Final mass: 0.08479547282
+Max value:  0.7581364675
 
 - Remap bump nonper-struct-3D
 remhos --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 4 -fct 2
-Final mass: 0.1197300277
-Max value:  0.9998318518
+Final mass: 0.1197299801
+Max value:  0.9997499683
 
 - Transport per-1D
 remhos --verify-bounds -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.001 -tf 1 -ho 3 -lo 4 -fct 2
 Final mass: 0.1401242317
-Max value:  0.985690468
+Max value:  0.9856875902
 
 - Transport bump per-unstruct-2D
 remhos --verify-bounds -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 -ho 3 -lo 4 -fct 2
 Final mass: 0.3888354875
-Max value:  0.9850341879
+Max value:  0.9850024108
 
 - Transport balls-jacks per-struct-2D
 remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 -ho 3 -lo 4 -fct 2
 Final mass: 0.1623263888
-Max value:  0.7159628909
+Max value:  0.7225782245
 
 - Transport bump per-struct-3D
 remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 3 -lo 4 -fct 2
 Final mass: 0.9607429525
-Max value:  0.9352380081
+Max value:  0.9355614911
 
 - Transport bump nonper-unstruct-3D
 remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 3 -lo 4 -fct 2
-Final mass: 0.8150727363
+Final mass: 0.8151253562
 Max value:  0.9999889316
 
 --- Method -ho 3 -lo 1 -fct 1
