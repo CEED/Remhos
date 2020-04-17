@@ -966,7 +966,7 @@ void AdvectionOperator::Mult(const Vector &x, Vector &y) const
          add(start_submesh_pos, t, submesh_vel, *submesh_pos);
       }
       // Reset precomputed geometric data.
-      Mbf.GetFES()->GetMesh()->DeleteGeometricFactors();
+      Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
 
       // Reassemble on the new mesh. Element contributions.
       // Currently needed to have the sparse matrices used by the LO methods.
