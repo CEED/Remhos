@@ -27,14 +27,14 @@ Final mass: 0.1623263888
 Max value:  0.7742737139
 
 - Transport bump per-struct-3D
-remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 1 -lo 2 -fct 2
+remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 1 -lo 2 -fct 2
 Final mass: 0.9607429525
-Max value:  0.97314009
+Max value:  0.9724537077
 
 - Transport bump nonper-unstruct-3D
-remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 1 -lo 2 -fct 2
-Final mass: 0.8074988957
-Max value:  0.9999889315
+remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 -ho 1 -lo 2 -fct 2
+Final mass: 0.8075184062
+Max value:  0.9999889214
 
 --- Method -ho 3 -lo 4 -fct 2
 
@@ -64,14 +64,14 @@ Final mass: 0.1623263888
 Max value:  0.7145371968
 
 - Transport bump per-struct-3D
-remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 3 -lo 4 -fct 2
+remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 3 -lo 4 -fct 2
 Final mass: 0.9607429525
-Max value:  0.9355614911
+Max value:  0.9334903111
 
 - Transport bump nonper-unstruct-3D
-remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 3 -lo 4 -fct 2
-Final mass: 0.8151253562
-Max value:  0.9999889316
+remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 -ho 3 -lo 4 -fct 2
+Final mass: 0.8154100947
+Max value:  0.9999889312
 
 --- Method -ho 3 -lo 1 -fct 1
 
@@ -101,14 +101,14 @@ Final mass: 0.1623263888
 Max value:  0.787875182
 
 - Transport bump per-struct-3D
-remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 3 -lo 1 -fct 1
+remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 3 -lo 1 -fct 1
 Final mass: 0.9607429525
-Max value:  0.9989302971
+Max value:  0.9984668427
 
 - Transport bump nonper-unstruct-3D
-remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 3 -lo 1 -fct 1
-Final mass: 0.8142581776
-Max value:  0.9996750477
+remhos --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 -ho 3 -lo 1 -fct 1
+Final mass: 0.8142740272
+Max value:  0.9995192991
 
 --- Steady monolithic 2 2D
 remhos --verify-bounds -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2

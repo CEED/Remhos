@@ -4,7 +4,7 @@ file="out_test.dat"
 
 ntask=$1
 
-command="mpirun -np "$((ntask))" ../remhos -no-vis --verify-bounds"
+command="time mpirun -np "$((ntask))" ../remhos -no-vis --verify-bounds"
 vis_command="remhos --verify-bounds"
 
 methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
@@ -39,12 +39,12 @@ for method in "${methods[@]}"; do
   $command -m ../data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport bump per-struct-3D" >> $file
-  echo -e $vis_command" -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 "$method >> $file
-  $command -m ../data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 $method | grep -e 'Final' -e 'value'>> $file
+  echo -e $vis_command" -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 "$method >> $file
+  $command -m ../data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport bump nonper-unstruct-3D" >> $file
-  echo -e $vis_command" -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 "$method >> $file
-  $command -m ../data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 $method | grep -e 'Final' -e 'value'>> $file
+  echo -e $vis_command" -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 "$method >> $file
+  $command -m ../data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 $method | grep -e 'Final' -e 'value'>> $file
 
 done
 
