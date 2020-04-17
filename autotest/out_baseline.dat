@@ -22,9 +22,9 @@ Final mass: 0.3888354875
 Max value:  0.9854644631
 
 - Transport balls-jacks per-struct-2D
-remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 -ho 1 -lo 2 -fct 2
+remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 1 -lo 2 -fct 2
 Final mass: 0.1623263888
-Max value:  0.781191392
+Max value:  0.7742737139
 
 - Transport bump per-struct-3D
 remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 1 -lo 2 -fct 2
@@ -59,9 +59,9 @@ Final mass: 0.3888354875
 Max value:  0.9850024108
 
 - Transport balls-jacks per-struct-2D
-remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 -ho 3 -lo 4 -fct 2
+remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 3 -lo 4 -fct 2
 Final mass: 0.1623263888
-Max value:  0.7225782245
+Max value:  0.7145371968
 
 - Transport bump per-struct-3D
 remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 3 -lo 4 -fct 2
@@ -96,9 +96,9 @@ Final mass: 0.3888354875
 Max value:  0.9979069772
 
 - Transport balls-jacks per-struct-2D
-remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 -ho 3 -lo 1 -fct 1
+remhos --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 3 -lo 1 -fct 1
 Final mass: 0.1623263888
-Max value:  0.8160613141
+Max value:  0.787875182
 
 - Transport bump per-struct-3D
 remhos --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 -ho 3 -lo 1 -fct 1

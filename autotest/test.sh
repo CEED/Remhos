@@ -35,8 +35,8 @@ for method in "${methods[@]}"; do
   $command -m ../data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport balls-jacks per-struct-2D" >> $file
-  echo -e $vis_command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 "$method >> $file
-  $command -m ../data/periodic-square.mesh -p 5 -rs 3 -dt 0.0015 -tf 0.8 $method | grep -e 'Final' -e 'value'>> $file
+  echo -e $vis_command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 "$method >> $file
+  $command -m ../data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport bump per-struct-3D" >> $file
   echo -e $vis_command" -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.012 -tf 2 "$method >> $file
