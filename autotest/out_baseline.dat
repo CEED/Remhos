@@ -2,9 +2,9 @@
 --- Method -ho 1 -lo 2 -fct 2
 
 - Remap pacman nonper-struct-2D
-remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 -ho 1 -lo 2 -fct 2
-Final mass: 0.084795467
-Max value:  0.8223243807
+remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 1 -lo 2 -fct 2
+Final mass: 0.08479546635
+Max value:  0.8262756899
 
 - Remap bump nonper-struct-3D
 remhos --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 1 -lo 2 -fct 2
@@ -39,9 +39,9 @@ Max value:  0.9999889315
 --- Method -ho 3 -lo 4 -fct 2
 
 - Remap pacman nonper-struct-2D
-remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 -ho 3 -lo 4 -fct 2
-Final mass: 0.08479546871
-Max value:  0.767442726
+remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 4 -fct 2
+Final mass: 0.08479547294
+Max value:  0.7703009569
 
 - Remap bump nonper-struct-3D
 remhos --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 4 -fct 2
@@ -76,9 +76,9 @@ Max value:  0.9999889316
 --- Method -ho 3 -lo 1 -fct 1
 
 - Remap pacman nonper-struct-2D
-remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 -ho 3 -lo 1 -fct 1
-Final mass: 0.08479546693
-Max value:  0.9080102411
+remhos --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 1 -fct 1
+Final mass: 0.08479546829
+Max value:  0.9055102425
 
 - Remap bump nonper-struct-3D
 remhos --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 1 -fct 1
