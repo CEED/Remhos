@@ -4,7 +4,7 @@ file="out_test.dat"
 
 ntask=$1
 
-command="time mpirun -np "$((ntask))" ../remhos -no-vis --verify-bounds"
+command="mpirun -np "$((ntask))" ../remhos -no-vis --verify-bounds"
 vis_command="remhos --verify-bounds"
 
 methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
@@ -27,8 +27,8 @@ for method in "${methods[@]}"; do
   $command -m ../data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport per-1D" >> $file
-  echo -e $vis_command" -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.001 -tf 1 "$method >> $file
-  $command -m ../data/periodic-segment.mesh -p 0 -rs 5 -dt 0.001 -tf 1 $method | grep -e 'Final' -e 'value'>> $file
+  echo -e $vis_command" -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.0005 -tf 1 "$method >> $file
+  $command -m ../data/periodic-segment.mesh -p 0 -rs 5 -dt 0.0005 -tf 1 $method | grep -e 'Final' -e 'value'>> $file
 
   echo -e '\n'"- Transport bump per-unstruct-2D" >> $file
   echo -e $vis_command" -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 "$method >> $file
