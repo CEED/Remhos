@@ -88,7 +88,7 @@ Max value:  0.996173945
 - Transport per-1D
 remhos --verify-bounds -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.0005 -tf 1 -ho 3 -lo 1 -fct 1
 Final mass: 0.1401242317
-Max value:  0.9882148242
+Max value:  0.9882148243
 
 - Transport bump per-unstruct-2D
 remhos --verify-bounds -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 -ho 3 -lo 1 -fct 1
