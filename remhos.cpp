@@ -37,6 +37,7 @@
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
+#include "remhos_sync.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -59,6 +60,7 @@ void velocity_function(const Vector &x, Vector &v);
 
 // Initial condition
 double u0_function(const Vector &x);
+double s0_function(const Vector &x);
 
 // Inflow boundary condition
 double inflow_function(const Vector &x);
@@ -136,6 +138,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
+   bool product_sync = false;
    int vis_steps = 100;
 
    int precision = 8;
@@ -197,6 +200,9 @@ int main(int argc, char *argv[])
    args.AddOption(&verify_bounds, "-vb", "--verify-bounds", "-no-vb",
                   "--no-verify-bounds",
                   "Verify solution bounds after each time step.");
+   args.AddOption(&product_sync, "-ps", "--product-sync", "-no-ps",
+                  "--no-product-sync",
+                  "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -320,7 +326,8 @@ int main(int argc, char *argv[])
       if (order == 0)
       {
          // Disable monotonicity treatment for piecewise constants.
-         if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
+         if (myid == 0)
+         { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
          lo_type = LOSolverType::None;
          fct_type = FCTSolverType::None;
          mono_type = MonolithicSolverType::None;
@@ -601,6 +608,16 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
 
+   ParGridFunction s, u_s;
+   Array<bool> ind_u;
+   if (product_sync)
+   {
+      s.SetSpace(&pfes);
+      ComputeBoolIndicator(u, ind_u);
+      BoolFunctionCoefficient sc(s0_function, ind_u);
+      s.ProjectCoefficient(sc);
+   }
+
    // Smoothness indicator.
    SmoothnessIndicator *smth_indicator = NULL;
    if (smth_ind_type)
@@ -667,7 +684,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout;
+   socketstream sout, vis_s;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -677,11 +694,19 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh.GetComm());
 
       sout.precision(8);
+      vis_s.precision(8);
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 350, Wh = 350; // window size
-      VisualizeField(sout, vishost, visport, u, "Solution", Wx, Wy, Ww, Wh);
+      VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      if (product_sync)
+      {
+         VisualizeField(vis_s, vishost, visport, s, "Solution s", Wx, Wy + Wh,
+                                                                  Ww, Wh);
+      }
    }
+
+   MFEM_ABORT("stop");
 
    // check for conservation
    Vector masses(lumpedM);
@@ -909,7 +934,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   // 10. Free the used memory.
+   // Free the used memory.
    delete mono_solver;
    delete fct_solver;
    delete smth_indicator;
@@ -1390,6 +1415,12 @@ double u0_function(const Vector &x)
       }
    }
    return 0.0;
+}
+
+double s0_function(const Vector &x)
+{
+   // Simple nonlinear function.
+   return 1.0 + x(0) * x(0) + x(1) * x(1);
 }
 
 double inflow_function(const Vector &x)
