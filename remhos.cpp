@@ -616,6 +616,9 @@ int main(int argc, char *argv[])
       ComputeBoolIndicator(u, ind_u);
       BoolFunctionCoefficient sc(s0_function, ind_u);
       s.ProjectCoefficient(sc);
+
+      u_s.SetSpace(&pfes);
+      for (int i = 0; i < s.Size(); i++) { u_s(i) = u(i) * s(i); }
    }
 
    // Smoothness indicator.
@@ -684,7 +687,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_s;
+   socketstream sout, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -695,18 +698,19 @@ int main(int argc, char *argv[])
 
       sout.precision(8);
       vis_s.precision(8);
+      vis_us.precision(8);
 
       int Wx = 0, Wy = 0; // window position
-      const int Ww = 350, Wh = 350; // window size
+      const int Ww = 400, Wh = 400; // window size
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       if (product_sync)
       {
-         VisualizeField(vis_s, vishost, visport, s, "Solution s", Wx, Wy + Wh,
-                                                                  Ww, Wh);
+         VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                        Wx + Ww, Wy, Ww, Wh);
+         VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
+                        Wx + 2*Ww, Wy, Ww, Wh);
       }
    }
-
-   MFEM_ABORT("stop");
 
    // check for conservation
    Vector masses(lumpedM);
@@ -769,6 +773,11 @@ int main(int argc, char *argv[])
       adv.SetDt(dt_real);
 
       ode_solver->Step(u, t, dt_real);
+      if (product_sync)
+      {
+         t -= dt_real;
+         ode_solver->Step(u_s, t, dt_real);
+      }
       ti++;
 
       // Monotonicity check for debug purposes mainly.
@@ -836,9 +845,14 @@ int main(int argc, char *argv[])
          if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
-            int Ww = 350, Wh = 350; // window size
-            VisualizeField(sout, vishost, visport, u,
-                           "Solution", Wx, Wy, Ww, Wh);
+            int Ww = 400, Wh = 400; // window size
+            VisualizeField(sout, vishost, visport, u, "Solution",
+                           Wx, Wy, Ww, Wh);
+            if (product_sync)
+            {
+               VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
+                              Wx + 2*Ww, Wy, Ww, Wh);
+            }
          }
          if (visit)
          {
@@ -1420,7 +1434,7 @@ double u0_function(const Vector &x)
 double s0_function(const Vector &x)
 {
    // Simple nonlinear function.
-   return 1.0 + x(0) * x(0) + x(1) * x(1);
+   return 2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1));
 }
 
 double inflow_function(const Vector &x)
