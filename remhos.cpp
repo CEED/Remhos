@@ -93,7 +93,7 @@ private:
    MonolithicSolver *mono_solver;
 
 public:
-   AdvectionOperator(BilinearForm &Mbf_, BilinearForm &_ml,
+   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -603,21 +603,28 @@ int main(int argc, char *argv[])
                                            subcell_scheme, time_dep);
    }
 
-   // Initial condition.
+   // Setup the initial conditions.
+   const int vsize = pfes.GetVSize();
+   Array<int> offset((product_sync) ? 4 : 2);
+   for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
+   BlockVector S(offset);
+   // Primary scalar field is u.
    ParGridFunction u(&pfes);
+   u.MakeRef(&pfes, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
-
+   // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, u_s;
    Array<bool> ind_u;
    if (product_sync)
    {
-      s.SetSpace(&pfes);
+      s.MakeRef(&pfes, S, offset[1]);
       ComputeBoolIndicator(u, ind_u);
       BoolFunctionCoefficient sc(s0_function, ind_u);
       s.ProjectCoefficient(sc);
 
-      u_s.SetSpace(&pfes);
+      u_s.MakeRef(&pfes, S, offset[2]);
+      // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { u_s(i) = u(i) * s(i); }
    }
 
@@ -743,7 +750,7 @@ int main(int argc, char *argv[])
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   AdvectionOperator adv(m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -772,12 +779,7 @@ int main(int argc, char *argv[])
 
       adv.SetDt(dt_real);
 
-      ode_solver->Step(u, t, dt_real);
-      if (product_sync)
-      {
-         t -= dt_real;
-         ode_solver->Step(u_s, t, dt_real);
-      }
+      ode_solver->Step(S, t, dt_real);
       ti++;
 
       // Monotonicity check for debug purposes mainly.
@@ -973,7 +975,7 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
+AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -983,7 +985,7 @@ AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(Mbf_.Size()), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -993,7 +995,7 @@ AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
-void AdvectionOperator::Mult(const Vector &x, Vector &y) const
+void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
    if (exec_mode == 1)
    {
@@ -1049,29 +1051,58 @@ void AdvectionOperator::Mult(const Vector &x, Vector &y) const
       }
    }
 
-   x_gf = x;
+   const int s = Kbf.ParFESpace()->GetVSize();
+   Vector u(X.GetData(), s);
+   Vector y(Y.GetData(), s);
+
+   x_gf = u;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver) { mono_solver->CalcSolution(x, y); return; }
-
-   if (fct_solver)
+   if (mono_solver) { mono_solver->CalcSolution(u, y); }
+   else if (fct_solver)
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      Vector yH(x.Size()), yL(x.Size());
-      lo_solver->CalcLOSolution(x, yL);
-      ho_solver->CalcHOSolution(x, yH);
+      Vector yH(u.Size()), yL(u.Size());
+      lo_solver->CalcLOSolution(u, yL);
+      ho_solver->CalcHOSolution(u, yH);
       dofs.ComputeBounds();
       fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
                                   dofs.xi_min, dofs.xi_max, y);
-      return;
    }
+   else if (lo_solver) { lo_solver->CalcLOSolution(u, y); goto product_remap; }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, y); goto product_remap; }
+   else { MFEM_ABORT("No solver was chosen."); }
 
-   if (lo_solver) { lo_solver->CalcLOSolution(x, y); return; }
+   product_remap:
+   // Remap the product field, if there is one.
+   if (X.Size() > s)
+   {
+      Vector u_s(X.GetData() + 2*s, s);
+      Vector y(Y.GetData() + 2*s, s);
 
-   if (ho_solver) { ho_solver->CalcHOSolution(x, y); return; }
+      x_gf = u_s;
+      x_gf.ExchangeFaceNbrData();
 
-   MFEM_ABORT("No solver was chosen.");
+      if (mono_solver) { mono_solver->CalcSolution(u_s, y); }
+      else if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         Vector yH(u_s.Size()), yL(u_s.Size());
+         lo_solver->CalcLOSolution(u_s, yL);
+         ho_solver->CalcHOSolution(u_s, yH);
+         dofs.ComputeBounds();
+         fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
+                                     dofs.xi_min, dofs.xi_max, y);
+         return;
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(u_s, y); return; }
+      else if (ho_solver) { ho_solver->CalcHOSolution(u_s, y); return; }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      // Compute the ratio.
+   }
 }
 
 // Velocity coefficient
