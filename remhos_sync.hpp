@@ -17,12 +17,17 @@
 #ifndef MFEM_REMHOS_SYNC
 #define MFEM_REMHOS_SYNC
 
+#define EMPTY_ZONE_TOL 1e-12
+
 #include "mfem.hpp"
 
 namespace mfem
 {
 
 void ComputeBoolIndicator(const ParGridFunction &u, Array<bool> &ind);
+
+void ComputeGFRatio(const ParGridFunction &u_s, const ParGridFunction &u,
+                    const Vector &lumpedM, ParGridFunction &s);
 
 class BoolFunctionCoefficient : public FunctionCoefficient
 {

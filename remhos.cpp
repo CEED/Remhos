@@ -852,6 +852,8 @@ int main(int argc, char *argv[])
                            Wx, Wy, Ww, Wh);
             if (product_sync)
             {
+               VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                              Wx + Ww, Wy, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
                               Wx + 2*Ww, Wy, Ww, Wh);
             }
@@ -1051,14 +1053,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
    }
 
-   const int s = Kbf.ParFESpace()->GetVSize();
-   Vector u(X.GetData(), s);
-   Vector y(Y.GetData(), s);
+   const int size = Kbf.ParFESpace()->GetVSize();
+   Vector u(X.GetData(), size);
+   Vector d_u(Y.GetData(), size);
 
    x_gf = u;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver) { mono_solver->CalcSolution(u, y); }
+   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
    else if (fct_solver)
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
@@ -1068,23 +1070,22 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       ho_solver->CalcHOSolution(u, yH);
       dofs.ComputeBounds();
       fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                  dofs.xi_min, dofs.xi_max, y);
+                                  dofs.xi_min, dofs.xi_max, d_u);
    }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, y); goto product_remap; }
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, y); goto product_remap; }
+   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
-   product_remap:
    // Remap the product field, if there is one.
-   if (X.Size() > s)
+   if (X.Size() > size)
    {
-      Vector u_s(X.GetData() + 2*s, s);
-      Vector y(Y.GetData() + 2*s, s);
+      Vector u_s(X.GetData() + 2*size, size);
+      Vector d_u_s(Y.GetData() + 2*size, size);
 
       x_gf = u_s;
       x_gf.ExchangeFaceNbrData();
 
-      if (mono_solver) { mono_solver->CalcSolution(u_s, y); }
+      if (mono_solver) { mono_solver->CalcSolution(u_s, d_u_s); }
       else if (fct_solver)
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
@@ -1094,14 +1095,29 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          ho_solver->CalcHOSolution(u_s, yH);
          dofs.ComputeBounds();
          fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                     dofs.xi_min, dofs.xi_max, y);
-         return;
+                                     dofs.xi_min, dofs.xi_max, d_u_s);
       }
-      else if (lo_solver) { lo_solver->CalcLOSolution(u_s, y); return; }
-      else if (ho_solver) { ho_solver->CalcHOSolution(u_s, y); return; }
+      else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }
       else { MFEM_ABORT("No solver was chosen."); }
 
       // Compute the ratio.
+      Vector s(X.GetData() + size, size);
+      ParGridFunction us_gf(x_gf), u_gf(x_gf), s_gf(x_gf);
+      add(1.0, u_s, dt, d_u_s, us_gf);
+      add(1.0, u, dt, d_u, u_gf);
+      ComputeGFRatio(us_gf, u_gf, lumpedM, s_gf);
+
+      Vector d_s(Y.GetData() + size, size);
+
+      for (int i = 0; i < size; i++)
+      {
+         d_s(i) = ( s_gf(i) - s(i) ) / dt;
+         if (s(i) > 1e3 || s_gf(i) > 1e3)
+         {
+            std::cout << s(i) << " " << s_gf(i) << std::endl;
+         }
+      }
    }
 }
 
