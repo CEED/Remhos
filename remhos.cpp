@@ -119,10 +119,11 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   const char *mesh_file = "data/periodic-square.mesh";
-   int rs_levels = 2;
+   //const char *mesh_file = "data/periodic-square.mesh";
+   const char *mesh_file = "data/inline-quad.mesh";
+   int rs_levels = 0;
    int rp_levels = 0;
-   int order = 3;
+   int order = 2;
    int mesh_order = 2;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::CG;
