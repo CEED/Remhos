@@ -820,6 +820,7 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
+            u.HostReadWrite();
             VisualizeField(sout, vishost, visport, u,
                            "Solution", Wx, Wy, Ww, Wh);
          }

@@ -77,6 +77,10 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
 
    if (!mass_lim) { max_iter = -1; }
    const int ne = pfes.GetMesh()->GetNE();
+
+   assembly.dofs.xe_max.HostReadWrite();
+   assembly.dofs.xe_min.HostReadWrite();
+   u.HostRead();
    for (int k = 0; k < ne; k++)
    {
       assembly.dofs.xe_min(k) = numeric_limits<double>::infinity();
@@ -110,6 +114,9 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
    Vector &u_nd = u_gf.FaceNbrData();
 
    // Monotonicity terms
+   du.HostReadWrite();
+   alpha.HostReadWrite();
+   z.HostReadWrite();
    for (int k = 0; k < ne; k++)
    {
       for (int j = 0; j < ndof; j++)
