@@ -125,17 +125,18 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
-   FCTSolverType fct_type         = FCTSolverType::None;
-   MonolithicSolverType mono_type = MonolithicSolverType::None;
+   HOSolverType ho_type           = HOSolverType::CG;
+   LOSolverType lo_type           = LOSolverType::ResDistSubcell;
+   FCTSolverType fct_type         = FCTSolverType::NonlinearPenalty;
+   MonolithicSolverType mono_type = MonolithicSolverType::ResDistMonoSubcell;
    bool pa = false;
+   const char *device_config = "cpu";
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
-   bool verify_bounds = false;
+   bool verify_bounds = true;
    int vis_steps = 100;
 
    int precision = 8;
@@ -180,6 +181,8 @@ int main(int argc, char *argv[])
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
+   args.AddOption(&device_config, "-d", "--device",
+                  "Device configuration string, see Device::Configure().");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
                   "Smoothness indicator: 0 - no smoothness indicator,\n\t"
                   "                      1 - approx_quadratic,\n\t"
@@ -206,6 +209,11 @@ int main(int argc, char *argv[])
       return 1;
    }
    if (myid == 0) { args.PrintOptions(cout); }
+
+   // 2. Enable hardware devices such as GPUs, and programming models such as
+   //    CUDA, OCCA, RAJA and OpenMP based on command line options.
+   Device device(device_config);
+   if (myid == 0) { device.Print(); }
 
    // When not using lua, exec mode is derived from problem number convention
    if (problem_num < 10)      { exec_mode = 0; }
