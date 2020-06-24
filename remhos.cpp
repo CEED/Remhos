@@ -129,7 +129,7 @@ int main(int argc, char *argv[])
    LOSolverType lo_type           = LOSolverType::ResDistSubcell;
    FCTSolverType fct_type         = FCTSolverType::NonlinearPenalty;
    MonolithicSolverType mono_type = MonolithicSolverType::ResDistMonoSubcell;
-   bool pa = false;
+   bool pa = true;
    const char *device_config = "cpu";
    int smth_ind_type = 0;
    double t_final = 4.0;
@@ -219,6 +219,7 @@ int main(int argc, char *argv[])
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
+   if(myid == ) {printf("exec_mode = %d \n", exec_mode);}
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -985,6 +986,7 @@ void AdvectionOperator::Mult(const Vector &x, Vector &y) const
       Kbf.Assemble(0);
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
+      lumpedM.HostReadWrite();
       ml.SpMat().GetDiag(lumpedM);
 
       M_HO.BilinearForm::operator=(0.0);
