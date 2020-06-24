@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::CG;
    LOSolverType lo_type           = LOSolverType::ResDistSubcell;
-   FCTSolverType fct_type         = FCTSolverType::NonlinearPenalty;
+   FCTSolverType fct_type         = FCTSolverType::ClipScale;
    MonolithicSolverType mono_type = MonolithicSolverType::ResDistMonoSubcell;
    bool pa = true;
    const char *device_config = "cpu";
@@ -220,7 +220,7 @@ int main(int argc, char *argv[])
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
-   if(myid == ) {printf("exec_mode = %d \n", exec_mode);}
+   if(myid == 0) {printf("exec_mode = %d \n", exec_mode);}
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
