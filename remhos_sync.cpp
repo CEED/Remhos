@@ -21,12 +21,10 @@ using namespace std;
 namespace mfem
 {
 
-void ComputeBoolIndicator(const ParGridFunction &u, Array<bool> &ind)
+void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind)
 {
-   const int NE = u.ParFESpace()->GetMesh()->GetNE();
-   const int ndof = u.ParFESpace()->GetFE(0)->GetDof();
-
    ind.SetSize(NE);
+   const int ndof = u.Size() / NE;
    for (int i = 0; i < NE; i++)
    {
       ind[i] = false;
@@ -39,13 +37,12 @@ void ComputeBoolIndicator(const ParGridFunction &u, Array<bool> &ind)
 }
 
 // This function assumes a DG space.
-void ComputeGFRatio(const ParGridFunction &u_s, const ParGridFunction &u,
-                    const Vector &lumpedM, ParGridFunction &s)
+void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
+                  const Vector &lumpedM, Vector &s)
 {
    Array<bool> u_bool;
-   ComputeBoolIndicator(u, u_bool);
+   ComputeBoolIndicator(NE, u, u_bool);
 
-   const int NE = u_s.ParFESpace()->GetNE();
    const int ndof = u_s.Size() / NE;
 
    for (int i = 0; i < NE; i++)

@@ -24,10 +24,10 @@
 namespace mfem
 {
 
-void ComputeBoolIndicator(const ParGridFunction &u, Array<bool> &ind);
+void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind);
 
-void ComputeGFRatio(const ParGridFunction &u_s, const ParGridFunction &u,
-                    const Vector &lumpedM, ParGridFunction &s);
+void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
+                  const Vector &lumpedM, Vector &s);
 
 class BoolFunctionCoefficient : public FunctionCoefficient
 {

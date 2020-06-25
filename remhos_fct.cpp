@@ -54,17 +54,16 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                   const Vector &dus_ho, const Vector &dus_lo,
                                   const Vector &s_min, const Vector &s_max,
-                                  const ParGridFunction &u_new,
-                                  Vector &dus)
+                                  const Vector &u_new, Vector &dus)
 {
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, dus_ho, flux_ij);
 
    // Update the flux matrix to a product-compatible version.
    // Compute a compatible low-order solutions.
-   Array<bool> new_u_indicator;
-   ComputeBoolIndicator(u_new, new_u_indicator);
    const int NE = us.ParFESpace()->GetNE();
+   Array<bool> new_u_indicator;
+   ComputeBoolIndicator(NE, u_new, new_u_indicator);
    const int ndofs = us.Size() / NE;
    Vector us_new_lo(ndofs), flux_loc(ndofs), beta(ndofs), dus_lo_fct(us.Size());
    DenseMatrix fij_loc(ndofs);

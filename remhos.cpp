@@ -619,7 +619,7 @@ int main(int argc, char *argv[])
    if (product_sync)
    {
       s.MakeRef(&pfes, S, offset[1]);
-      ComputeBoolIndicator(u, ind_u);
+      ComputeBoolIndicator(pmesh.GetNE(), u, ind_u);
       BoolFunctionCoefficient sc(s0_function, ind_u);
       s.ProjectCoefficient(sc);
 
@@ -1054,6 +1054,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
+   const int NE   = Kbf.ParFESpace()->GetNE();
    Vector u(X.GetData(), size);
    Vector d_u(Y.GetData(), size);
 
@@ -1096,10 +1097,18 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          lo_solver->CalcLOSolution(u_s, yL);
          ho_solver->CalcHOSolution(u_s, yH);
 
-         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max);
+         // Compute the ratio s = us / u.
+         Vector s(X.GetData() + size, size);
+         ComputeRatio(NE, u_s, u, lumpedM, s);
+
+         // Bounds for s.
+         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max);
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-         fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                     dofs.xi_min, dofs.xi_max, d_u_s);
+
+         Vector u_new(size);
+         add(1.0, u, dt, d_u, u_new);
+         fct_solver->CalcFCTProduct(x_gf, lumpedM, yH, yL,
+                                    dofs.xi_min, dofs.xi_max, u_new, d_u_s);
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
       else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }
@@ -1107,16 +1116,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       // Compute the ratio.
       Vector s(X.GetData() + size, size);
-      ParGridFunction us_gf(x_gf), u_gf(x_gf), s_gf(x_gf);
-      add(1.0, u_s, dt, d_u_s, us_gf);
-      add(1.0, u, dt, d_u, u_gf);
-      ComputeGFRatio(us_gf, u_gf, lumpedM, s_gf);
+      Vector u_new(size), us_new(size), s_new(size);
+      add(1.0, u, dt, d_u, u_new);
+      add(1.0, u_s, dt, d_u_s, us_new);
+      ComputeRatio(NE, us_new, u_new, lumpedM, s_new);
 
       Vector d_s(Y.GetData() + size, size);
-
       for (int i = 0; i < size; i++)
       {
-         d_s(i) = ( s_gf(i) - s(i) ) / dt;
+         d_s(i) = (s_new(i) - s(i)) / dt;
       }
    }
 }
