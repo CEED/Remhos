@@ -367,42 +367,63 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
    FillSubcell2CellDof(); // Fill Sub2Ind.
 }
 
-void DofInfo::ComputeBounds()
+void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
+                            Vector &dof_min, Vector &dof_max)
 {
    GroupCommunicator &gcomm = pfes_bounds.GroupComm();
    Array<int> dofsCG;
+   const int NE = pfes.GetNE();
 
    // Form min/max at each CG dof, considering element overlaps.
    x_min =   std::numeric_limits<double>::infinity();
    x_max = - std::numeric_limits<double>::infinity();
-   for (int i = 0; i < pmesh->GetNE(); i++)
+   for (int i = 0; i < NE; i++)
    {
-      x_min.FESpace()->GetElementDofs(i, dofsCG);
+      pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
-         x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), xe_min(i));
-         x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), xe_max(i));
+         x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), el_min(i));
+         x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-         maxvals(x_max.GetData(), x_max.Size());
+                 maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
    gcomm.Bcast(maxvals);
 
-   // Use (x_min, x_max) to fill (xi_min, xi_max) for each DG dof.
+   // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
       dynamic_cast<const TensorBasisElement *>(pfes_bounds.GetFE(0));
    const Array<int> &dof_map = fe_cg->GetDofMap();
    const int ndofs = dof_map.Size();
-   for (int i = 0; i < pmesh->GetNE(); i++)
+   for (int i = 0; i < NE; i++)
    {
-      x_min.FESpace()->GetElementDofs(i, dofsCG);
+      pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
-         xi_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
-         xi_max(i*ndofs + j) = x_max(dofsCG[dof_map[j]]);
+         dof_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
+         dof_max(i*ndofs + j) = x_max(dofsCG[dof_map[j]]);
+      }
+   }
+}
+
+void DofInfo::ComputeElementsMinMax(const Vector &u,
+                                    Vector &u_min, Vector &u_max) const
+{
+   const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
+   int dof_id;
+   for (int k = 0; k < NE; k++)
+   {
+      u_min(k) = numeric_limits<double>::infinity();
+      u_max(k) = -numeric_limits<double>::infinity();
+
+      for (int i = 0; i < ndof; i++)
+      {
+         dof_id = k*ndof + i;
+         u_min(k) = min(u_min(k), u(dof_id));
+         u_max(k) = max(u_max(k), u(dof_id));
       }
    }
 }

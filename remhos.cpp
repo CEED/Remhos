@@ -1068,7 +1068,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Vector yH(u.Size()), yL(u.Size());
       lo_solver->CalcLOSolution(u, yL);
       ho_solver->CalcHOSolution(u, yH);
-      dofs.ComputeBounds();
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
@@ -1093,7 +1095,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Vector yH(u_s.Size()), yL(u_s.Size());
          lo_solver->CalcLOSolution(u_s, yL);
          ho_solver->CalcHOSolution(u_s, yH);
-         dofs.ComputeBounds();
+
+         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
          fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
                                      dofs.xi_min, dofs.xi_max, d_u_s);
       }

@@ -77,6 +77,7 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
 
    if (!mass_lim) { max_iter = -1; }
    const int ne = pfes.GetMesh()->GetNE();
+
    for (int k = 0; k < ne; k++)
    {
       assembly.dofs.xe_min(k) = numeric_limits<double>::infinity();
@@ -89,8 +90,10 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
          assembly.dofs.xe_min(k) = min(assembly.dofs.xe_min(k), u(dof_id));
       }
    }
-
-   assembly.dofs.ComputeBounds();
+   assembly.dofs.ComputeElementsMinMax(u, assembly.dofs.xe_min,
+                                          assembly.dofs.xe_max);
+   assembly.dofs.ComputeBounds(assembly.dofs.xe_min, assembly.dofs.xe_max,
+                               assembly.dofs.xi_min, assembly.dofs.xi_max);
 
    // Smoothness indicator.
    ParGridFunction si_val;
