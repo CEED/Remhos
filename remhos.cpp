@@ -1113,10 +1113,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       for (int i = 0; i < size; i++)
       {
          d_s(i) = ( s_gf(i) - s(i) ) / dt;
-         if (s(i) > 1e3 || s_gf(i) > 1e3)
-         {
-            std::cout << s(i) << " " << s_gf(i) << std::endl;
-         }
       }
    }
 }

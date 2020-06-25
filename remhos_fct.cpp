@@ -16,6 +16,7 @@
 
 #include "remhos_fct.hpp"
 #include "remhos_tools.hpp"
+#include "remhos_sync.hpp"
 
 using namespace std;
 
@@ -29,9 +30,120 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 {
    MFEM_VERIFY(smth_indicator == NULL, "TODO: update SI bounds.");
 
-   // Construct the flux matrix.
+   // Construct the flux matrix (it gets recomputed every time).
+   ComputeFluxMatrix(u, du_ho, flux_ij);
+
+   // Iterated FCT correction.
+   Vector du_lo_fct(du_lo);
+   for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)
+   {
+      // Compute sums of incoming/outgoing fluxes at each DOF.
+      AddFluxesAtDofs(flux_ij, gp, gm);
+
+      // Compute the flux coefficients (aka alphas) into gp and gm.
+      ComputeFluxCoefficients(u, du_lo_fct, m, u_min, u_max, gp, gm);
+
+      // Apply the alpha coefficients to get the final solution.
+      // Update the flux matrix for iterative FCT (when iter_cnt > 1).
+      UpdateSolutionAndFlux(du_lo_fct, m, gp, gm, flux_ij, du);
+
+      du_lo_fct = du;
+   }
+}
+
+void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                                  const Vector &dus_ho, const Vector &dus_lo,
+                                  const Vector &s_min, const Vector &s_max,
+                                  const ParGridFunction &u_new,
+                                  Vector &dus)
+{
+   // Construct the flux matrix (it gets recomputed every time).
+   ComputeFluxMatrix(us, dus_ho, flux_ij);
+
+   // Update the flux matrix to a product-compatible version.
+   // Compute a compatible low-order solutions.
+   Array<bool> new_u_indicator;
+   ComputeBoolIndicator(u_new, new_u_indicator);
+   const int NE = us.ParFESpace()->GetNE();
+   const int ndofs = us.Size() / NE;
+   Vector us_new_lo(ndofs), flux_loc(ndofs), beta(ndofs), dus_lo_fct(us.Size());
+   DenseMatrix fij_loc(ndofs);
+   fij_loc = 0.0;
+   for (int k = 0; k < NE; k++)
+   {
+      if (new_u_indicator[k] == false) { continue; }
+
+      double mass_us = 0.0, mass_u = 0.0;
+      for (int j = 0; j < ndofs; j++)
+      {
+         us_new_lo(j) = us(k*ndofs + j) + dt * dus_lo(k*ndofs + j);
+         mass_us += us_new_lo(j) * m(k*ndofs + j);
+         mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
+      }
+      const double s_avg = mass_us / mass_u;
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         // Take into account the compatible low-order solution.
+         double d_us_lo_j = (u_new(k*ndofs + j) * s_avg - us_new_lo(j)) / dt;
+         beta(j) = m(k*ndofs + j) * u_new(k*ndofs + j);
+         flux_loc(j) = m(k*ndofs + j) *
+                       dt * (dus_lo(k*ndofs + j) - d_us_lo_j);
+         // Change the LO solution.
+         dus_lo_fct(k*ndofs + j) = d_us_lo_j;
+      }
+
+      // Make the betas sum to 1.
+      beta /= beta.Sum();
+
+      for (int j = 1; j < ndofs; j++)
+      {
+         for (int i = 0; i < j; i++)
+         {
+            fij_loc(i, j) = beta(j) * flux_loc(i) - beta(i) * flux_loc(j);
+         }
+      }
+      Array<int> dofs;
+      us.ParFESpace()->GetElementDofs(k, dofs);
+      flux_ij.AddSubMatrix(dofs, dofs, fij_loc);
+   }
+
+   // Rescale the bounds (s_min, s_max) -> (u*s_min, u*s_max).
+   Vector us_min(s_min), us_max(s_max);
+   for (int k = 0; k < NE; k++)
+   {
+      if (new_u_indicator[k] == false) { continue; }
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         us_min(k*ndofs + j) *= u_new(k*ndofs + j);
+         us_max(k*ndofs + j) *= u_new(k*ndofs + j);
+      }
+   }
+
+   // Iterated FCT correction.
+   for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)
+   {
+      // Compute sums of incoming fluxes at each DOF.
+      AddFluxesAtDofs(flux_ij, gp, gm);
+
+      // Compute the flux coefficients (aka alphas) into gp and gm.
+      ComputeFluxCoefficients(us, dus_lo_fct, m, us_min, us_max, gp, gm);
+
+      // Apply the alpha coefficients to get the final solution.
+      // Update the fluxes for iterative FCT (when iter_cnt > 1).
+      UpdateSolutionAndFlux(dus_lo_fct, m, gp, gm, flux_ij, dus);
+
+      dus_lo_fct = dus;
+   }
+}
+
+void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
+                                     const Vector &du_ho,
+                                     SparseMatrix &flux_mat) const
+{
    const int s = u.Size();
-   double *flux_data = flux_ij.GetData();
+   double *flux_data = flux_mat.GetData();
    const int *K_I = K.GetI(), *K_J = K.GetJ();
    const double *K_data = K.GetData();
    const double *u_np = u.FaceNbrData().GetData();
@@ -50,6 +162,7 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
          flux_data[k] = dt * dij * u_ij;
       }
    }
+
    const int NE = pfes.GetMesh()->GetNE();
    const int ndof = s / NE;
    Array<int> dofs;
@@ -66,88 +179,107 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
          for (; j <= i; j++) { Mz(i, j) = 0.0; }
          for (; j < ndof; j++) { Mz(i, j) *= dt * (du_z(i) - du_z(j)); }
       }
-      // This is the local contribution.
-      flux_ij.AddSubMatrix(dofs, dofs, Mz, 0);
+      flux_mat.AddSubMatrix(dofs, dofs, Mz, 0);
    }
-
-   for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)
-   {
-      // Compute sums of incoming fluxes.
-      const int *flux_I = flux_ij.GetI(), *flux_J = flux_ij.GetJ();
-      gp = 0.0;
-      gm = 0.0;
-      for (int i = 0; i < s; i++)
-      {
-         for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
-         {
-            int j = flux_J[k];
-
-            // The skipped fluxes will be added when the outer loop is at j as
-            // the flux matrix is always symmetric.
-            if (j <= i) { continue; }
-
-            double f_ij = flux_data[k];
-
-            if (f_ij >= 0.0)
-            {
-               gp(i) += f_ij;
-               // Modify j if it's on the same MPI task (prevents x2 counting).
-               if (j < s) { gm(j) -= f_ij; }
-            }
-            else
-            {
-               gm(i) += f_ij;
-               // Modify j if it's on the same MPI task (prevents x2 counting).
-               if (j < s) { gp(j) -= f_ij; }
-            }
-         }
-      }
-
-      // Compute alpha coefficients (into gp and gm).
-      for (int i = 0; i < s; i++)
-      {
-         double u_lo = u(i) + dt * du_lo(i);
-         double max_pos_diff = max((u_max(i) - u_lo) * m(i), 0.0),
-                min_neg_diff = min((u_min(i) - u_lo) * m(i), 0.0);
-         double sum_pos = gp(i), sum_neg = gm(i);
-
-         gp(i) = (sum_pos > max_pos_diff) ? max_pos_diff / sum_pos : 1.0;
-         gm(i) = (sum_neg < min_neg_diff) ? min_neg_diff / sum_neg : 1.0;
-      }
-
-      // Apply the alpha coefficients to get the final solution.
-      Vector &a_pos_n = gp.FaceNbrData(), &a_neg_n = gm.FaceNbrData();
-      gp.ExchangeFaceNbrData();
-      gm.ExchangeFaceNbrData();
-      du = du_lo;
-      for (int i = 0; i < s; i++)
-      {
-         for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
-         {
-            int j = flux_J[k];
-            if (j <= i) { continue; }
-
-            double fij = flux_data[k], a_ij;
-            if (fij >= 0.0)
-            {
-               a_ij = (j < s) ? min(gp(i), gm(j))
-                      : min(gp(i), a_neg_n(j - s));
-            }
-            else
-            {
-               a_ij = (j < s) ? min(gm(i), gp(j))
-                      : min(gm(i), a_pos_n(j - s));
-            }
-            fij *= a_ij;
-
-            du(i) += fij / m(i) / dt;
-            if (j < s) { du(j) -= fij / m(j) / dt; }
-
-            flux_data[k] -= fij;
-         }
-      }
-   } // iterated FCT.
 }
+
+// Compute sums of incoming fluxes for every DOF.
+void FluxBasedFCT::AddFluxesAtDofs(const SparseMatrix &flux_mat,
+                                   Vector &flux_pos, Vector &flux_neg) const
+{
+   const int s = flux_pos.Size();
+   const double *flux_data = flux_mat.GetData();
+   const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
+   flux_pos = 0.0;
+   flux_neg = 0.0;
+   for (int i = 0; i < s; i++)
+   {
+      for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
+      {
+         int j = flux_J[k];
+
+         // The skipped fluxes will be added when the outer loop is at j as
+         // the flux matrix is always symmetric.
+         if (j <= i) { continue; }
+
+         const double f_ij = flux_data[k];
+
+         if (f_ij >= 0.0)
+         {
+            flux_pos(i) += f_ij;
+            // Modify j if it's on the same MPI task (prevents x2 counting).
+            if (j < s) { flux_neg(j) -= f_ij; }
+         }
+         else
+         {
+            flux_neg(i) += f_ij;
+            // Modify j if it's on the same MPI task (prevents x2 counting).
+            if (j < s) { flux_pos(j) -= f_ij; }
+         }
+      }
+   }
+}
+
+// Compute the so-called alpha coefficients that scale the fluxes into gp, gm.
+void FluxBasedFCT::
+ComputeFluxCoefficients(const Vector &u, const Vector &du_lo, const Vector &m,
+                        const Vector &u_min, const Vector &u_max,
+                        Vector &coeff_pos, Vector &coeff_neg) const
+{
+   const int s = u.Size();
+   for (int i = 0; i < s; i++)
+   {
+      const double u_lo = u(i) + dt * du_lo(i);
+      const double max_pos_diff = max((u_max(i) - u_lo) * m(i), 0.0),
+                   min_neg_diff = min((u_min(i) - u_lo) * m(i), 0.0);
+      const double sum_pos = coeff_pos(i), sum_neg = coeff_neg(i);
+
+      coeff_pos(i) = (sum_pos > max_pos_diff) ? max_pos_diff / sum_pos : 1.0;
+      coeff_neg(i) = (sum_neg < min_neg_diff) ? min_neg_diff / sum_neg : 1.0;
+   }
+}
+
+void FluxBasedFCT::
+UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
+                      ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
+                      SparseMatrix &flux_mat, Vector &du) const
+{
+   Vector &a_pos_n = coeff_pos.FaceNbrData(),
+          &a_neg_n = coeff_neg.FaceNbrData();
+   coeff_pos.ExchangeFaceNbrData();
+   coeff_neg.ExchangeFaceNbrData();
+   du = du_lo;
+   double *flux_data = flux_mat.GetData();
+   const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
+   const int s = du.Size();
+   for (int i = 0; i < s; i++)
+   {
+      for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
+      {
+         int j = flux_J[k];
+         if (j <= i) { continue; }
+
+         double fij = flux_data[k], a_ij;
+         if (fij >= 0.0)
+         {
+            a_ij = (j < s) ? min(coeff_pos(i), coeff_neg(j))
+                   : min(coeff_pos(i), a_neg_n(j - s));
+         }
+         else
+         {
+            a_ij = (j < s) ? min(coeff_neg(i), coeff_pos(j))
+                   : min(coeff_neg(i), a_pos_n(j - s));
+         }
+         fij *= a_ij;
+
+         du(i) += fij / m(i) / dt;
+         if (j < s) { du(j) -= fij / m(j) / dt; }
+
+         flux_data[k] -= fij;
+      }
+   }
+}
+
 
 void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                       const Vector &du_ho, const Vector &du_lo,
