@@ -27,7 +27,9 @@ namespace mfem
 void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind);
 
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s);
+                  const Vector &lumpedM, Vector &s, Array<bool> &s_bool);
+
+void ZeroOutEmptyZones(const Array<bool> &ind, Vector &u);
 
 class BoolFunctionCoefficient : public FunctionCoefficient
 {

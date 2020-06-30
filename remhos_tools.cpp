@@ -368,7 +368,8 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
 }
 
 void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
-                            Vector &dof_min, Vector &dof_max)
+                            Vector &dof_min, Vector &dof_max,
+                            Array<bool> *active_el)
 {
    GroupCommunicator &gcomm = pfes_bounds.GroupComm();
    Array<int> dofsCG;
@@ -379,6 +380,9 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
    x_max = - std::numeric_limits<double>::infinity();
    for (int i = 0; i < NE; i++)
    {
+      // Inactive elements don't affect the bounds.
+      if (active_el && (*active_el)[i] == false) { continue; }
+
       pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {

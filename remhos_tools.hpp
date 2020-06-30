@@ -131,7 +131,8 @@ public:
    // Computes the admissible interval of values for each DG dof from the values
    // of all elements that feature the dof at its physical location.
    void ComputeBounds(const Vector &el_min, const Vector &el_max,
-                      Vector &dof_min, Vector &dof_max);
+                      Vector &dof_min, Vector &dof_max,
+                      Array<bool> *active_el = NULL);
 
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,

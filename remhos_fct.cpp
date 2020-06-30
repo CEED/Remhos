@@ -54,7 +54,8 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                   const Vector &dus_ho, const Vector &dus_lo,
                                   const Vector &s_min, const Vector &s_max,
-                                  const Vector &u_new, Vector &dus)
+                                  const Vector &u_new,
+                                  const Array<bool> &active_el, Vector &dus)
 {
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, dus_ho, flux_ij);
@@ -62,15 +63,13 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    // Update the flux matrix to a product-compatible version.
    // Compute a compatible low-order solutions.
    const int NE = us.ParFESpace()->GetNE();
-   Array<bool> new_u_indicator;
-   ComputeBoolIndicator(NE, u_new, new_u_indicator);
    const int ndofs = us.Size() / NE;
    Vector us_new_lo(ndofs), flux_loc(ndofs), beta(ndofs), dus_lo_fct(us.Size());
    DenseMatrix fij_loc(ndofs);
    fij_loc = 0.0;
    for (int k = 0; k < NE; k++)
    {
-      if (new_u_indicator[k] == false) { continue; }
+      if (active_el[k] == false) { continue; }
 
       double mass_us = 0.0, mass_u = 0.0;
       for (int j = 0; j < ndofs; j++)
@@ -84,7 +83,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       for (int j = 0; j < ndofs; j++)
       {
          // Take into account the compatible low-order solution.
-         double d_us_lo_j = (u_new(k*ndofs + j) * s_avg - us_new_lo(j)) / dt;
+         double d_us_lo_j = (u_new(k*ndofs + j) * s_avg - us(k*ndofs + j)) / dt;
          beta(j) = m(k*ndofs + j) * u_new(k*ndofs + j);
          flux_loc(j) = m(k*ndofs + j) *
                        dt * (dus_lo(k*ndofs + j) - d_us_lo_j);
@@ -111,7 +110,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    Vector us_min(s_min), us_max(s_max);
    for (int k = 0; k < NE; k++)
    {
-      if (new_u_indicator[k] == false) { continue; }
+      if (active_el[k] == false) { continue; }
 
       for (int j = 0; j < ndofs; j++)
       {
@@ -119,6 +118,8 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          us_max(k*ndofs + j) *= u_new(k*ndofs + j);
       }
    }
+
+   dus = dus_lo_fct; return;
 
    // Iterated FCT correction.
    for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)

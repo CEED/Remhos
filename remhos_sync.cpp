@@ -38,16 +38,14 @@ void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind)
 
 // This function assumes a DG space.
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s)
+                  const Vector &lumpedM, Vector &s, Array<bool> &s_bool)
 {
-   Array<bool> u_bool;
-   ComputeBoolIndicator(NE, u, u_bool);
+   ComputeBoolIndicator(NE, u, s_bool);
 
-   const int ndof = u_s.Size() / NE;
-
+   const int ndof = u.Size() / NE;
    for (int i = 0; i < NE; i++)
    {
-      if (u_bool[i] == false)
+      if (s_bool[i] == false)
       {
          for (int j = 0; j < ndof; j++) { s(i*ndof + j) = 0.0; }
          continue;
@@ -77,6 +75,20 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
             const double soft01 = 1.0 - std::exp(- u_el[j] / EMPTY_ZONE_TOL);
             s_el[j] = (ss - s_avg) * soft01 + s_avg;
          }
+      }
+   }
+}
+
+void ZeroOutEmptyZones(const Array<bool> &ind, Vector &u)
+{
+   const int NE = ind.Size();
+   const int ndofs = u.Size() / NE;
+   for (int k = 0; k < NE; k++)
+   {
+      if (ind[k] == true) { continue; }
+      for (int i = 0; i < ndofs; i++)
+      {
+         u(k*ndofs + i) = 0.0;
       }
    }
 }

@@ -605,7 +605,7 @@ int main(int argc, char *argv[])
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? 4 : 2);
+   Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset);
    // Primary scalar field is u.
@@ -618,12 +618,12 @@ int main(int argc, char *argv[])
    Array<bool> ind_u;
    if (product_sync)
    {
-      s.MakeRef(&pfes, S, offset[1]);
+      s.SetSpace(&pfes);
       ComputeBoolIndicator(pmesh.GetNE(), u, ind_u);
       BoolFunctionCoefficient sc(s0_function, ind_u);
       s.ProjectCoefficient(sc);
 
-      u_s.MakeRef(&pfes, S, offset[2]);
+      u_s.MakeRef(&pfes, S, offset[1]);
       // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { u_s(i) = u(i) * s(i); }
    }
@@ -852,12 +852,15 @@ int main(int argc, char *argv[])
                            Wx, Wy, Ww, Wh);
             if (product_sync)
             {
+               // Recompute s = u_s / u.
+               ComputeRatio(pmesh.GetNE(), u_s, u, masses, s, ind_u);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
                               Wx + Ww, Wy, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
                               Wx + 2*Ww, Wy, Ww, Wh);
             }
          }
+
          if (visit)
          {
             dc->SetCycle(ti);
@@ -865,6 +868,8 @@ int main(int argc, char *argv[])
             dc->Save();
          }
       }
+
+      MFEM_ABORT("one step");
    }
 
    // Print the final meshes and solution.
@@ -1079,11 +1084,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
-   // Remap the product field, if there is one.
+   // Remap the product field, if there is a product field.
    if (X.Size() > size)
    {
-      Vector u_s(X.GetData() + 2*size, size);
-      Vector d_u_s(Y.GetData() + 2*size, size);
+      Vector u_s(X.GetData() + size, size);
+      Vector d_u_s(Y.GetData() + size, size);
 
       x_gf = u_s;
       x_gf.ExchangeFaceNbrData();
@@ -1098,34 +1103,28 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          ho_solver->CalcHOSolution(u_s, yH);
 
          // Compute the ratio s = us / u.
-         Vector s(X.GetData() + size, size);
-         ComputeRatio(NE, u_s, u, lumpedM, s);
+         Vector s(size);
+         Array<bool> s_bool(NE);
+         ComputeRatio(NE, u_s, u, lumpedM, s, s_bool);
 
          // Bounds for s.
          dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max);
-         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                            dofs.xi_min, dofs.xi_max, &s_bool);
 
+         // Evolved u and its bool indicator.
          Vector u_new(size);
          add(1.0, u, dt, d_u, u_new);
+         ComputeBoolIndicator(NE, u_new, s_bool);
+
          fct_solver->CalcFCTProduct(x_gf, lumpedM, yH, yL,
-                                    dofs.xi_min, dofs.xi_max, u_new, d_u_s);
+                                    dofs.xi_min, dofs.xi_max,
+                                    u_new, s_bool, d_u_s);
+         ZeroOutEmptyZones(s_bool, d_u_s);
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
       else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }
       else { MFEM_ABORT("No solver was chosen."); }
-
-      // Compute the ratio.
-      Vector s(X.GetData() + size, size);
-      Vector u_new(size), us_new(size), s_new(size);
-      add(1.0, u, dt, d_u, u_new);
-      add(1.0, u_s, dt, d_u_s, us_new);
-      ComputeRatio(NE, us_new, u_new, lumpedM, s_new);
-
-      Vector d_s(Y.GetData() + size, size);
-      for (int i = 0; i < size; i++)
-      {
-         d_s(i) = (s_new(i) - s(i)) / dt;
-      }
    }
 }
 
