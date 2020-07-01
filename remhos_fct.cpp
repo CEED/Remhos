@@ -53,23 +53,29 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
 void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                   const Vector &dus_ho, const Vector &dus_lo,
-                                  const Vector &s_min, const Vector &s_max,
+                                  Vector &s_min, Vector &s_max,
                                   const Vector &u_new,
                                   const Array<bool> &active_el, Vector &dus)
 {
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, dus_ho, flux_ij);
 
+   const double eps = 1e-12;
+
    // Update the flux matrix to a product-compatible version.
    // Compute a compatible low-order solutions.
    const int NE = us.ParFESpace()->GetNE();
    const int ndofs = us.Size() / NE;
    Vector us_new_lo(ndofs), flux_loc(ndofs), beta(ndofs), dus_lo_fct(us.Size());
+   Vector us_min(s_min), us_max(s_max);
    DenseMatrix fij_loc(ndofs);
    fij_loc = 0.0;
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }
+
+      Array<int> dofs;
+      us.ParFESpace()->GetElementDofs(k, dofs);
 
       double mass_us = 0.0, mass_u = 0.0;
       for (int j = 0; j < ndofs; j++)
@@ -79,6 +85,39 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
       }
       const double s_avg = mass_us / mass_u;
+
+      // Update s bounds - relevant when a new cell is activated.
+      Vector min_loc, max_loc;
+      s_min.GetSubVector(dofs, min_loc);
+      s_max.GetSubVector(dofs, max_loc);
+      double minv = min_loc.Min(), maxv = max_loc.Max();
+      for (int j = 0; j < ndofs; j++)
+      {
+         // TODO - the s_min / s_max here should be the average (undefined).
+         if (min_loc(j) == std::numeric_limits<double>::infinity())
+         {
+            s_min(k*ndofs + j) = minv;
+         }
+         if (max_loc(j) == -std::numeric_limits<double>::infinity())
+         {
+            s_max(k*ndofs + j) = maxv;
+         }
+      }
+
+      //
+      // Check s_avg.
+      //
+      // TODO - check only defined dofs.
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (s_avg + eps < minv ||
+             s_avg - eps > maxv)
+         {
+            std::cout << "s_avg: " << k << " " << minv<< " "
+                      << s_avg << " "
+                      << maxv << std::endl;
+         }
+      }
 
       for (int j = 0; j < ndofs; j++)
       {
@@ -101,41 +140,102 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
             fij_loc(i, j) = beta(j) * flux_loc(i) - beta(i) * flux_loc(j);
          }
       }
-      Array<int> dofs;
-      us.ParFESpace()->GetElementDofs(k, dofs);
       flux_ij.AddSubMatrix(dofs, dofs, fij_loc);
+
+      // Rescale the bounds (s_min, s_max) -> (u*s_min, u*s_max).
+      // TODO - rescale only defined values.
+      for (int j = 0; j < ndofs; j++)
+      {
+         us_min(k*ndofs + j) *= u_new(k*ndofs + j);
+         us_max(k*ndofs + j) *= u_new(k*ndofs + j);
+      }
+      //
+      // Check product.
+      //
+      // TODO - check only defined values.
+      Vector u_loc;
+      us_min.GetSubVector(dofs, min_loc);
+      us_max.GetSubVector(dofs, max_loc);
+      u_new.GetSubVector(dofs, u_loc);
+      minv = min_loc.Min(); maxv = max_loc.Max();
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (s_avg * u_new(k*ndofs + j) + eps < minv ||
+             s_avg * u_new(k*ndofs + j) - eps > maxv)
+         {
+            std::cout << "s_avg * u: " << k << " " << minv << " "
+                      << s_avg * u_new(k*ndofs + j) << " "
+                      << u_new(k*ndofs + j) << " "
+                      << maxv << std::endl;
+            u_loc.Print();
+         }
+      }
    }
 
-   // Rescale the bounds (s_min, s_max) -> (u*s_min, u*s_max).
-   Vector us_min(s_min), us_max(s_max);
+   dus = dus_lo_fct;
+   // Check the bounds. TODO - only defined values.
+   Vector us_new(dus.Size());
+   add(1.0, us, dt, dus, us_new);
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }
 
       for (int j = 0; j < ndofs; j++)
       {
-         us_min(k*ndofs + j) *= u_new(k*ndofs + j);
-         us_max(k*ndofs + j) *= u_new(k*ndofs + j);
+         if (us_new(k*ndofs + j) + eps < us_min(k*ndofs + j) ||
+             us_new(k*ndofs + j) - eps > us_max(k*ndofs + j))
+         {
+            std::cout << "LO " << j << " " << k << " "
+                      << us_min(k*ndofs + j) << " "
+                      << us_new(k*ndofs + j) << " "
+                      << us_max(k*ndofs + j) << std::endl;
+            std::cout << "---\n";
+         }
       }
    }
-
-   dus = dus_lo_fct; return;
 
    // Iterated FCT correction.
    for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)
    {
       // Compute sums of incoming fluxes at each DOF.
       AddFluxesAtDofs(flux_ij, gp, gm);
+      // TODO - should be zero for undefined values.
 
       // Compute the flux coefficients (aka alphas) into gp and gm.
       ComputeFluxCoefficients(us, dus_lo_fct, m, us_min, us_max, gp, gm);
+      // TODO - alpha should give LO solution for undefined dofs.
 
       // Apply the alpha coefficients to get the final solution.
       // Update the fluxes for iterative FCT (when iter_cnt > 1).
       UpdateSolutionAndFlux(dus_lo_fct, m, gp, gm, flux_ij, dus);
 
+      ZeroOutEmptyZones(active_el, dus);
+
       dus_lo_fct = dus;
    }
+
+   dus = dus_lo_fct;
+   // Check the bounds.
+   // TODO - only defined DOFs.
+   add(1.0, us, dt, dus, us_new);
+   for (int k = 0; k < NE; k++)
+   {
+      if (active_el[k] == false) { continue; }
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (us_new(k*ndofs + j) + eps < us_min(k*ndofs + j) ||
+             us_new(k*ndofs + j) - eps > us_max(k*ndofs + j))
+         {
+            std::cout << "Final " << j << " " << k << " "
+                      << us_min(k*ndofs + j) << " "
+                      << us_new(k*ndofs + j) << " "
+                      << us_max(k*ndofs + j) << std::endl;
+            std::cout << "---\n";
+         }
+      }
+   }
+   return;
 }
 
 void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,

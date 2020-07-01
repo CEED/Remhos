@@ -1107,20 +1107,21 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Array<bool> s_bool(NE);
          ComputeRatio(NE, u_s, u, lumpedM, s, s_bool);
 
-         // Bounds for s.
+         // Bounds for s, based on the old values (and old active elements).
          dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max);
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                             dofs.xi_min, dofs.xi_max, &s_bool);
 
-         // Evolved u and its bool indicator.
+         // Evolved u and get the new active elements.
          Vector u_new(size);
          add(1.0, u, dt, d_u, u_new);
          ComputeBoolIndicator(NE, u_new, s_bool);
 
+         // TODO move the s_min and s_max update here, back to const.
+
          fct_solver->CalcFCTProduct(x_gf, lumpedM, yH, yL,
                                     dofs.xi_min, dofs.xi_max,
                                     u_new, s_bool, d_u_s);
-         ZeroOutEmptyZones(s_bool, d_u_s);
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
       else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }
