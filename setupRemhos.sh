@@ -9,5 +9,5 @@ tar -zxvf metis-4.0.3.tar.gz && cd metis-4.0.3 &&
 make -j 3 && cd .. &&
 ln -s metis-4.0.3 metis-4.0 &&
 git clone --recursive https://github.com/mfem/mfem.git &&
-cd mfem && make pcudebug MFEM_USE_SIMD=NO CUDA_ARCH=sm_70 -j 10
+cd mfem && make pcuda MFEM_USE_SIMD=NO CUDA_ARCH=sm_70 -j 10
 cd ../Remhos && make -j 10
