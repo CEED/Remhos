@@ -119,26 +119,25 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   //const char *mesh_file = "data/periodic-square.mesh";
-   const char *mesh_file = "data/inline-quad.mesh";
-   int rs_levels = 0;
+   const char *mesh_file = "data/periodic-square.mesh";
+   int rs_levels = 2;
    int rp_levels = 0;
-   int order = 2;
+   int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::CG;
-   LOSolverType lo_type           = LOSolverType::ResDistSubcell;
-   FCTSolverType fct_type         = FCTSolverType::ClipScale;
-   MonolithicSolverType mono_type = MonolithicSolverType::ResDistMonoSubcell;
-   bool pa = true;
-   const char *device_config = "cpu";
+   HOSolverType ho_type           = HOSolverType::LocalInverse;
+   LOSolverType lo_type           = LOSolverType::None;
+   FCTSolverType fct_type         = FCTSolverType::None;
+   MonolithicSolverType mono_type = MonolithicSolverType::None;
+   bool pa = false;
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
-   bool verify_bounds = true;
+   bool verify_bounds = false;
    int vis_steps = 100;
+   const char *device_config = "cpu";
 
    int precision = 8;
    cout.precision(precision);
@@ -220,7 +219,6 @@ int main(int argc, char *argv[])
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
-   if(myid == 0) {printf("exec_mode = %d \n", exec_mode);}
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -690,6 +688,7 @@ int main(int argc, char *argv[])
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 350, Wh = 350; // window size
+      u.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution", Wx, Wy, Ww, Wh);
    }
 
@@ -799,6 +798,7 @@ int main(int argc, char *argv[])
       {
          // Steady state problems - stop at convergence.
          double res_loc = 0.;
+         lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
          for (int i = 0; i < res.Size(); i++)
          {
             res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
@@ -822,7 +822,6 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 350, Wh = 350; // window size
-            u.HostReadWrite();
             VisualizeField(sout, vishost, visport, u,
                            "Solution", Wx, Wy, Ww, Wh);
          }
@@ -857,6 +856,7 @@ int main(int argc, char *argv[])
    {
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
+      lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
       finalMass_loc = lumpedM * u;
    }

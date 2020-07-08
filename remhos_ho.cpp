@@ -127,6 +127,9 @@ void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    u_gf = u;
    u_gf.ExchangeFaceNbrData();
    Vector &u_nd = u_gf.FaceNbrData();
+   u.HostRead();
+   rhs.HostReadWrite();
+   u_nd.HostRead();
    for (int k = 0; k < ne; k++)
    {
       for (int i = 0; i < assembly.dofs.numBdrs; i++)
@@ -139,6 +142,8 @@ void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    du = 0.0;
    const double abs_tol = 1.e-4;
    const int max_iter = 20;
+   du.ReadWrite();
+   M_lumped.HostRead();
    for (int iter = 1; iter <= max_iter; iter++)
    {
       M.Mult(du, res);
@@ -150,6 +155,8 @@ void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       resid = std::sqrt(resid);
       if (resid <= abs_tol) { return; }
 
+      res.HostReadWrite();
+      du.HostReadWrite();
       for (int i = 0; i < n; i++)
       {
          du(i) -= res(i) / M_lumped(i);

@@ -283,6 +283,9 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       if (resid <= abs_tol) { break; }
 
+      y.HostReadWrite();
+      z.HostReadWrite();
+      lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
          y(i) -= z(i) / lumpedMH1(i);
@@ -309,6 +312,9 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       if (resid <= abs_tol) { break; }
 
+      y.HostReadWrite();
+      z.HostReadWrite();
+      lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
          y(i) -= z(i) / lumpedMH1(i);

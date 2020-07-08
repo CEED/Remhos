@@ -170,6 +170,9 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
+   u.HostRead();
+   du.HostReadWrite();
+   du_lo.Read(); du_ho.Read();
    for (int k = 0; k < NE; k++)
    {
       sumPos = sumNeg = 0.0;
