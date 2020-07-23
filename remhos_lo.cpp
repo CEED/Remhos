@@ -53,6 +53,7 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    const int ne = pfes.GetMesh()->GetNE();
    u.HostRead();
    du.HostReadWrite();
+   M_lumped.HostRead();
    for (int k = 0; k < ne; k++)
    {
       // Face contributions.
@@ -133,6 +134,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    z.HostReadWrite();
    u.HostRead();
    du.HostReadWrite();
+   M_lumped.HostRead();
    // Monotonicity terms
    for (int k = 0; k < ne; k++)
    {

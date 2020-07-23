@@ -117,6 +117,7 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
    du.HostReadWrite();
    alpha.HostReadWrite();
    z.HostReadWrite();
+   M_lumped.HostRead();
    for (int k = 0; k < ne; k++)
    {
       for (int j = 0; j < ndof; j++)

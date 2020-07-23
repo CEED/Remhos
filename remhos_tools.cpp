@@ -285,10 +285,10 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       y.HostReadWrite();
       z.HostReadWrite();
-      lumpedMH1.HostRead();
+      const double *h_lumpedMH1 = lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
-         y(i) -= z(i) / lumpedMH1(i);
+         y(i) -= z(i) / h_lumpedMH1[i];
       }
    }
 
@@ -314,10 +314,10 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       y.HostReadWrite();
       z.HostReadWrite();
-      lumpedMH1.HostRead();
+      const double * h_lumpedMH1 = lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
-         y(i) -= z(i) / lumpedMH1(i);
+         y(i) -= z(i) / h_lumpedMH1[i];
       }
    }
 }
