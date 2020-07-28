@@ -53,6 +53,7 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    const int ne = pfes.GetMesh()->GetNE();
    u.HostRead();
    du.HostReadWrite();
+   M_lumped.HostRead();
    for (int k = 0; k < ne; k++)
    {
       // Face contributions.
@@ -76,10 +77,12 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
 {
-   const int *Ip = K.GetI(), *Jp = K.GetJ(), n = K.Size();
-   const double *Kp = K.GetData();
+   const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
 
-   double *Dp = D.GetData();
+   const double *Kp = K.HostReadData();
+
+   double *Dp = D.HostReadWriteData();
+   D.HostReadWriteI(); D.HostReadWriteJ();
 
    for (int i = 0, k = 0; i < n; i++)
    {
@@ -133,6 +136,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    z.HostReadWrite();
    u.HostRead();
    du.HostReadWrite();
+   M_lumped.HostRead();
    // Monotonicity terms
    for (int k = 0; k < ne; k++)
    {
