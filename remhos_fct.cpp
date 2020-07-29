@@ -34,7 +34,8 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    double *flux_data = flux_ij.GetData();
    const int *K_I = K.GetI(), *K_J = K.GetJ();
    const double *K_data = K.GetData();
-   const double *u_np = u.FaceNbrData().GetData();
+   const double *u_np = u.FaceNbrData().HostRead();
+   u.HostRead();
    for (int i = 0; i < s; i++)
    {
       for (int k = K_I[i]; k < K_I[i + 1]; k++)
@@ -76,6 +77,8 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       const int *flux_I = flux_ij.GetI(), *flux_J = flux_ij.GetJ();
       gp = 0.0;
       gm = 0.0;
+      gp.HostReadWrite();
+      gm.HostReadWrite();
       for (int i = 0; i < s; i++)
       {
          for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
@@ -120,6 +123,9 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       gp.ExchangeFaceNbrData();
       gm.ExchangeFaceNbrData();
       du = du_lo;
+      gp.HostReadWrite();
+      gm.HostReadWrite();
+      du.HostReadWrite();
       for (int i = 0; i < s; i++)
       {
          for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
@@ -170,6 +176,9 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
+   u.HostRead();
+   du.HostReadWrite();
+   du_lo.Read(); du_ho.Read();
    for (int k = 0; k < NE; k++)
    {
       sumPos = sumNeg = 0.0;
