@@ -17,6 +17,8 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
+#define REMHOS_FCT_DEBUG
+
 #include "mfem.hpp"
 
 namespace mfem

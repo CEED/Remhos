@@ -21,17 +21,23 @@ using namespace std;
 namespace mfem
 {
 
-void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind)
+void ComputeBoolIndicators(int NE, const Vector &u,
+                           Array<bool> &ind_elem, Array<bool> &ind_dofs)
 {
-   ind.SetSize(NE);
+   ind_elem.SetSize(NE);
+   ind_dofs.SetSize(u.Size());
+
    const int ndof = u.Size() / NE;
+   int dof_id;
    for (int i = 0; i < NE; i++)
    {
-      ind[i] = false;
+      ind_elem[i] = false;
       for (int j = 0; j < ndof; j++)
       {
-         // This indexing assumes u is DG.
-         if (u(i*ndof + j) > EMPTY_ZONE_TOL) { ind[i] = true; break; }
+         dof_id = i*ndof + j;
+         ind_dofs[dof_id] = (u(dof_id) > 0.0) ? true : false;
+
+         if (u(dof_id) > EMPTY_ZONE_TOL) { ind_elem[i] = true; }
       }
    }
 }
@@ -40,7 +46,8 @@ void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind)
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
                   const Vector &lumpedM, Vector &s, Array<bool> &s_bool)
 {
-   ComputeBoolIndicator(NE, u, s_bool);
+   Array<bool> dummy;
+   ComputeBoolIndicators(NE, u, s_bool, dummy);
 
    const int ndof = u.Size() / NE;
    for (int i = 0; i < NE; i++)
@@ -79,16 +86,18 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
    }
 }
 
-void ZeroOutEmptyZones(const Array<bool> &ind, Vector &u)
+void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
+                      const Array<bool> &ind_dofs, Vector &u)
 {
-   const int NE = ind.Size();
+   const int NE = ind_elem.Size();
    const int ndofs = u.Size() / NE;
    for (int k = 0; k < NE; k++)
    {
-      if (ind[k] == true) { continue; }
+      if (ind_elem[k] == true) { continue; }
+
       for (int i = 0; i < ndofs; i++)
       {
-         u(k*ndofs + i) = 0.0;
+         if (ind_dofs[k*ndofs + i] == false) { u(k*ndofs + i) = 0.0; }
       }
    }
 }

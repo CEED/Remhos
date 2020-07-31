@@ -24,12 +24,14 @@
 namespace mfem
 {
 
-void ComputeBoolIndicator(int NE, const Vector &u, Array<bool> &ind);
+void ComputeBoolIndicators(int NE, const Vector &u,
+                           Array<bool> &ind_elem, Array<bool> &ind_dofs);
 
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
                   const Vector &lumpedM, Vector &s, Array<bool> &s_bool);
 
-void ZeroOutEmptyZones(const Array<bool> &ind, Vector &u);
+void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
+                      const Array<bool> &ind_dofs, Vector &u);
 
 class BoolFunctionCoefficient : public FunctionCoefficient
 {
