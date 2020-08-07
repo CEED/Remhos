@@ -35,7 +35,7 @@ void ComputeBoolIndicators(int NE, const Vector &u,
       for (int j = 0; j < ndof; j++)
       {
          dof_id = i*ndof + j;
-         ind_dofs[dof_id] = (u(dof_id) > 0.0) ? true : false;
+         ind_dofs[dof_id] = (u(dof_id) > EMPTY_ZONE_TOL) ? true : false;
 
          if (u(dof_id) > EMPTY_ZONE_TOL) { ind_elem[i] = true; }
       }

@@ -782,6 +782,8 @@ int main(int argc, char *argv[])
       ode_solver->Step(S, t, dt_real);
       ti++;
 
+      //if (ti == 10) { MFEM_ABORT("10 steps"); }
+
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
       {
@@ -1060,6 +1062,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    const int NE   = Kbf.ParFESpace()->GetNE();
    Vector u(X.GetData(), size);
    Vector d_u(Y.GetData(), size);
+   Vector du_HO(u.Size()), du_LO(u.Size());
 
    x_gf = u;
    x_gf.ExchangeFaceNbrData();
@@ -1069,13 +1072,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      Vector yH(u.Size()), yL(u.Size());
-      lo_solver->CalcLOSolution(u, yL);
-      ho_solver->CalcHOSolution(u, yH);
+      lo_solver->CalcLOSolution(u, du_LO);
+      ho_solver->CalcHOSolution(u, du_HO);
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
    else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
@@ -1096,9 +1098,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector yH(u_s.Size()), yL(u_s.Size());
-         lo_solver->CalcLOSolution(u_s, yL);
-         ho_solver->CalcHOSolution(u_s, yH);
+         Vector dus_HO(u_s.Size()), dus_LO(u_s.Size());
+         lo_solver->CalcLOSolution(u_s, dus_LO);
+         ho_solver->CalcHOSolution(u_s, dus_HO);
 
          // Compute the ratio s = us / u.
          Vector s(size);
@@ -1115,11 +1117,18 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          add(1.0, u, dt, d_u, u_new);
          ComputeBoolIndicators(NE, u_new, s_bool_el, s_bool_dofs);
 
+         ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, u_new);
+         ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, d_u);
+
+         // Evolved u_LO and get the new active elements.
+         Vector u_new_LO(size);
+         add(1.0, u, dt, du_LO, u_new_LO);
+
          // TODO move the s_min and s_max update here, back to const.
 
-         fct_solver->CalcFCTProduct(x_gf, lumpedM, yH, yL,
+         fct_solver->CalcFCTProduct(x_gf, lumpedM, dus_HO, dus_LO,
                                     dofs.xi_min, dofs.xi_max,
-                                    u_new, s_bool_el, d_u_s);
+                                    u, u_new, u_new_LO, s_bool_el, d_u_s);
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
       else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }

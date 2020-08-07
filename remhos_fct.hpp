@@ -55,7 +55,9 @@ public:
    virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                const Vector &dus_ho, const Vector &dus_lo,
                                Vector &s_min, Vector &s_max,
-                               const Vector &u_new, const Array<bool> &active_el,
+                               const Vector &u,
+                               const Vector &u_new, const Vector &u_new_LO,
+                               const Array<bool> &active_el,
                                Vector &dus)
    {
       MFEM_ABORT("Not implemented for the chosen solver");
@@ -103,7 +105,9 @@ public:
    virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                const Vector &dus_ho, const Vector &dus_lo,
                                Vector &s_min, Vector &s_max,
-                               const Vector &u_new, const Array<bool> &active_el,
+                               const Vector &u,
+                               const Vector &u_new, const Vector &u_new_LO,
+                               const Array<bool> &active_el,
                                Vector &dus);
 };
 
