@@ -71,7 +71,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, dus_ho, flux_ij);
 
-   const double eps = 1e-6;
+   const double eps = 1e-12;
    int dof_id;
 
    // Update the flux matrix to a product-compatible version.
@@ -123,13 +123,18 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          dof_id = k*ndofs + j;
          if (active_dofs[dof_id] == false) { continue; }
 
-         double s_LO = us_new_LO_loc(j) / u_new_LO_loc(j);
-         if (s_LO + eps < minv ||
-             s_LO - eps > maxv)
+         // Check if us_lo / s_lo is in the full stencil bounds.
+         // This is the backbone theorem we use for the LO solutions.
+         if (us_new_LO_loc(j) + eps < minv * u_new_LO_loc(j) ||
+             us_new_LO_loc(j) - eps > maxv * u_new_LO_loc(j))
          {
+            double s_LO = us_new_LO_loc(j) / u_new_LO_loc(j);
             std::cout << "Cell " << k << std::endl;
             std::cout << "At " << j << " out of " << ndofs << std::endl;
-            std::cout << "Basic theorem " << minv << " " << s_LO << " " << maxv << std::endl;
+            std::cout << "Basic theorem "
+                      << minv << " " << s_LO << " " << maxv << std::endl
+                      << minv * u_new_LO_loc(j) << " "
+                      << us_new_LO_loc(j) << " " << maxv * u_new_LO_loc(j) << std::endl;
             std::cout << us_new_LO_loc(j) << " " << u_new_LO_loc(j) << std::endl;
 
             std::cout << "us_old_loc: " << std::endl;
@@ -150,9 +155,11 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
             MFEM_ABORT("s_LO not in element bounds");
          }
 
-         // Check if s_avg is within the min/max for the cell.
-         if (s_avg + eps < minv ||
-             s_avg - eps > maxv)
+         // Check if s_avg = mass_us / mass_u is within the bounds for the cell.
+         // The check avoids dividing by small numbers, which would make
+         // rounding errors huge.
+         if (mass_us + eps < minv * mass_u ||
+             mass_us - eps > maxv * mass_u)
          {
             std::cout << "---\ns_avg element bounds: "
                       << minv << " " << s_avg << " " << maxv << std::endl;
@@ -239,7 +246,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                       << us_max(dof_id) << std::endl;
             std::cout << u_new(k*ndofs + j) << " " << s_avg << endl;
             std::cout << s_min(dof_id) << " " << s_max(dof_id) << "\n---\n";
-            MFEM_ABORT("s_avg * u NOT IN BOUNDS WTF MAN");
+            MFEM_ABORT("s_avg * u not in bounds");
          }
       }
    }
@@ -281,8 +288,6 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    PrintCellVals(50, NE, us, "Cell 50 after update, u_s_old.");
    PrintCellVals(50, NE, us_new, "Cell 50 after update, u_s."); */
 
-
-   /*
    // Iterated FCT correction.
    for (int fct_iter = 0; fct_iter < iter_cnt; fct_iter++)
    {
@@ -300,7 +305,6 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
       dus_lo_fct = dus;
    }
-   */
 
 #ifdef REMHOS_FCT_DEBUG
    // Check the bounds.
