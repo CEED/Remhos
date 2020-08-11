@@ -63,13 +63,13 @@ void PrintCellVals(int cell_id, int NE, const Vector &vec, const char *msg)
 }
 
 void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
-                                  const Vector &dus_ho, const Vector &dus_lo,
+                                  const Vector &d_us_HO, const Vector &d_us_LO,
                                   Vector &s_min, Vector &s_max, const Vector &u,
                                   const Vector &u_new, const Vector &u_new_LO,
-                                  const Array<bool> &active_el, Vector &dus)
+                                  const Array<bool> &active_el, Vector &d_us)
 {
    // Construct the flux matrix (it gets recomputed every time).
-   ComputeFluxMatrix(us, dus_ho, flux_ij);
+   ComputeFluxMatrix(us, d_us_HO, flux_ij);
 
    const double eps = 1e-12;
    int dof_id;
@@ -99,7 +99,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       double mass_us = 0.0, mass_u = 0.0, mass_u_LO = 0.0;
       for (int j = 0; j < ndofs; j++)
       {
-         us_new_LO_loc(j) = us(k*ndofs + j) + dt * dus_lo(k*ndofs + j);
+         us_new_LO_loc(j) = us(k*ndofs + j) + dt * d_us_LO(k*ndofs + j);
          mass_us += us_new_LO_loc(j) * m(k*ndofs + j);
          mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
          mass_u_LO += u_new_LO(k*ndofs + j) * m(k*ndofs + j);
@@ -113,11 +113,11 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       u_new.GetSubVector(dofs, u_new_loc);
       u_new_LO.GetSubVector(dofs, u_new_LO_loc);
       us.GetSubVector(dofs, us_old_loc);
-      dus_lo.GetSubVector(dofs, dus_lo_loc);
+      d_us_LO.GetSubVector(dofs, dus_lo_loc);
       double minv = min_loc.Min(), maxv = max_loc.Max();
 
-      // When s_avg is not in bounds for some dof (it should be within the
-      // global max and min for the element), reset the bounds to s_avg.
+      // When s_avg is not in the local bounds for some dof (it should be within
+      // the global max and min for the element), reset the bounds to s_avg.
       for (int j = 0; j < ndofs; j++)
       {
          dof_id = k*ndofs + j;
@@ -191,7 +191,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
          dof_id = k*ndofs + j;
          double d_us_lo_j = (u_new(dof_id) * s_avg - us(dof_id)) / dt;
-         flux_loc(j) = m(dof_id) * dt * (dus_lo(dof_id) - d_us_lo_j);
+         flux_loc(j) = m(dof_id) * dt * (d_us_LO(dof_id) - d_us_lo_j);
          // Change the LO solution.
          dus_lo_fct(dof_id) = d_us_lo_j;
 
@@ -251,10 +251,10 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       }
    }
 
-   dus = dus_lo_fct;
+   d_us = dus_lo_fct;
    // Check the bounds.
-   Vector us_new(dus.Size());
-   add(1.0, us, dt, dus, us_new);
+   Vector us_new(d_us.Size());
+   add(1.0, us, dt, d_us, us_new);
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }
@@ -276,7 +276,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       }
    }
 
-   ZeroOutEmptyDofs(active_el, active_dofs, dus);
+   ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 
    /*
    PrintCellVals(18, NE, u, "Cell 18 after update, u_old.");
@@ -299,16 +299,16 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
       // Apply the alpha coefficients to get the final solution.
       // Update the fluxes for iterative FCT (when iter_cnt > 1).
-      UpdateSolutionAndFlux(dus_lo_fct, m, gp, gm, flux_ij, dus);
+      UpdateSolutionAndFlux(dus_lo_fct, m, gp, gm, flux_ij, d_us);
 
-      ZeroOutEmptyDofs(active_el, active_dofs, dus);
+      ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 
-      dus_lo_fct = dus;
+      dus_lo_fct = d_us;
    }
 
 #ifdef REMHOS_FCT_DEBUG
    // Check the bounds.
-   add(1.0, us, dt, dus, us_new);
+   add(1.0, us, dt, d_us, us_new);
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }

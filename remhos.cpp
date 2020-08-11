@@ -1087,25 +1087,25 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
    {
-      Vector u_s(X.GetData() + size, size);
-      Vector d_u_s(Y.GetData() + size, size);
+      Vector us(X.GetData() + size, size);
+      Vector d_us(Y.GetData() + size, size);
 
-      x_gf = u_s;
+      x_gf = us;
       x_gf.ExchangeFaceNbrData();
 
-      if (mono_solver) { mono_solver->CalcSolution(u_s, d_u_s); }
+      if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
       else if (fct_solver)
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector dus_HO(u_s.Size()), dus_LO(u_s.Size());
-         lo_solver->CalcLOSolution(u_s, dus_LO);
-         ho_solver->CalcHOSolution(u_s, dus_HO);
+         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
+         lo_solver->CalcLOSolution(us, d_us_LO);
+         ho_solver->CalcHOSolution(us, d_us_HO);
 
          // Compute the ratio s = us / u.
          Vector s(size);
          Array<bool> s_bool_el, s_bool_dofs;
-         ComputeRatio(NE, u_s, u, lumpedM, s, s_bool_el);
+         ComputeRatio(NE, us, u, lumpedM, s, s_bool_el);
 
          // Bounds for s, based on the old values (and old active elements).
          dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max);
@@ -1126,12 +1126,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
          // TODO move the s_min and s_max update here, back to const.
 
-         fct_solver->CalcFCTProduct(x_gf, lumpedM, dus_HO, dus_LO,
+         fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                     dofs.xi_min, dofs.xi_max,
-                                    u, u_new, u_new_LO, s_bool_el, d_u_s);
+                                    u, u_new, u_new_LO, s_bool_el, d_us);
       }
-      else if (lo_solver) { lo_solver->CalcLOSolution(u_s, d_u_s); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(u_s, d_u_s); }
+      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
       else { MFEM_ABORT("No solver was chosen."); }
    }
 }
