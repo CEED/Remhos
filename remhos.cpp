@@ -614,7 +614,7 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    // For the case of product remap, we also solve for s and u_s.
-   ParGridFunction s, u_s;
+   ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
    if (product_sync)
    {
@@ -623,9 +623,9 @@ int main(int argc, char *argv[])
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
 
-      u_s.MakeRef(&pfes, S, offset[1]);
+      us.MakeRef(&pfes, S, offset[1]);
       // Simple - we don't target conservation at initialization.
-      for (int i = 0; i < s.Size(); i++) { u_s(i) = u(i) * s(i); }
+      for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
    }
 
    // Smoothness indicator.
@@ -636,6 +636,7 @@ int main(int argc, char *argv[])
                                                pfes, u, dofs);
    }
 
+   // Setup of the high-order solver (if any).
    HOSolver *ho_solver = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
@@ -650,6 +651,7 @@ int main(int argc, char *argv[])
       ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
    }
 
+   // Setup of the monolithic solver (if any).
    MonolithicSolver *mono_solver = NULL;
    bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
    if (mono_type == MonolithicSolverType::ResDistMono)
@@ -714,22 +716,24 @@ int main(int argc, char *argv[])
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
                         Wx + Ww, Wy, Ww, Wh);
-         VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
+         VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
                         Wx + 2*Ww, Wy, Ww, Wh);
       }
    }
 
-   // check for conservation
+   // Record the initial mass.
+   MPI_Comm comm = pmesh.GetComm();
    Vector masses(lumpedM);
-   const double initialMass_loc = lumpedM * u;
-   double initialMass;
-   MPI_Allreduce(&initialMass_loc, &initialMass, 1, MPI_DOUBLE, MPI_SUM,
-                 pmesh.GetComm());
+   const double mass0_u_loc = lumpedM * u;
+   double mass0_u, mass0_us;
+   MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+   if (product_sync)
+   {
+      const double mass0_us_loc = lumpedM * us;
+      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+   }
 
-   // Define the time-dependent evolution operator describing the ODE
-   // right-hand side, and perform time-integration (looping over the time
-   // iterations, ti, with a time-step dt).
-
+   // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
    if (fct_type == FCTSolverType::FluxBased)
@@ -772,6 +776,7 @@ int main(int argc, char *argv[])
    ParGridFunction res = u;
    double residual;
 
+   // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    for (int ti = 0; !done; )
    {
@@ -781,8 +786,6 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(S, t, dt_real);
       ti++;
-
-      //if (ti == 10) { MFEM_ABORT("10 steps"); }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -831,7 +834,7 @@ int main(int argc, char *argv[])
          {
             res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
          }
-         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
 
          residual = sqrt(residual);
          if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
@@ -855,10 +858,10 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                // Recompute s = u_s / u.
-               ComputeRatio(pmesh.GetNE(), u_s, u, masses, s, u_bool_el);
+               ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
                               Wx + Ww, Wy, Ww, Wh);
-               VisualizeField(vis_us, vishost, visport, u_s, "Solution u_s",
+               VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
                               Wx + 2*Ww, Wy, Ww, Wh);
             }
          }
@@ -889,26 +892,43 @@ int main(int argc, char *argv[])
    }
 
    // Check for mass conservation.
-   double finalMass_loc(0);
+   double mass_u_loc = 0.0, mass_us_loc = 0.0;
    if (exec_mode == 1)
    {
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       ml.SpMat().GetDiag(lumpedM);
-      finalMass_loc = lumpedM * u;
+      mass_u_loc = lumpedM * u;
+      if (product_sync) { mass_us_loc = lumpedM * us; }
    }
-   else { finalMass_loc = masses * u; }
-   double finalMass;
-   MPI_Allreduce(&finalMass_loc, &finalMass, 1, MPI_DOUBLE, MPI_SUM,
-                 pmesh.GetComm());
+   else
+   {
+      mass_u_loc = masses * u;
+      if (product_sync) { mass_us_loc = masses * us; }
+   }
+   double mass_u, mass_us, s_max;
+   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
+   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+   if (product_sync)
+   {
+      const double s_max_loc = s.Max();
+      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+   }
    if (myid == 0)
    {
       cout << setprecision(10)
-           << "Final mass: " << finalMass << endl
-           << "Max value:  " << umax << endl << setprecision(6)
-           << "Mass loss:  " << abs(initialMass - finalMass) << endl;
+           << "Final mass u:  " << mass_u << endl
+           << "Max value u:   " << umax << endl << setprecision(6)
+           << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
+      if (product_sync)
+      {
+         cout << setprecision(10)
+              << "Final mass us: " << mass_us << endl
+              << "Max value s:   " << s_max << endl << setprecision(6)
+              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+      }
    }
 
    // Compute errors, if the initial condition is equal to the final solution
@@ -1117,6 +1137,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          add(1.0, u, dt, d_u, u_new);
          ComputeBoolIndicators(NE, u_new, s_bool_el, s_bool_dofs);
 
+         // TODO are these needed?
          ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, u_new);
          ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, d_u);
 
