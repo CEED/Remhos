@@ -55,10 +55,9 @@ public:
    virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
-                               const Vector &u,
-                               const Vector &u_new, const Vector &u_new_LO,
+                               const Vector &u_new,
                                const Array<bool> &active_el,
-                               Vector &d_us)
+                               const Array<bool> &active_dofs, Vector &d_us)
    {
       MFEM_ABORT("Not implemented for the chosen solver");
    }
@@ -105,10 +104,9 @@ public:
    virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
-                               const Vector &u,
-                               const Vector &u_new, const Vector &u_new_LO,
+                               const Vector &u_new,
                                const Array<bool> &active_el,
-                               Vector &d_us);
+                               const Array<bool> &active_dofs, Vector &d_us);
 };
 
 class ClipScaleSolver : public FCTSolver

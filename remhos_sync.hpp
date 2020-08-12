@@ -33,6 +33,16 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
 
+// Used for debug calls.
+void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg);
+
+// Check if us_lo / s_lo is in the full stencil bounds.
+// This is the backbone theorem we use for the LO product solutions.
+void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
+                     const Vector &s_min, const Vector &s_max,
+                     const Array<bool> &active_el,
+                     const Array<bool> &active_dofs);
+
 class BoolFunctionCoefficient : public FunctionCoefficient
 {
 protected:

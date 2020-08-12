@@ -1141,15 +1141,21 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, u_new);
          ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, d_u);
 
-         // Evolved u_LO and get the new active elements.
+#ifdef REMHOS_FCT_DEBUG
+         // Evolved u_LO.
          Vector u_new_LO(size);
          add(1.0, u, dt, du_LO, u_new_LO);
-
-         // TODO move the s_min and s_max update here, back to const.
+         // Evolved us_LO.
+         Vector us_new_LO(size);
+         add(1.0, us, dt, d_us_LO, us_new_LO);
+         VerifyLOProduct(NE, us_new_LO, u_new_LO, dofs.xi_min, dofs.xi_max,
+                         s_bool_el, s_bool_dofs);
+#endif
 
          fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                     dofs.xi_min, dofs.xi_max,
-                                    u, u_new, u_new_LO, s_bool_el, d_us);
+                                    u_new,
+                                    s_bool_el, s_bool_dofs, d_us);
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
       else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }

@@ -107,6 +107,60 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
    }
 }
 
+void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg)
+{
+   std::cout << msg << std::endl;
+   const int ndofs = vec.Size() / NE;
+   for (int i = 0; i < ndofs; i++)
+   {
+      std::cout << vec(cell_id * ndofs + i) << " ";
+   }
+   std::cout << endl;
+}
+
+void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
+                     const Vector &s_min, const Vector &s_max,
+                     const Array<bool> &active_el,
+                     const Array<bool> &active_dofs)
+{
+   const double eps = 1.0e-12;
+   const int ndofs = u_LO.Size() / NE;
+   Vector s_min_loc, s_max_loc;
+
+   for (int k = 0; k < NE; k++)
+   {
+      if (active_el[k] == false) { continue; }
+
+      const double *us = &us_LO(k*ndofs), *u = &u_LO(k*ndofs);
+      s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
+      s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
+      const double smin = s_min_loc.Min(), smax = s_max_loc.Max();
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (active_dofs[k*ndofs + j] == false) { continue; }
+
+         if (us[j] + eps < smin * u[j] ||
+             us[j] - eps > smax * u[j])
+         {
+            const double s_LO = us[j] / u[j];
+            std::cout << "Element " << k << std::endl
+                      << "At " << j << " out of " << ndofs << std::endl
+                      << "Basic LO product theorem is violated: "
+                      << smin << " " << s_LO << " " << smax << std::endl
+                      << smin * u[j] << " "
+                      << us[j] << " " << smax * u[j] << std::endl
+                      << us[j] << " " << u[j] << std::endl;
+
+            PrintCellValues(k, NE, us_LO, "us_old_loc: ");
+            PrintCellValues(k, NE, u_LO, "u_old_loc: ");
+
+            MFEM_ABORT("[us_LO/u_LO] is not in the full stencil bounds!");
+         }
+      }
+   }
+}
+
 double BoolFunctionCoefficient::Eval(ElementTransformation &T,
                                      const IntegrationPoint &ip)
 {
