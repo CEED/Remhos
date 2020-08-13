@@ -912,6 +912,7 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
    {
+      ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el);
       const double s_max_loc = s.Max();
       MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
       MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
@@ -1136,10 +1137,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Vector u_new(size);
          add(1.0, u, dt, d_u, u_new);
          ComputeBoolIndicators(NE, u_new, s_bool_el, s_bool_dofs);
-
-         // TODO are these needed?
-         ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, u_new);
-         ZeroOutEmptyDofs(s_bool_el, s_bool_dofs, d_u);
 
 #ifdef REMHOS_FCT_DEBUG
          // Evolved u_LO.

@@ -122,19 +122,14 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          }
 #endif
 
-         // TODO improve here (don't set both).
-         if (s_avg + eps < s_min_loc(j) ||
-             s_avg - eps > s_max_loc(j))
-         {
-            s_min_loc(j) = s_avg;
-            s_max_loc(j) = s_avg;
-         }
+         if (s_avg + eps < s_min_loc(j)) { s_min_loc(j) = s_avg; }
+         if (s_avg - eps > s_max_loc(j)) { s_max_loc(j) = s_avg; }
       }
 
       // Take into account the compatible low-order solution.
       for (int j = 0; j < ndofs; j++)
       {
-         // In inactive dofs we get zeros for u*s, which should be fine.
+         // In inactive dofs we get u_new*s_avg ~ 0, which should be fine.
 
          dof_id = k*ndofs + j;
          double d_us_LO_j = (u_new(dof_id) * s_avg - us(dof_id)) / dt;
