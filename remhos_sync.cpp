@@ -78,9 +78,12 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
          else
          {
             const double s_j = u_s_el[j] / u_el[j];
-            // Soft transition between s_avg and s for u in [0, tol].
-            const double soft01 = 1.0 - std::exp(- u_el[j] / EMPTY_ZONE_TOL);
-            s_el[j] = (s_j - s_avg) * soft01 + s_avg;
+            if (u_el[j] > EMPTY_ZONE_TOL) { s_el[j] = s_j; }
+            else
+            {
+               // Continuous transition between s_avg and s for u in [0, tol].
+               s_el[j] = u_el[j] * (s_j - s_avg) / EMPTY_ZONE_TOL + s_avg;
+            }
 
             // NOTE: the above transition alters slightly the values of
             // s = us / u, near u = EMPTY_ZONE_TOL. This might break the theorem
