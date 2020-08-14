@@ -149,14 +149,14 @@ void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
             const double s_LO = us[j] / u[j];
             std::cout << "Element " << k << std::endl
                       << "At " << j << " out of " << ndofs << std::endl
-                      << "Basic LO product theorem is violated: "
-                      << smin << " " << s_LO << " " << smax << std::endl
+                      << "Basic LO product theorem is violated: " << endl
+                      << smin << " <= " << s_LO << " <= " << smax << std::endl
                       << smin * u[j] << " "
                       << us[j] << " " << smax * u[j] << std::endl
                       << us[j] << " " << u[j] << std::endl;
 
-            PrintCellValues(k, NE, us_LO, "us_old_loc: ");
-            PrintCellValues(k, NE, u_LO, "u_old_loc: ");
+            PrintCellValues(k, NE, us_LO, "us_LO_loc: ");
+            PrintCellValues(k, NE, u_LO, "u_LO_loc: ");
 
             MFEM_ABORT("[us_LO/u_LO] is not in the full stencil bounds!");
          }

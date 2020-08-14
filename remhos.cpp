@@ -1133,7 +1133,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                             dofs.xi_min, dofs.xi_max, &s_bool_el);
 
-         // Evolved u and get the new active elements.
+         // Evolve u and get the new active elements.
          Vector u_new(size);
          add(1.0, u, dt, d_u, u_new);
          ComputeBoolIndicators(NE, u_new, s_bool_el, s_bool_dofs);
@@ -1238,7 +1238,7 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 11:
+      case 10:
       {
          // Gresho deformation used for mesh motion in remap tests.
          const double r = sqrt(x(0)*x(0) + x(1)*x(1));
@@ -1255,12 +1255,12 @@ void velocity_function(const Vector &x, Vector &v)
          else { v = 0.0; }
          break;
       }
+      case 11:
       case 12:
       case 13:
       case 14:
       case 15:
       case 16:
-      case 10:
       case 17:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
