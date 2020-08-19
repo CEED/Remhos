@@ -91,10 +91,18 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          mass_us += us_new_LO_loc(j) * m(k*ndofs + j);
          mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
       }
-      const double s_avg = mass_us / mass_u;
+      double s_avg = mass_us / mass_u;
 
       s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
       s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
+      double s_min = numeric_limits<double>::infinity(),
+             s_max = -numeric_limits<double>::infinity();
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (active_dofs[k*ndofs + j] == false) { continue; }
+         s_min = min(s_min, s_min_loc(j));
+         s_max = max(s_max, s_max_loc(j));
+      }
 
       // When s_avg is not in the local bounds for some dof (it should be within
       // the global max and min for the element), reset the bounds to s_avg.
@@ -103,16 +111,27 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          dof_id = k*ndofs + j;
          if (active_dofs[dof_id] == false) { continue; }
 
+         // Check if there's a violation, s_avg < s_min, due to round-offs in
+         // division (the 2nd check means s_avg = mass_us / mass_u > s_min).
+         if (s_avg + eps < s_min &&
+             mass_us + eps > s_min * mass_u) { s_avg = s_min; }
+         // Check if there's a violation, s_avg > s_max, due to round-offs in
+         // division (the 2nd check means s_avg = mass_us / mass_u < s_max).
+         if (s_avg - eps > s_max &&
+             mass_us - eps < s_max * mass_u) { s_avg = s_max; }
+
+
 #ifdef REMHOS_FCT_DEBUG
          // Check if s_avg = mass_us / mass_u is within the bounds for the cell.
          // The check avoids dividing by small numbers, which would make
          // rounding errors huge.
-         double minv = s_min_loc.Min(), maxv = s_max_loc.Max();
-         if (mass_us + eps < minv * mass_u ||
-             mass_us - eps > maxv * mass_u)
+         if (mass_us + eps < s_min * mass_u ||
+             mass_us - eps > s_max * mass_u ||
+             s_avg + eps < s_min ||
+             s_avg - eps > s_max)
          {
             std::cout << "---\ns_avg element bounds: "
-                      << minv << " " << s_avg << " " << maxv << std::endl;
+                      << s_min << " " << s_avg << " " << s_max << std::endl;
             std::cout << "Element " << k << std::endl;
             std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
             PrintCellValues(k, NE, u_new, "u_loc: ");
@@ -223,6 +242,17 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       {
          dof_id = k*ndofs + j;
          if (active_dofs[dof_id] == false) { continue; }
+
+         double s = us_new(dof_id) / u_new(dof_id);
+         if (s + eps < s_min(dof_id) ||
+             s - eps > s_max(dof_id))
+         {
+            std::cout << "Final s " << j << " " << k << " "
+                      << s_min(dof_id) << " "
+                      << s << " "
+                      << s_max(dof_id) << std::endl;
+            std::cout << "---\n";
+         }
 
          if (us_new(dof_id) + eps < us_min(dof_id) ||
              us_new(dof_id) - eps > us_max(dof_id))

@@ -136,7 +136,9 @@ public:
 
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,
-                              Vector &u_min, Vector &u_max) const;
+                              Vector &u_min, Vector &u_max,
+                              Array<bool> *active_el,
+                              Array<bool> *active_dof) const;
 };
 
 class Assembly

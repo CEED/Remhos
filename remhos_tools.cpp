@@ -414,7 +414,9 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
 }
 
 void DofInfo::ComputeElementsMinMax(const Vector &u,
-                                    Vector &u_min, Vector &u_max) const
+                                    Vector &u_min, Vector &u_max,
+                                    Array<bool> *active_el,
+                                    Array<bool> *active_dof) const
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
@@ -423,9 +425,15 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
       u_min(k) = numeric_limits<double>::infinity();
       u_max(k) = -numeric_limits<double>::infinity();
 
+      // Inactive elements don't affect the bounds.
+      if (active_el && (*active_el)[k] == false) { continue; }
+
       for (int i = 0; i < ndof; i++)
       {
          dof_id = k*ndof + i;
+         // Inactive dofs don't affect the bounds.
+         if (active_dof && (*active_dof)[dof_id] == false) { continue; }
+
          u_min(k) = min(u_min(k), u(dof_id));
          u_max(k) = max(u_max(k), u(dof_id));
       }

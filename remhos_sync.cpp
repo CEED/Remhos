@@ -44,15 +44,15 @@ void ComputeBoolIndicators(int NE, const Vector &u,
 
 // This function assumes a DG space.
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s, Array<bool> &s_bool)
+                  const Vector &lumpedM, Vector &s,
+                  Array<bool> &bool_el, Array<bool> &bool_dof)
 {
-   Array<bool> dummy;
-   ComputeBoolIndicators(NE, u, s_bool, dummy);
+   ComputeBoolIndicators(NE, u, bool_el, bool_dof);
 
    const int ndof = u.Size() / NE;
    for (int i = 0; i < NE; i++)
    {
-      if (s_bool[i] == false)
+      if (bool_el[i] == false)
       {
          for (int j = 0; j < ndof; j++) { s(i*ndof + j) = 0.0; }
          continue;
@@ -110,6 +110,26 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
    }
 }
 
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+                    const Vector &lumpedM)
+{
+   const int size = u.Size();
+   Vector s(size);
+   Array<bool> bool_el, bool_dofs;
+   ComputeBoolIndicators(NE, u, bool_el, bool_dofs);
+   ComputeRatio(NE, u_s, u, lumpedM, s, bool_el, bool_dofs);
+   double min_s = numeric_limits<double>::infinity();
+   double max_s = -numeric_limits<double>::infinity();
+   for (int i = 0; i < size; i++)
+   {
+      if (bool_dofs[i] == false) { continue; }
+
+      min_s = min(s(i), min_s);
+      max_s = max(s(i), max_s);
+   }
+   std::cout << min_s << " " << max_s << std::endl;
+}
+
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg)
 {
    std::cout << msg << std::endl;
@@ -137,23 +157,30 @@ void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
       const double *us = &us_LO(k*ndofs), *u = &u_LO(k*ndofs);
       s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
       s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
-      const double smin = s_min_loc.Min(), smax = s_max_loc.Max();
+      double s_min = numeric_limits<double>::infinity(),
+             s_max = -numeric_limits<double>::infinity();
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (active_dofs[k*ndofs + j] == false) { continue; }
+         s_min = min(s_min, s_min_loc(j));
+         s_max = max(s_max, s_max_loc(j));
+      }
 
       for (int j = 0; j < ndofs; j++)
       {
          if (active_dofs[k*ndofs + j] == false) { continue; }
 
-         if (us[j] + eps < smin * u[j] ||
-             us[j] - eps > smax * u[j])
+         if (us[j] + eps < s_min * u[j] ||
+             us[j] - eps > s_max * u[j])
          {
             const double s_LO = us[j] / u[j];
             std::cout << "Element " << k << std::endl
                       << "At " << j << " out of " << ndofs << std::endl
                       << "Basic LO product theorem is violated: " << endl
-                      << smin << " <= " << s_LO << " <= " << smax << std::endl
-                      << smin * u[j] << " "
-                      << us[j] << " " << smax * u[j] << std::endl
-                      << us[j] << " " << u[j] << std::endl;
+                      << s_min << " <= " << s_LO << " <= " << s_max << std::endl
+                      << s_min * u[j] << " <= "
+                      << us[j] << " <= " << s_max * u[j] << std::endl
+                      << "s_LO = " << us[j] << " / " << u[j] << std::endl;
 
             PrintCellValues(k, NE, us_LO, "us_LO_loc: ");
             PrintCellValues(k, NE, u_LO, "u_LO_loc: ");

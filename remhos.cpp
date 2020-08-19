@@ -858,7 +858,8 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                // Recompute s = u_s / u.
-               ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el);
+               ComputeRatio(pmesh.GetNE(), us, u, masses, s,
+                            u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
                               Wx + Ww, Wy, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
@@ -912,7 +913,7 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
    {
-      ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el);
+      ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el, u_bool_dofs);
       const double s_max_loc = s.Max();
       MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
       MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
@@ -1096,7 +1097,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       lo_solver->CalcLOSolution(u, du_LO);
       ho_solver->CalcHOSolution(u, du_HO);
 
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max);
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
@@ -1123,20 +1124,27 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          lo_solver->CalcLOSolution(us, d_us_LO);
          ho_solver->CalcHOSolution(us, d_us_HO);
 
-         // Compute the ratio s = us / u.
+         // Compute the ratio s = us_old / u_old, and old active dofs.
          Vector s(size);
          Array<bool> s_bool_el, s_bool_dofs;
-         ComputeRatio(NE, us, u, lumpedM, s, s_bool_el);
+         ComputeRatio(NE, us, u, lumpedM, s, s_bool_el, s_bool_dofs);
+#ifdef REMHOS_FCT_DEBUG
+         ComputeMinMaxS(NE, us, u, lumpedM);
+#endif
 
-         // Bounds for s, based on the old values (and old active elements).
-         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max);
+         // Bounds for s, based on the old values (and old active dofs).
+         // This doesn't consider s values from the old inactive dofs, because
+         // there were no bounds restriction on them at the previous time step.
+         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+                                    &s_bool_el, &s_bool_dofs);
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                             dofs.xi_min, dofs.xi_max, &s_bool_el);
 
-         // Evolve u and get the new active elements.
+         // Evolve u and get the new active dofs.
          Vector u_new(size);
          add(1.0, u, dt, d_u, u_new);
-         ComputeBoolIndicators(NE, u_new, s_bool_el, s_bool_dofs);
+         Array<bool> s_bool_el_new, s_bool_dofs_new;
+         ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
 #ifdef REMHOS_FCT_DEBUG
          // Evolved u_LO.
@@ -1146,13 +1154,20 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Vector us_new_LO(size);
          add(1.0, us, dt, d_us_LO, us_new_LO);
          VerifyLOProduct(NE, us_new_LO, u_new_LO, dofs.xi_min, dofs.xi_max,
-                         s_bool_el, s_bool_dofs);
+                         s_bool_el_new, s_bool_dofs_new);
 #endif
 
          fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                     dofs.xi_min, dofs.xi_max,
                                     u_new,
-                                    s_bool_el, s_bool_dofs, d_us);
+                                    s_bool_el_new, s_bool_dofs_new, d_us);
+
+#ifdef REMHOS_FCT_DEBUG
+         Vector us_new(size);
+         add(1.0, us, dt, d_us, us_new);
+         ComputeMinMaxS(NE, us_new, u_new, lumpedM);
+         std::cout << " --- " << std::endl;
+#endif
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
       else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }

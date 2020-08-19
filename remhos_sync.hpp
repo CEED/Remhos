@@ -28,12 +28,15 @@ void ComputeBoolIndicators(int NE, const Vector &u,
                            Array<bool> &ind_elem, Array<bool> &ind_dofs);
 
 void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s, Array<bool> &s_bool);
+                  const Vector &lumpedM, Vector &s,
+                  Array<bool> &bool_el, Array<bool> &bool_dof);
 
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
 
-// Used for debug calls.
+// Set of functions that are used for debug calls.
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+                    const Vector &lumpedM);
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg);
 
 // Check if us_lo / s_lo is in the full stencil bounds.
