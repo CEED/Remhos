@@ -55,4 +55,6 @@ echo -e '\n'"--- Steady monolithic 1 2D" >> $file
 echo -e $vis_command" -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1" >> $file
 $command -m ../data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1 | grep -e 'Final' -e 'value'>> $file
 
+
+
 exit 0

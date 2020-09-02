@@ -17,7 +17,7 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
-#define REMHOS_FCT_DEBUG
+//#define REMHOS_FCT_DEBUG
 
 #include "mfem.hpp"
 
@@ -59,7 +59,7 @@ public:
                                const Array<bool> &active_el,
                                const Array<bool> &active_dofs, Vector &d_us)
    {
-      MFEM_ABORT("Not implemented for the chosen solver");
+      MFEM_ABORT("Product remap is not implemented for the chosen solver");
    }
 };
 

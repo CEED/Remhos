@@ -232,9 +232,11 @@ Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the 
 7.  `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -ho 1 -lo 4 -fct 2`
 8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 1 -lo 4 -fct 2`
 9.  `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 -ho 1 -lo 4 -fct 2`
-10. `mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -ho 1 -lo 4 -fct 2`
-11. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2`
-12. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1`
+10. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1`
+11. `mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -ho 1 -lo 4 -fct 2`
+12. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2`
+13. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1`
+
 
 | `run` | `mass` | `max` |
 | ----- | ------ | ----- |
@@ -247,9 +249,10 @@ Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the 
 |  7. | 0.9607429525 | 0.7678305756 |
 |  8. | 0.8087104604 | 0.9999889315 |
 |  9. | 0.08479546709| 0.8156091428 |
-| 10. | 0.1197294512 | 0.9990312449 |
-| 11. | 0.1570667907 | 0.9987771164 |
-| 12. | 0.3182739921 | 1            |
+| 10. | 0.09075745567| 0.9943988056 |
+| 11. | 0.1197294512 | 0.9990312449 |
+| 12. | 0.1570667907 | 0.9987771164 |
+| 13. | 0.3182739921 | 1            |
 
 An implementation is considered valid if the computed values are all within
 round-off distance from the above reference values.
