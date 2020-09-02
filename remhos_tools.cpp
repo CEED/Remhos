@@ -283,9 +283,12 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       if (resid <= abs_tol) { break; }
 
+      y.HostReadWrite();
+      z.HostReadWrite();
+      const double *h_lumpedMH1 = lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
-         y(i) -= z(i) / lumpedMH1(i);
+         y(i) -= z(i) / h_lumpedMH1[i];
       }
    }
 
@@ -309,9 +312,12 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 
       if (resid <= abs_tol) { break; }
 
+      y.HostReadWrite();
+      z.HostReadWrite();
+      const double * h_lumpedMH1 = lumpedMH1.HostRead();
       for (i = 0; i < N; i++)
       {
-         y(i) -= z(i) / lumpedMH1(i);
+         y(i) -= z(i) / h_lumpedMH1[i];
       }
    }
 }
@@ -383,6 +389,8 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       // Inactive elements don't affect the bounds.
       if (active_el && (*active_el)[i] == false) { continue; }
 
+      x_min.HostReadWrite();
+      x_max.HostReadWrite();
       pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
@@ -854,6 +862,9 @@ void Assembly::NonlinFluxLumping(const int k, const int nd,
       xDiff(j) = xNeighbor - x(dofInd);
    }
 
+   y.HostReadWrite();
+   bdrInt.HostRead();
+   xDiff.HostReadWrite();
    for (i = 0; i < dofs.numFaceDofs; i++)
    {
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
@@ -1345,6 +1356,7 @@ void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
 
 void GetMinMax(const ParGridFunction &g, double &min, double &max)
 {
+   g.HostRead();
    double min_loc = g.Min(), max_loc = g.Max();
    MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);

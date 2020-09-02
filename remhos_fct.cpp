@@ -276,7 +276,8 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
    double *flux_data = flux_mat.GetData();
    const int *K_I = K.GetI(), *K_J = K.GetJ();
    const double *K_data = K.GetData();
-   const double *u_np = u.FaceNbrData().GetData();
+   const double *u_np = u.FaceNbrData().HostRead();
+   u.HostRead();
    for (int i = 0; i < s; i++)
    {
       for (int k = K_I[i]; k < K_I[i + 1]; k++)
@@ -322,6 +323,8 @@ void FluxBasedFCT::AddFluxesAtDofs(const SparseMatrix &flux_mat,
    const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
    flux_pos = 0.0;
    flux_neg = 0.0;
+   flux_pos.HostReadWrite();
+   flux_neg.HostReadWrite();
    for (int i = 0; i < s; i++)
    {
       for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
@@ -378,6 +381,9 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
           &a_neg_n = coeff_neg.FaceNbrData();
    coeff_pos.ExchangeFaceNbrData();
    coeff_neg.ExchangeFaceNbrData();
+   coeff_pos.HostReadWrite();
+   coeff_neg.HostReadWrite();
+   du.HostReadWrite();
    du = du_lo;
    double *flux_data = flux_mat.GetData();
    const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
@@ -432,6 +438,9 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
+   u.HostRead();
+   du.HostReadWrite();
+   du_lo.Read(); du_ho.Read();
    for (int k = 0; k < NE; k++)
    {
       sumPos = sumNeg = 0.0;

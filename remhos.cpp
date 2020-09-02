@@ -140,6 +140,7 @@ int main(int argc, char *argv[])
    bool verify_bounds = false;
    bool product_sync = false;
    int vis_steps = 100;
+   const char *device_config = "cpu";
 
    int precision = 8;
    cout.precision(precision);
@@ -183,6 +184,8 @@ int main(int argc, char *argv[])
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
+   args.AddOption(&device_config, "-d", "--device",
+                  "Device configuration string, see Device::Configure().");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
                   "Smoothness indicator: 0 - no smoothness indicator,\n\t"
                   "                      1 - approx_quadratic,\n\t"
@@ -212,6 +215,11 @@ int main(int argc, char *argv[])
       return 1;
    }
    if (myid == 0) { args.PrintOptions(cout); }
+
+   // Enable hardware devices such as GPUs, and programming models such as
+   // CUDA, OCCA, RAJA and OpenMP based on command line options.
+   Device device(device_config);
+   if (myid == 0) { device.Print(); }
 
    // When not using lua, exec mode is derived from problem number convention
    if (problem_num < 10)      { exec_mode = 0; }
@@ -711,6 +719,7 @@ int main(int argc, char *argv[])
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 400, Wh = 400; // window size
+      u.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       if (product_sync)
       {
@@ -830,6 +839,7 @@ int main(int argc, char *argv[])
       {
          // Steady state problems - stop at convergence.
          double res_loc = 0.;
+         lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
          for (int i = 0; i < res.Size(); i++)
          {
             res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
@@ -897,6 +907,7 @@ int main(int argc, char *argv[])
    {
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
+      lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
       mass_u_loc = lumpedM * u;
       if (product_sync) { mass_us_loc = lumpedM * us; }
@@ -1045,6 +1056,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Kbf.Assemble(0);
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
+      lumpedM.HostReadWrite();
       ml.SpMat().GetDiag(lumpedM);
 
       M_HO.BilinearForm::operator=(0.0);
