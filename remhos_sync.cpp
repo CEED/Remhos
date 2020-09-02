@@ -43,8 +43,8 @@ void ComputeBoolIndicators(int NE, const Vector &u,
 }
 
 // This function assumes a DG space.
-void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s,
+void ComputeRatio(int NE, const Vector &us, const Vector &u,
+                  Vector &s,
                   Array<bool> &bool_el, Array<bool> &bool_dof)
 {
    ComputeBoolIndicators(NE, u, bool_el, bool_dof);
@@ -58,16 +58,22 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
          continue;
       }
 
-      const double *u_el = &u(i*ndof), *u_s_el = &u_s(i*ndof);
+      const double *u_el = &u(i*ndof), *us_el = &us(i*ndof);
       double *s_el = &s(i*ndof);
 
-      double mass_u_s = 0.0, mass_u = 0.0;
+      // Average of the existing values.
+      int n = 0;
+      double sum = 0.0;
       for (int j = 0; j < ndof; j++)
       {
-         mass_u += lumpedM(i*ndof + j) * u_el[j];
-         mass_u_s += lumpedM(i*ndof + j) * u_s_el[j];
+         if (u_el[j] > EMPTY_ZONE_TOL)
+         {
+            sum += us_el[j] / u_el[j];
+            n++;
+         }
       }
-      const double s_avg = mass_u_s / mass_u;
+      MFEM_VERIFY(n > 0, "Major error that makes no sense");
+      const double s_avg = sum / n;
 
       for (int j = 0; j < ndof; j++)
       {
@@ -77,7 +83,7 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
          }
          else
          {
-            const double s_j = u_s_el[j] / u_el[j];
+            const double s_j = us_el[j] / u_el[j];
             if (u_el[j] > EMPTY_ZONE_TOL) { s_el[j] = s_j; }
             else
             {
@@ -110,14 +116,13 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
    }
 }
 
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
-                    const Vector &lumpedM)
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
 {
    const int size = u.Size();
    Vector s(size);
    Array<bool> bool_el, bool_dofs;
    ComputeBoolIndicators(NE, u, bool_el, bool_dofs);
-   ComputeRatio(NE, u_s, u, lumpedM, s, bool_el, bool_dofs);
+   ComputeRatio(NE, u_s, u, s, bool_el, bool_dofs);
    double min_s = numeric_limits<double>::infinity();
    double max_s = -numeric_limits<double>::infinity();
    for (int i = 0; i < size; i++)
@@ -127,7 +132,31 @@ void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
       min_s = min(s(i), min_s);
       max_s = max(s(i), max_s);
    }
-   std::cout << min_s << " " << max_s << std::endl;
+   double min_s_glob, max_s_glob;
+   MPI_Allreduce(&min_s, &min_s_glob, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   MPI_Allreduce(&max_s, &max_s_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+   if (myid == 0) { std::cout << min_s_glob << " " << max_s_glob << std::endl; }
+}
+
+void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid)
+{
+   const int size = s.Size();
+   double min_s = numeric_limits<double>::infinity();
+   double max_s = -numeric_limits<double>::infinity();
+   for (int i = 0; i < size; i++)
+   {
+      if (bool_dofs[i] == false) { continue; }
+
+      min_s = min(s(i), min_s);
+      max_s = max(s(i), max_s);
+   }
+   double min_s_glob, max_s_glob;
+   MPI_Allreduce(&min_s, &min_s_glob, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   MPI_Allreduce(&max_s, &max_s_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+   if (myid == 0)
+   { std::cout << min_s_glob << " " << max_s_glob << std::endl; }
 }
 
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg)

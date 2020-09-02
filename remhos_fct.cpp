@@ -68,10 +68,10 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    // Compute a compatible low-order solutions.
    const int NE = us.ParFESpace()->GetNE();
    const int ndofs = us.Size() / NE;
-   Vector us_new_LO_loc(ndofs), flux_loc(ndofs), beta(ndofs), dus_lo_fct(us.Size());
-   Vector us_min(us.Size()), us_max(us.Size());
-   DenseMatrix fij_loc(ndofs);
-   fij_loc = 0.0;
+   Vector us_new_LO_el(ndofs), flux_el(ndofs), beta(ndofs);
+   Vector dus_lo_fct(us.Size()), us_min(us.Size()), us_max(us.Size());
+   DenseMatrix fij_el(ndofs);
+   fij_el = 0.0;
 
    Vector s_min_loc, s_max_loc;
 
@@ -87,12 +87,13 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       double mass_us = 0.0, mass_u = 0.0;
       for (int j = 0; j < ndofs; j++)
       {
-         us_new_LO_loc(j) = us(k*ndofs + j) + dt * d_us_LO(k*ndofs + j);
-         mass_us += us_new_LO_loc(j) * m(k*ndofs + j);
+         us_new_LO_el(j) = us(k*ndofs + j) + dt * d_us_LO(k*ndofs + j);
+         mass_us += us_new_LO_el(j) * m(k*ndofs + j);
          mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
       }
       double s_avg = mass_us / mass_u;
 
+      // Min and max of s using the full stencil of active dofs.
       s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
       s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
       double s_min = numeric_limits<double>::infinity(),
@@ -104,12 +105,10 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          s_max = max(s_max, s_max_loc(j));
       }
 
-      // When s_avg is not in the local bounds for some dof (it should be within
-      // the global max and min for the element), reset the bounds to s_avg.
+      // Fix inconsistencies due to round-off and the usage of local bounds.
       for (int j = 0; j < ndofs; j++)
       {
-         dof_id = k*ndofs + j;
-         if (active_dofs[dof_id] == false) { continue; }
+         if (active_dofs[k*ndofs + j] == false) { continue; }
 
          // Check if there's a violation, s_avg < s_min, due to round-offs in
          // division (the 2nd check means s_avg = mass_us / mass_u > s_min).
@@ -122,9 +121,8 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
 
 #ifdef REMHOS_FCT_DEBUG
-         // Check if s_avg = mass_us / mass_u is within the bounds for the cell.
-         // The check avoids dividing by small numbers, which would make
-         // rounding errors huge.
+         // Check if s_avg = mass_us / mass_u is within the bounds of the full
+         // stencil of active dofs.
          if (mass_us + eps < s_min * mass_u ||
              mass_us - eps > s_max * mass_u ||
              s_avg + eps < s_min ||
@@ -135,12 +133,14 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
             std::cout << "Element " << k << std::endl;
             std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
             PrintCellValues(k, NE, u_new, "u_loc: ");
-            std::cout << "us_loc_LO: " << std::endl; us_new_LO_loc.Print();
+            std::cout << "us_loc_LO: " << std::endl; us_new_LO_el.Print();
 
             MFEM_ABORT("s_avg is not in the full stencil bounds!");
          }
 #endif
 
+         // When s_avg is not in the local bounds for some dof (it should be
+         // within the full stencil of active dofs), reset the bounds to s_avg.
          if (s_avg + eps < s_min_loc(j)) { s_min_loc(j) = s_avg; }
          if (s_avg - eps > s_max_loc(j)) { s_max_loc(j) = s_avg; }
       }
@@ -152,7 +152,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
          dof_id = k*ndofs + j;
          double d_us_LO_j = (u_new(dof_id) * s_avg - us(dof_id)) / dt;
-         flux_loc(j) = m(dof_id) * dt * (d_us_LO(dof_id) - d_us_LO_j);
+         flux_el(j) = m(dof_id) * dt * (d_us_LO(dof_id) - d_us_LO_j);
          // Change the LO solution.
          dus_lo_fct(dof_id) = d_us_LO_j;
 
@@ -165,10 +165,10 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       {
          for (int i = 0; i < j; i++)
          {
-            fij_loc(i, j) = beta(j) * flux_loc(i) - beta(i) * flux_loc(j);
+            fij_el(i, j) = beta(j) * flux_el(i) - beta(i) * flux_el(j);
          }
       }
-      flux_ij.AddSubMatrix(dofs, dofs, fij_loc);
+      flux_ij.AddSubMatrix(dofs, dofs, fij_el);
 
       // Rescale the bounds (s_min, s_max) -> (u*s_min, u*s_max).
       for (int j = 0; j < ndofs; j++)

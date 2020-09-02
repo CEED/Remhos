@@ -27,20 +27,23 @@ namespace mfem
 void ComputeBoolIndicators(int NE, const Vector &u,
                            Array<bool> &ind_elem, Array<bool> &ind_dofs);
 
-void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  const Vector &lumpedM, Vector &s,
+void ComputeRatio(int NE, const Vector &u_s, const Vector &u, Vector &s,
                   Array<bool> &bool_el, Array<bool> &bool_dof);
 
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
 
 // Set of functions that are used for debug calls.
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
-                    const Vector &lumpedM);
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid);
+void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid);
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg);
 
-// Check if us_lo / s_lo is in the full stencil bounds.
-// This is the backbone theorem we use for the LO product solutions.
+// Checks if us_lo / s_lo is in the full stencil bounds.
+// Full stencil here means the whole neighborhood of active dofs.
+// Although it is the backbone theorem we use for the LO product solutions
+// (ALE hydro paper 2018), in the case of local bounds it does not hold, because
+// the LO discrete upwind procedure always uses the full stencil, without any
+// notion of active dofs.
 void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
                      const Vector &s_min, const Vector &s_max,
                      const Array<bool> &active_el,

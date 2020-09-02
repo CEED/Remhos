@@ -858,8 +858,7 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                // Recompute s = u_s / u.
-               ComputeRatio(pmesh.GetNE(), us, u, masses, s,
-                            u_bool_el, u_bool_dofs);
+               ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
                               Wx + Ww, Wy, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
@@ -913,7 +912,7 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
    {
-      ComputeRatio(pmesh.GetNE(), us, u, masses, s, u_bool_el, u_bool_dofs);
+      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
       const double s_max_loc = s.Max();
       MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
       MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
@@ -1127,9 +1126,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          // Compute the ratio s = us_old / u_old, and old active dofs.
          Vector s(size);
          Array<bool> s_bool_el, s_bool_dofs;
-         ComputeRatio(NE, us, u, lumpedM, s, s_bool_el, s_bool_dofs);
+         ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
 #ifdef REMHOS_FCT_DEBUG
-         ComputeMinMaxS(NE, us, u, lumpedM);
+         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
 #endif
 
          // Bounds for s, based on the old values (and old active dofs).
@@ -1146,17 +1145,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Array<bool> s_bool_el_new, s_bool_dofs_new;
          ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
-#ifdef REMHOS_FCT_DEBUG
-         // Evolved u_LO.
-         Vector u_new_LO(size);
-         add(1.0, u, dt, du_LO, u_new_LO);
-         // Evolved us_LO.
-         Vector us_new_LO(size);
-         add(1.0, us, dt, d_us_LO, us_new_LO);
-         VerifyLOProduct(NE, us_new_LO, u_new_LO, dofs.xi_min, dofs.xi_max,
-                         s_bool_el_new, s_bool_dofs_new);
-#endif
-
          fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                     dofs.xi_min, dofs.xi_max,
                                     u_new,
@@ -1165,8 +1153,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 #ifdef REMHOS_FCT_DEBUG
          Vector us_new(size);
          add(1.0, us, dt, d_us, us_new);
-         ComputeMinMaxS(NE, us_new, u_new, lumpedM);
-         std::cout << " --- " << std::endl;
+         int myid = x_gf.ParFESpace()->GetMyRank();
+         ComputeMinMaxS(NE, us_new, u_new, myid);
+         if (myid == 0) { std::cout << " --- " << std::endl; }
 #endif
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
