@@ -27,6 +27,10 @@ void ComputeBoolIndicators(int NE, const Vector &u,
    ind_elem.SetSize(NE);
    ind_dofs.SetSize(u.Size());
 
+   ind_elem.HostWrite();
+   ind_dofs.HostWrite();
+   u.HostRead();
+
    const int ndof = u.Size() / NE;
    int dof_id;
    for (int i = 0; i < NE; i++)
@@ -43,11 +47,16 @@ void ComputeBoolIndicators(int NE, const Vector &u,
 }
 
 // This function assumes a DG space.
-void ComputeRatio(int NE, const Vector &us, const Vector &u,
-                  Vector &s,
+void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
                   Array<bool> &bool_el, Array<bool> &bool_dof)
 {
    ComputeBoolIndicators(NE, u, bool_el, bool_dof);
+
+   us.HostRead();
+   u.HostRead();
+   s.HostWrite();
+   bool_el.HostRead();
+   bool_dof.HostRead();
 
    const int ndof = u.Size() / NE;
    for (int i = 0; i < NE; i++)
@@ -103,6 +112,10 @@ void ComputeRatio(int NE, const Vector &us, const Vector &u,
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u)
 {
+   ind_elem.HostRead();
+   ind_dofs.HostRead();
+   u.HostReadWrite();
+
    const int NE = ind_elem.Size();
    const int ndofs = u.Size() / NE;
    for (int k = 0; k < NE; k++)
@@ -123,6 +136,9 @@ void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
    Array<bool> bool_el, bool_dofs;
    ComputeBoolIndicators(NE, u, bool_el, bool_dofs);
    ComputeRatio(NE, u_s, u, s, bool_el, bool_dofs);
+
+   bool_dofs.HostRead();
+
    double min_s = numeric_limits<double>::infinity();
    double max_s = -numeric_limits<double>::infinity();
    for (int i = 0; i < size; i++)
@@ -141,6 +157,9 @@ void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
 
 void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid)
 {
+   s.HostRead();
+   bool_dofs.HostRead();
+
    const int size = s.Size();
    double min_s = numeric_limits<double>::infinity();
    double max_s = -numeric_limits<double>::infinity();

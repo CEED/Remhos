@@ -61,6 +61,14 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, d_us_HO, flux_ij);
 
+   us.HostRead();
+   d_us_LO.HostRead();
+   s_min.HostReadWrite();
+   s_max.HostReadWrite();
+   u_new.HostRead();
+   active_el.HostRead();
+   active_dofs.HostRead();
+
    const double eps = 1e-12;
    int dof_id;
 
