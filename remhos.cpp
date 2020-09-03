@@ -615,12 +615,13 @@ int main(int argc, char *argv[])
    const int vsize = pfes.GetVSize();
    Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
-   BlockVector S(offset);
+   BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
    u.MakeRef(&pfes, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
+   u.SyncAliasMemory(S);
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -630,10 +631,15 @@ int main(int argc, char *argv[])
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
+      s.SyncAliasMemory(S);
 
       us.MakeRef(&pfes, S, offset[1]);
+      us.HostWrite();
+      u.HostRead();
+      s.HostRead();
       // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
+      us.SyncAliasMemory(S);
    }
 
    // Smoothness indicator.
@@ -720,6 +726,7 @@ int main(int argc, char *argv[])
       int Wx = 0, Wy = 0; // window position
       const int Ww = 400, Wh = 400; // window size
       u.HostRead();
+      s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       if (product_sync)
       {
@@ -787,7 +794,7 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   for (int ti = 0; !done; )
+   for (int ti = 0; !done;)
    {
       double dt_real = min(dt, t_final - t);
 
@@ -795,6 +802,8 @@ int main(int argc, char *argv[])
 
       ode_solver->Step(S, t, dt_real);
       ti++;
+
+      u.SyncAliasMemory(S);
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -1112,6 +1121,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+
+      d_u.GetMemory().SyncAlias(Y.GetMemory(), d_u.Size());
    }
    else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
