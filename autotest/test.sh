@@ -55,6 +55,11 @@ for method in "${methods[@]}"; do
 
 done
 
+echo -e '\n'"--- Product remap 2D" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1"
+echo -e $run_line >> $file
+$run_line | grep -e 'mass us' -e 'loss us'>> $file
+
 echo -e '\n'"--- Steady monolithic 2 2D" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2"
 echo -e $run_line >> $file
