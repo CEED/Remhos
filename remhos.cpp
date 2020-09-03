@@ -1265,7 +1265,7 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 10:
+      case 11:
       {
          // Gresho deformation used for mesh motion in remap tests.
          const double r = sqrt(x(0)*x(0) + x(1)*x(1));
@@ -1282,7 +1282,7 @@ void velocity_function(const Vector &x, Vector &v)
          else { v = 0.0; }
          break;
       }
-      case 11:
+      case 10:
       case 12:
       case 13:
       case 14:
