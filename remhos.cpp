@@ -631,7 +631,6 @@ int main(int argc, char *argv[])
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
-      s.SyncAliasMemory(S);
 
       us.MakeRef(&pfes, S, offset[1]);
       us.HostWrite();
