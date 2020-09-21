@@ -11,7 +11,9 @@ methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
         # "-ho 2 -lo 3 -fct 3"   # Manuel
           "-ho 3 -lo 1 -fct 1" ) # Blast
 
+echo $PWD
 cd ..
+echo $PWD
 rm -f $file
 
 for method in "${methods[@]}"; do
