@@ -4,16 +4,14 @@ file="autotest/out_test.dat"
 
 ntask=$1
 
-command="mpirun -np "$((ntask))" remhos -no-vis --verify-bounds"
+command="mpirun -np "$((ntask))" ./remhos -no-vis --verify-bounds"
 
 methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
           "-ho 3 -lo 4 -fct 2"   # Hennes 2
         # "-ho 2 -lo 3 -fct 3"   # Manuel
           "-ho 3 -lo 1 -fct 1" ) # Blast
 
-echo $PWD
 cd ..
-echo $PWD
 rm -f $file
 
 for method in "${methods[@]}"; do
