@@ -286,6 +286,7 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
    const double *K_data = K.GetData();
    const double *u_np = u.FaceNbrData().HostRead();
    u.HostRead();
+   du_ho.HostRead();
    for (int i = 0; i < s; i++)
    {
       for (int k = K_I[i]; k < K_I[i + 1]; k++)
@@ -389,10 +390,13 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
           &a_neg_n = coeff_neg.FaceNbrData();
    coeff_pos.ExchangeFaceNbrData();
    coeff_neg.ExchangeFaceNbrData();
+
+   du = du_lo;
+
    coeff_pos.HostReadWrite();
    coeff_neg.HostReadWrite();
    du.HostReadWrite();
-   du = du_lo;
+
    double *flux_data = flux_mat.GetData();
    const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
    const int s = du.Size();
