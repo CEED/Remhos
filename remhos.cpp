@@ -803,6 +803,7 @@ int main(int argc, char *argv[])
       ti++;
 
       u.SyncAliasMemory(S);
+      if (product_sync) { us.SyncAliasMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -1101,8 +1102,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();
-   Vector u(X.GetData(), size);
-   Vector d_u(Y.GetData(), size);
+
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
+   Vector u, d_u;
+   Vector* xptr = const_cast<Vector*>(&X);
+   u.MakeRef(*xptr, 0, size);
+   d_u.MakeRef(Y, 0, size);
    Vector du_HO(u.Size()), du_LO(u.Size());
 
    x_gf = u;
@@ -1120,18 +1127,19 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
-
-      d_u.GetMemory().SyncAlias(Y.GetMemory(), d_u.Size());
    }
    else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
+   d_u.SyncAliasMemory(Y);
+
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
    {
-      Vector us(X.GetData() + size, size);
-      Vector d_us(Y.GetData() + size, size);
+      Vector us, d_us;
+      us.MakeRef(*xptr, size, size);
+      d_us.MakeRef(Y, size, size);
 
       x_gf = us;
       x_gf.ExchangeFaceNbrData();
@@ -1183,6 +1191,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
       else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
       else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
    }
 }
 
