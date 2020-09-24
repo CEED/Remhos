@@ -1,10 +1,18 @@
 #!/bin/bash
 
+# execute with
+# ./test.sh 2      -- cpu
+# ./test.sh 2 cuda -- cuda
+
 file="autotest/out_test.dat"
 
 ntask=$1
 
-command="mpirun -np "$((ntask))" ./remhos -no-vis --verify-bounds"
+if [ "$2" = "cuda" ]; then
+  command="lrun -n "$((ntask))" ./remhos -no-vis --verify-bounds -d cuda"
+else
+  command="mpirun -np "$((ntask))" ./remhos -no-vis --verify-bounds"
+fi
 
 methods=( "-ho 1 -lo 2 -fct 2"   # Hennes 1
           "-ho 3 -lo 4 -fct 2"   # Hennes 2
