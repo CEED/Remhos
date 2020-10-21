@@ -45,12 +45,12 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    // Discretization and monotonicity terms.
    D.Mult(u, du);
 
-   // Lump fluxes (for PDU), compute min/max, and invert lumped mass matrix.
+   // Lump fluxes (for PDU).
    ParGridFunction u_gf(&pfes);
    u_gf = u;
    u_gf.ExchangeFaceNbrData();
    Vector &u_nd = u_gf.FaceNbrData();
-   const int ne = pfes.GetMesh()->GetNE();
+   const int ne = pfes.GetNE();
    u.HostRead();
    du.HostReadWrite();
    M_lumped.HostRead();
@@ -61,18 +61,10 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
       {
          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
-
-      // Compute min / max over elements (needed for FCT).
-      assembly.dofs.xe_min(k) = numeric_limits<double>::infinity();
-      assembly.dofs.xe_max(k) = -numeric_limits<double>::infinity();
-      for (int j = 0; j < ndof; j++)
-      {
-         int dof_id = k*ndof + j;
-         assembly.dofs.xe_max(k) = max(assembly.dofs.xe_max(k), u(dof_id));
-         assembly.dofs.xe_min(k) = min(assembly.dofs.xe_min(k), u(dof_id));
-         du(dof_id) /= M_lumped(dof_id);
-      }
    }
+
+   const int s = du.Size();
+   for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const

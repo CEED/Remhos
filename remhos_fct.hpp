@@ -17,6 +17,8 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
+//#define REMHOS_FCT_DEBUG
+
 #include "mfem.hpp"
 
 namespace mfem
@@ -49,6 +51,16 @@ public:
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const = 0;
+
+   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                               const Vector &d_us_HO, const Vector &d_us_LO,
+                               Vector &s_min, Vector &s_max,
+                               const Vector &u_new,
+                               const Array<bool> &active_el,
+                               const Array<bool> &active_dofs, Vector &d_us)
+   {
+      MFEM_ABORT("Product remap is not implemented for the chosen solver");
+   }
 };
 
 class FluxBasedFCT : public FCTSolver
@@ -56,10 +68,23 @@ class FluxBasedFCT : public FCTSolver
 protected:
    const SparseMatrix &K, &M;
    const Array<int> &K_smap;
+
+   // Temporary computation objects.
    mutable SparseMatrix flux_ij;
    mutable ParGridFunction gp, gm;
 
    const int iter_cnt;
+
+   void ComputeFluxMatrix(const ParGridFunction &u, const Vector &du_ho,
+                          SparseMatrix &flux_mat) const;
+   void AddFluxesAtDofs(const SparseMatrix &flux_mat,
+                        Vector &flux_pos, Vector &flux_neg) const;
+   void ComputeFluxCoefficients(const Vector &u, const Vector &du_lo,
+      const Vector &m, const Vector &u_min, const Vector &u_max,
+      Vector &coeff_pos, Vector &coeff_neg) const;
+   void UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
+      ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
+      SparseMatrix &flux_mat, Vector &du) const;
 
 public:
    FluxBasedFCT(ParFiniteElementSpace &space,
@@ -75,6 +100,13 @@ public:
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
+
+   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                               const Vector &d_us_HO, const Vector &d_us_LO,
+                               Vector &s_min, Vector &s_max,
+                               const Vector &u_new,
+                               const Array<bool> &active_el,
+                               const Array<bool> &active_dofs, Vector &d_us);
 };
 
 class ClipScaleSolver : public FCTSolver

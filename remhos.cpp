@@ -37,6 +37,7 @@
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
+#include "remhos_sync.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -59,6 +60,7 @@ void velocity_function(const Vector &x, Vector &v);
 
 // Initial condition
 double u0_function(const Vector &x);
+double s0_function(const Vector &x);
 
 // Inflow boundary condition
 double inflow_function(const Vector &x);
@@ -91,7 +93,7 @@ private:
    MonolithicSolver *mono_solver;
 
 public:
-   AdvectionOperator(BilinearForm &Mbf_, BilinearForm &_ml,
+   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -136,6 +138,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
+   bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
 
@@ -200,6 +203,9 @@ int main(int argc, char *argv[])
    args.AddOption(&verify_bounds, "-vb", "--verify-bounds", "-no-vb",
                   "--no-verify-bounds",
                   "Verify solution bounds after each time step.");
+   args.AddOption(&product_sync, "-ps", "--product-sync", "-no-ps",
+                  "--no-product-sync",
+                  "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -328,7 +334,8 @@ int main(int argc, char *argv[])
       if (order == 0)
       {
          // Disable monotonicity treatment for piecewise constants.
-         if (myid == 0) { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
+         if (myid == 0)
+         { mfem_warning("For -o 0, monotonicity treatment is disabled."); }
          lo_type = LOSolverType::None;
          fct_type = FCTSolverType::None;
          mono_type = MonolithicSolverType::None;
@@ -604,10 +611,35 @@ int main(int argc, char *argv[])
                                            subcell_scheme, time_dep);
    }
 
-   // Initial condition.
+   // Setup the initial conditions.
+   const int vsize = pfes.GetVSize();
+   Array<int> offset((product_sync) ? 3 : 2);
+   for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
+   BlockVector S(offset, Device::GetMemoryType());
+   // Primary scalar field is u.
    ParGridFunction u(&pfes);
+   u.MakeRef(&pfes, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
+   u.SyncAliasMemory(S);
+   // For the case of product remap, we also solve for s and u_s.
+   ParGridFunction s, us;
+   Array<bool> u_bool_el, u_bool_dofs;
+   if (product_sync)
+   {
+      s.SetSpace(&pfes);
+      ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
+      BoolFunctionCoefficient sc(s0_function, u_bool_el);
+      s.ProjectCoefficient(sc);
+
+      us.MakeRef(&pfes, S, offset[1]);
+      us.HostWrite();
+      u.HostRead();
+      s.HostRead();
+      // Simple - we don't target conservation at initialization.
+      for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
+      us.SyncAliasMemory(S);
+   }
 
    // Smoothness indicator.
    SmoothnessIndicator *smth_indicator = NULL;
@@ -617,6 +649,7 @@ int main(int argc, char *argv[])
                                                pfes, u, dofs);
    }
 
+   // Setup of the high-order solver (if any).
    HOSolver *ho_solver = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
@@ -631,6 +664,7 @@ int main(int argc, char *argv[])
       ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
    }
 
+   // Setup of the monolithic solver (if any).
    MonolithicSolver *mono_solver = NULL;
    bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
    if (mono_type == MonolithicSolverType::ResDistMono)
@@ -675,7 +709,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout;
+   socketstream sout, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -685,24 +719,36 @@ int main(int argc, char *argv[])
       MPI_Barrier(pmesh.GetComm());
 
       sout.precision(8);
+      vis_s.precision(8);
+      vis_us.precision(8);
 
       int Wx = 0, Wy = 0; // window position
-      const int Ww = 350, Wh = 350; // window size
+      const int Ww = 400, Wh = 400; // window size
       u.HostRead();
-      VisualizeField(sout, vishost, visport, u, "Solution", Wx, Wy, Ww, Wh);
+      s.HostRead();
+      VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      if (product_sync)
+      {
+         VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                        Wx + Ww, Wy, Ww, Wh);
+         VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
+                        Wx + 2*Ww, Wy, Ww, Wh);
+      }
    }
 
-   // check for conservation
+   // Record the initial mass.
+   MPI_Comm comm = pmesh.GetComm();
    Vector masses(lumpedM);
-   const double initialMass_loc = lumpedM * u;
-   double initialMass;
-   MPI_Allreduce(&initialMass_loc, &initialMass, 1, MPI_DOUBLE, MPI_SUM,
-                 pmesh.GetComm());
+   const double mass0_u_loc = lumpedM * u;
+   double mass0_u, mass0_us;
+   MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+   if (product_sync)
+   {
+      const double mass0_us_loc = lumpedM * us;
+      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+   }
 
-   // Define the time-dependent evolution operator describing the ODE
-   // right-hand side, and perform time-integration (looping over the time
-   // iterations, ti, with a time-step dt).
-
+   // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
    if (fct_type == FCTSolverType::FluxBased)
@@ -723,7 +769,7 @@ int main(int argc, char *argv[])
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
 
-   AdvectionOperator adv(m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -745,15 +791,19 @@ int main(int argc, char *argv[])
    ParGridFunction res = u;
    double residual;
 
+   // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   for (int ti = 0; !done; )
+   for (int ti = 0; !done;)
    {
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
 
-      ode_solver->Step(u, t, dt_real);
+      ode_solver->Step(S, t, dt_real);
       ti++;
+
+      u.SyncAliasMemory(S);
+      if (product_sync) { us.SyncAliasMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -803,7 +853,7 @@ int main(int argc, char *argv[])
          {
             res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
          }
-         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
 
          residual = sqrt(residual);
          if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
@@ -821,10 +871,20 @@ int main(int argc, char *argv[])
          if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
-            int Ww = 350, Wh = 350; // window size
-            VisualizeField(sout, vishost, visport, u,
-                           "Solution", Wx, Wy, Ww, Wh);
+            int Ww = 400, Wh = 400; // window size
+            VisualizeField(sout, vishost, visport, u, "Solution",
+                           Wx, Wy, Ww, Wh);
+            if (product_sync)
+            {
+               // Recompute s = u_s / u.
+               ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+               VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                              Wx + Ww, Wy, Ww, Wh);
+               VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
+                              Wx + 2*Ww, Wy, Ww, Wh);
+            }
          }
+
          if (visit)
          {
             dc->SetCycle(ti);
@@ -851,27 +911,45 @@ int main(int argc, char *argv[])
    }
 
    // Check for mass conservation.
-   double finalMass_loc(0);
+   double mass_u_loc = 0.0, mass_us_loc = 0.0;
    if (exec_mode == 1)
    {
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
-      finalMass_loc = lumpedM * u;
+      mass_u_loc = lumpedM * u;
+      if (product_sync) { mass_us_loc = lumpedM * us; }
    }
-   else { finalMass_loc = masses * u; }
-   double finalMass;
-   MPI_Allreduce(&finalMass_loc, &finalMass, 1, MPI_DOUBLE, MPI_SUM,
-                 pmesh.GetComm());
+   else
+   {
+      mass_u_loc = masses * u;
+      if (product_sync) { mass_us_loc = masses * us; }
+   }
+   double mass_u, mass_us, s_max;
+   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
+   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+   if (product_sync)
+   {
+      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+      const double s_max_loc = s.Max();
+      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+   }
    if (myid == 0)
    {
       cout << setprecision(10)
-           << "Final mass: " << finalMass << endl
-           << "Max value:  " << umax << endl << setprecision(6)
-           << "Mass loss:  " << abs(initialMass - finalMass) << endl;
+           << "Final mass u:  " << mass_u << endl
+           << "Max value u:   " << umax << endl << setprecision(6)
+           << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
+      if (product_sync)
+      {
+         cout << setprecision(10)
+              << "Final mass us: " << mass_us << endl
+              << "Max value s:   " << s_max << endl << setprecision(6)
+              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+      }
    }
 
    // Compute errors, if the initial condition is equal to the final solution
@@ -920,7 +998,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   // 10. Free the used memory.
+   // Free the used memory.
    delete mono_solver;
    delete fct_solver;
    delete smth_indicator;
@@ -945,7 +1023,7 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
+AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -955,7 +1033,7 @@ AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(Mbf_.Size()), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -965,7 +1043,7 @@ AdvectionOperator::AdvectionOperator(BilinearForm &Mbf_,
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
-void AdvectionOperator::Mult(const Vector &x, Vector &y) const
+void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
    if (exec_mode == 1)
    {
@@ -1022,29 +1100,100 @@ void AdvectionOperator::Mult(const Vector &x, Vector &y) const
       }
    }
 
-   x_gf = x;
+   const int size = Kbf.ParFESpace()->GetVSize();
+   const int NE   = Kbf.ParFESpace()->GetNE();
+
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
+   Vector u, d_u;
+   Vector* xptr = const_cast<Vector*>(&X);
+   u.MakeRef(*xptr, 0, size);
+   d_u.MakeRef(Y, 0, size);
+   Vector du_HO(u.Size()), du_LO(u.Size());
+
+   x_gf = u;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver) { mono_solver->CalcSolution(x, y); return; }
-
-   if (fct_solver)
+   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
+   else if (fct_solver)
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      Vector yH(x.Size()), yL(x.Size());
-      lo_solver->CalcLOSolution(x, yL);
-      ho_solver->CalcHOSolution(x, yH);
-      dofs.ComputeBounds();
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, yH, yL,
-                                  dofs.xi_min, dofs.xi_max, y);
-      return;
+      lo_solver->CalcLOSolution(u, du_LO);
+      ho_solver->CalcHOSolution(u, du_HO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, d_u);
    }
+   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+   else { MFEM_ABORT("No solver was chosen."); }
 
-   if (lo_solver) { lo_solver->CalcLOSolution(x, y); return; }
+   d_u.SyncAliasMemory(Y);
 
-   if (ho_solver) { ho_solver->CalcHOSolution(x, y); return; }
+   // Remap the product field, if there is a product field.
+   if (X.Size() > size)
+   {
+      Vector us, d_us;
+      us.MakeRef(*xptr, size, size);
+      d_us.MakeRef(Y, size, size);
 
-   MFEM_ABORT("No solver was chosen.");
+      x_gf = us;
+      x_gf.ExchangeFaceNbrData();
+
+      if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
+      else if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
+         lo_solver->CalcLOSolution(us, d_us_LO);
+         ho_solver->CalcHOSolution(us, d_us_HO);
+
+         // Compute the ratio s = us_old / u_old, and old active dofs.
+         Vector s(size);
+         Array<bool> s_bool_el, s_bool_dofs;
+         ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
+#ifdef REMHOS_FCT_DEBUG
+         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
+#endif
+
+         // Bounds for s, based on the old values (and old active dofs).
+         // This doesn't consider s values from the old inactive dofs, because
+         // there were no bounds restriction on them at the previous time step.
+         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+                                    &s_bool_el, &s_bool_dofs);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                            dofs.xi_min, dofs.xi_max, &s_bool_el);
+
+         // Evolve u and get the new active dofs.
+         Vector u_new(size);
+         add(1.0, u, dt, d_u, u_new);
+         Array<bool> s_bool_el_new, s_bool_dofs_new;
+         ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
+
+         fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
+                                    dofs.xi_min, dofs.xi_max,
+                                    u_new,
+                                    s_bool_el_new, s_bool_dofs_new, d_us);
+
+#ifdef REMHOS_FCT_DEBUG
+         Vector us_new(size);
+         add(1.0, us, dt, d_us, us_new);
+         int myid = x_gf.ParFESpace()->GetMyRank();
+         ComputeMinMaxS(NE, us_new, u_new, myid);
+         if (myid == 0) { std::cout << " --- " << std::endl; }
+#endif
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
+   }
 }
 
 // Velocity coefficient
@@ -1142,12 +1291,12 @@ void velocity_function(const Vector &x, Vector &v)
          else { v = 0.0; }
          break;
       }
+      case 10:
       case 12:
       case 13:
       case 14:
       case 15:
       case 16:
-      case 10:
       case 17:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
@@ -1402,6 +1551,12 @@ double u0_function(const Vector &x)
       }
    }
    return 0.0;
+}
+
+double s0_function(const Vector &x)
+{
+   // Simple nonlinear function.
+   return 2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1));
 }
 
 double inflow_function(const Vector &x)

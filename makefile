@@ -105,10 +105,12 @@ LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
 CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
-SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp remhos_fct.cpp remhos_mono.cpp
+SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
+  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
-HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp remhos_mono.hpp
+HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
+  remhos_mono.hpp remhos_sync.hpp
 
 # Targets
 
@@ -184,5 +186,5 @@ style:
 	fi
 
 tests:
-	@ cd autotest; ./test.sh 6;
+	@ cd autotest; ./test.sh 2;
 	diff --report-identical-files autotest/out_test.dat autotest/out_baseline.dat;

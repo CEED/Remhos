@@ -93,8 +93,10 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
          assembly.dofs.xe_min(k) = min(assembly.dofs.xe_min(k), u(dof_id));
       }
    }
-
-   assembly.dofs.ComputeBounds();
+   assembly.dofs.ComputeElementsMinMax(u, assembly.dofs.xe_min,
+                                          assembly.dofs.xe_max, NULL, NULL);
+   assembly.dofs.ComputeBounds(assembly.dofs.xe_min, assembly.dofs.xe_max,
+                               assembly.dofs.xi_min, assembly.dofs.xi_max);
 
    // Smoothness indicator.
    ParGridFunction si_val;
