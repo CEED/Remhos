@@ -127,9 +127,9 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
-   FCTSolverType fct_type         = FCTSolverType::None;
+   HOSolverType ho_type           = HOSolverType::CG;
+   LOSolverType lo_type           = LOSolverType::DiscrUpwind;
+   FCTSolverType fct_type         = FCTSolverType::FluxBased;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
    int smth_ind_type = 0;
@@ -378,11 +378,15 @@ int main(int argc, char *argv[])
    if (exec_mode == 0)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      //k.SetAssemblyLevel(AssemblyLevel::LEGACYFULL); 
+      k.SetAssemblyLevel(AssemblyLevel::FULL);
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      //k.SetAssemblyLevel(AssemblyLevel::LEGACYFULL);
+      k.SetAssemblyLevel(AssemblyLevel::FULL);
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
@@ -404,7 +408,6 @@ int main(int argc, char *argv[])
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
-
       K_HO.KeepNbrBlock(true);
    }
 
@@ -412,6 +415,9 @@ int main(int argc, char *argv[])
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+   }else{
+     //Switch between legacy full vs new FULL
+     K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
    }
 
    M_HO.Assemble();
@@ -754,10 +760,12 @@ int main(int argc, char *argv[])
    if (fct_type == FCTSolverType::FluxBased)
    {
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
-
-      K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      printf("flux based sparse matrix \n");
+      //SparseMatrix A = GetFullAssemblySparseMatrix(*k);
+      SparseMatrix &K_HO_Spmat = K_HO.SpMat();
+      K_HO_smap = SparseMatrix_Build_smap(K_HO_Spmat);
       const int fct_iterations = 1;
-      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO_Spmat,
                                     K_HO_smap, M_HO.SpMat(), fct_iterations);
    }
    else if (fct_type == FCTSolverType::ClipScale)
