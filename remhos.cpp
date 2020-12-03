@@ -413,6 +413,10 @@ int main(int argc, char *argv[])
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
+   else if (dim > 1)
+   {
+      K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
+   }
 
    M_HO.Assemble();
    K_HO.Assemble(0);
@@ -633,11 +637,11 @@ int main(int argc, char *argv[])
       s.ProjectCoefficient(sc);
 
       us.MakeRef(&pfes, S, offset[1]);
-      us.HostWrite();
-      u.HostRead();
-      s.HostRead();
+      double *h_us = us.HostWrite();
+      const double *h_u  = u.HostRead();
+      const double *h_s  = s.HostRead();
       // Simple - we don't target conservation at initialization.
-      for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
+      for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
       us.SyncAliasMemory(S);
    }
 
@@ -754,7 +758,9 @@ int main(int argc, char *argv[])
    if (fct_type == FCTSolverType::FluxBased)
    {
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
-
+      K_HO.SpMat().HostReadI();
+      K_HO.SpMat().HostReadJ();
+      K_HO.SpMat().HostReadData();
       K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
       const int fct_iterations = 1;
       fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
@@ -836,7 +842,13 @@ int main(int argc, char *argv[])
 
       if (exec_mode == 1)
       {
+         x0.HostReadWrite(); v_sub_gf.HostReadWrite();
+         x.HostReadWrite();
          add(x0, t, v_gf, x);
+         x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
+         MFEM_VERIFY(xsub != NULL,
+                     "xsub == NULL/This code should not be entered for order = 1.");
+         xsub->HostReadWrite();
          add(x0_sub, t, v_sub_gf, *xsub);
       }
 

@@ -198,7 +198,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 #ifdef REMHOS_FCT_DEBUG
       // Check the LO product solution.
       for (int j = 0; j < ndofs; j++)
-      {         
+      {
          dof_id = k*ndofs + j;
          if (active_dofs[dof_id] == false) { continue; }
 
@@ -281,9 +281,10 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
                                      SparseMatrix &flux_mat) const
 {
    const int s = u.Size();
-   double *flux_data = flux_mat.GetData();
-   const int *K_I = K.GetI(), *K_J = K.GetJ();
-   const double *K_data = K.GetData();
+   double *flux_data = flux_mat.HostReadWriteData();
+   flux_mat.HostReadI(); flux_mat.HostReadJ();
+   const int *K_I = K.HostReadI(), *K_J = K.HostReadJ();
+   const double *K_data = K.HostReadData();
    const double *u_np = u.FaceNbrData().HostRead();
    u.HostRead();
    du_ho.HostRead();
@@ -387,7 +388,7 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
                       SparseMatrix &flux_mat, Vector &du) const
 {
    Vector &a_pos_n = coeff_pos.FaceNbrData(),
-          &a_neg_n = coeff_neg.FaceNbrData();
+           &a_neg_n = coeff_neg.FaceNbrData();
    coeff_pos.ExchangeFaceNbrData();
    coeff_neg.ExchangeFaceNbrData();
 
@@ -397,8 +398,8 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
    coeff_neg.HostReadWrite();
    du.HostReadWrite();
 
-   double *flux_data = flux_mat.GetData();
-   const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
+   double *flux_data = flux_mat.HostReadWriteData();
+   const int *flux_I = flux_mat.HostReadI(), *flux_J = flux_mat.HostReadJ();
    const int s = du.Size();
    for (int i = 0; i < s; i++)
    {

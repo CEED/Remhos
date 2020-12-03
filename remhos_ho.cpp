@@ -39,8 +39,6 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    Array<int> ess_tdof_list;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      MFEM_ABORT("PA for DG is not yet implemented.");
-
       K.Mult(u, rhs);
 
       M_solver.SetOperator(M);
@@ -48,7 +46,10 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
    else
    {
-      K_mat = K.ParallelAssemble();
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
       K_mat->Mult(u, rhs);
 
       M_mat = M.ParallelAssemble();
@@ -80,12 +81,14 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    HypreParMatrix *K_mat = NULL;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      MFEM_ABORT("PA for DG is not yet implemented.");
       K.Mult(u, rhs);
    }
    else
    {
-      K_mat = K.ParallelAssemble();
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
       K_mat->Mult(u, rhs);
    }
 

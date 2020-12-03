@@ -399,7 +399,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+         maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
