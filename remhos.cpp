@@ -802,8 +802,9 @@ int main(int argc, char *argv[])
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-      u.SyncAliasMemory(S);
-      if (product_sync) { us.SyncAliasMemory(S); }
+      //S has been modified, update the alias
+      u.SyncMemory(S);
+      if (product_sync) { us.SyncMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
