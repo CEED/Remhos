@@ -132,6 +132,7 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
+   bool next_gen_full = false;
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
@@ -184,6 +185,9 @@ int main(int argc, char *argv[])
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
+   args.AddOption(&next_gen_full, "-full", "--next-gen-full", "-no-full",
+                  "--no-next-gen-full",
+                  "Enable or disable next gen full assembly for the HO solution.");
    args.AddOption(&device_config, "-d", "--device",
                   "Device configuration string, see Device::Configure().");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
@@ -413,7 +417,8 @@ int main(int argc, char *argv[])
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
-   else if (dim > 1)
+
+   if (next_gen_full)
    {
       K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
    }
