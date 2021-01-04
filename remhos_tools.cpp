@@ -805,14 +805,15 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
-
+   /*
    static bool show_all = true;
    if (show_all)
    {
       printf("number of face dofs %d \n", dofs.numFaceDofs );
       show_all = false;
    }
-   printf("alpha is %f \n", alpha.Norml2() );
+   //printf("alpha is %f \n", alpha.Norml2() );
+   */
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);

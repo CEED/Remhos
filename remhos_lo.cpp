@@ -110,11 +110,14 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    Vector z(u.Size());
 
    const double gamma = 1.0;
-   int dof_id;
-   double xSum, sumFluctSubcellP, sumFluctSubcellN, sumWeightsP,
-          sumWeightsN, weightP, weightN, rhoP, rhoN, aux, fluct, eps = 1.E-15;
+   //int dof_id;
+   double /*xSum,*/ sumFluctSubcellP, sumFluctSubcellN,
+          /*sumWeightsP,
+          sumWeightsN, weightP, weightN, rhoP, rhoN,*/ aux, fluct, eps = 1.E-15;
    Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
           fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
+
+   double infinity = numeric_limits<double>::infinity();
 
    // Discretization terms
    du = 0.;
@@ -134,24 +137,72 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
    // Boundary contributions - stored in du
    //will want this in a seperate kernel to do forall elements
-   /*
-    int k =0;
-    for (int f = 0; f < assembly.dofs.numBdrs; f++)
-    {
-      assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
-    }
-   */
+   for (int k=0; k < ne; ++k)
+   {
+      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+      {
 
+         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+      }
+   }
+
+#if 1
+
+   //initialize to infinity
+   assembly.dofs.xe_min =  infinity;
+   assembly.dofs.xe_max = -infinity;
+
+   double *xe_min = assembly.dofs.xe_min.ReadWrite();
+   double *xe_max = assembly.dofs.xe_max.ReadWrite();
+
+   const double *d_u = u.Read();
+   const double *d_z = z.Read();
+   const double *d_M_lumped = M_lumped.Read();
+
+   double *d_du = du.ReadWrite();
+
+   MFEM_FORALL(k, ne,
+   {
+
+      // Boundary contributions - stored in du
+      // done before this loop
+
+      // Element contributions
+      double rhoP(0.), rhoN(0.), xSum(0.);
+      for (int j = 0; j < ndof; ++j)
+      {
+         int dof_id = k*ndof+j;
+         xe_max[k] = max(xe_max[k], d_u[dof_id]);
+         xe_min[k] = min(xe_min[k], d_u[dof_id]);
+         xSum += d_u[dof_id];
+         rhoP += max(0., d_z[dof_id]);
+         rhoN += min(0., d_z[dof_id]);
+      }
+
+      //denominator of equation 47
+      double sumWeightsP = ndof*xe_max[k] - xSum + eps;
+      double sumWeightsN = ndof*xe_min[k] - xSum - eps;
+
+      for (int i = 0; i < ndof; i++)
+      {
+         int dof_id = k*ndof+i;
+         //eq 46
+         double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
+         double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
+
+         // (lumpped trace term  + LED convection )/lumpped mass matrix
+         d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
+         d_M_lumped[dof_id];
+      }
+
+   });
+
+#else //Reference version
    // Monotonicity terms
    for (int k = 0; k < ne; k++)
    {
       // Boundary contributions - stored in du
-      /*
-       for (int f = 0; f < assembly.dofs.numBdrs; f++)
-       {
-          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
-       }
-      */
+      // done before this loop
 
       // Element contributions
       rhoP = rhoN = xSum = 0.;
@@ -183,6 +234,8 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
                       M_lumped(dof_id);
       }
    }
+#endif
+
 }
 
 } // namespace mfem
