@@ -18,6 +18,7 @@
 #define MFEM_REMHOS_TOOLS
 
 #include "mfem.hpp"
+#include "general/forall.hpp"
 
 namespace mfem
 {

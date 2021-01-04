@@ -120,6 +120,8 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    du = 0.;
    K.Mult(u, z);
 
+   //z = Conv * u
+
    ParGridFunction u_gf(&pfes);
    u_gf = u;
    u_gf.ExchangeFaceNbrData();
@@ -129,14 +131,27 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    u.HostRead();
    du.HostReadWrite();
    M_lumped.HostRead();
+
+   // Boundary contributions - stored in du
+   //will want this in a seperate kernel to do forall elements
+   /*
+    int k =0;
+    for (int f = 0; f < assembly.dofs.numBdrs; f++)
+    {
+      assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+    }
+   */
+
    // Monotonicity terms
    for (int k = 0; k < ne; k++)
    {
-      // Boundary contributions
-      for (int f = 0; f < assembly.dofs.numBdrs; f++)
-      {
-         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
-      }
+      // Boundary contributions - stored in du
+      /*
+       for (int f = 0; f < assembly.dofs.numBdrs; f++)
+       {
+          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+       }
+      */
 
       // Element contributions
       rhoP = rhoN = xSum = 0.;
@@ -152,86 +167,18 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
          rhoN += min(0., z(dof_id));
       }
 
+      //denominator of equation 47
       sumWeightsP = ndof*assembly.dofs.xe_max(k) - xSum + eps;
       sumWeightsN = ndof*assembly.dofs.xe_min(k) - xSum - eps;
-
-      if (subcell_scheme)
-      {
-         fluctSubcellP.SetSize(assembly.dofs.numSubcells);
-         fluctSubcellN.SetSize(assembly.dofs.numSubcells);
-         xMaxSubcell.SetSize(assembly.dofs.numSubcells);
-         xMinSubcell.SetSize(assembly.dofs.numSubcells);
-         sumWeightsSubcellP.SetSize(assembly.dofs.numSubcells);
-         sumWeightsSubcellN.SetSize(assembly.dofs.numSubcells);
-         nodalWeightsP.SetSize(ndof);
-         nodalWeightsN.SetSize(ndof);
-         sumFluctSubcellP = sumFluctSubcellN = 0.;
-         nodalWeightsP = 0.; nodalWeightsN = 0.;
-
-         // compute min-/max-values and the fluctuation for subcells
-         for (int m = 0; m < assembly.dofs.numSubcells; m++)
-         {
-            xMinSubcell(m) =   numeric_limits<double>::infinity();
-            xMaxSubcell(m) = - numeric_limits<double>::infinity();;
-            fluct = xSum = 0.;
-
-            if (time_dep)
-            {
-               assembly.ComputeSubcellWeights(k, m);
-            }
-
-            for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
-            {
-               dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
-               fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
-               xMaxSubcell(m) = max(xMaxSubcell(m), u(dof_id));
-               xMinSubcell(m) = min(xMinSubcell(m), u(dof_id));
-               xSum += u(dof_id);
-            }
-            sumWeightsSubcellP(m) = assembly.dofs.numDofsSubcell
-                                    * xMaxSubcell(m) - xSum + eps;
-            sumWeightsSubcellN(m) = assembly.dofs.numDofsSubcell
-                                    * xMinSubcell(m) - xSum - eps;
-
-            fluctSubcellP(m) = max(0., fluct);
-            fluctSubcellN(m) = min(0., fluct);
-            sumFluctSubcellP += fluctSubcellP(m);
-            sumFluctSubcellN += fluctSubcellN(m);
-         }
-
-         for (int m = 0; m < assembly.dofs.numSubcells; m++)
-         {
-            for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
-            {
-               const int loc_id = assembly.dofs.Sub2Ind(m, i);
-               dof_id = k*ndof + loc_id;
-               nodalWeightsP(loc_id) += fluctSubcellP(m)
-                                        * ((xMaxSubcell(m) - u(dof_id))
-                                           / sumWeightsSubcellP(m)); // eq. (58)
-               nodalWeightsN(loc_id) += fluctSubcellN(m)
-                                        * ((xMinSubcell(m) - u(dof_id))
-                                           / sumWeightsSubcellN(m)); // eq. (59)
-            }
-         }
-      }
 
       for (int i = 0; i < ndof; i++)
       {
          dof_id = k*ndof+i;
+         //eq 46
          weightP = (assembly.dofs.xe_max(k) - u(dof_id)) / sumWeightsP;
          weightN = (assembly.dofs.xe_min(k) - u(dof_id)) / sumWeightsN;
 
-         if (subcell_scheme)
-         {
-            aux = gamma / (rhoP + eps);
-            weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
-            weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP(i);
-
-            aux = gamma / (rhoN - eps);
-            weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
-            weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
-         }
-
+         // (lumpped trace term  + LED convection )/lumpped mass matrix
          du(dof_id) = (du(dof_id) + weightP * rhoP + weightN * rhoN) /
                       M_lumped(dof_id);
       }

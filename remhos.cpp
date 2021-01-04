@@ -127,8 +127,8 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
+   HOSolverType ho_type           = HOSolverType::None;
+   LOSolverType lo_type           = LOSolverType::ResDist;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
@@ -377,6 +377,7 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
+   //k is the low order convection solution only
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)

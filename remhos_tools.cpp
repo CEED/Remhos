@@ -806,6 +806,13 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
 
+   static bool show_all = true;
+   if (show_all)
+   {
+      printf("number of face dofs %d \n", dofs.numFaceDofs );
+      show_all = false;
+   }
+   printf("alpha is %f \n", alpha.Norml2() );
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
@@ -831,7 +838,7 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
          y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
                       (xDiff(i) + (xDiff(j)-xDiff(i)) *
                        alpha(dofs.BdrDofs(i,BdrID)) *
-                       alpha(dofs.BdrDofs(j,BdrID)));
+                       alpha(dofs.BdrDofs(j,BdrID)) );
       }
    }
 }
