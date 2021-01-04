@@ -709,10 +709,12 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
    }
 }
 
+//Will need a GPU/Vectorize version of this method
 void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
                                 FaceElementTransformations *Trans,
                                 LowOrderMethod &lom)
 {
+   //printf("Computing flux terms %d %d \n", e_id, BdrID);
    Mesh *mesh = fes->GetMesh();
 
    int i, j, l, dim = mesh->Dimension();
@@ -842,6 +844,60 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
                        alpha(dofs.BdrDofs(j,BdrID)) );
       }
    }
+}
+
+void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
+                                     Vector &y, const Vector &x_nd,
+                                     const Vector &alpha) const
+{
+   int i, j, dofInd;
+   double xNeighbor;
+   Vector xDiff(dofs.numFaceDofs);
+   const int size_x = x.Size();
+
+   const int NE = fes->GetNE();
+
+   //Forall elements
+   for (int k=0; k<NE; ++k)
+   {
+
+      //for all faces in elements
+      for (int BdrID=0; BdrID<dofs.numBdrs; ++BdrID)
+      {
+
+         for (j = 0; j < dofs.numFaceDofs; j++)
+         {
+            dofInd = k*nd+dofs.BdrDofs(j,BdrID);
+            const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
+            // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+            // s.t. this value will not matter.
+            if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
+            else
+            {
+               xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
+                           : x_nd(nbr_dof_id - size_x);
+            }
+            xDiff(j) = xNeighbor - x(dofInd);
+         }
+
+         for (i = 0; i < dofs.numFaceDofs; i++)
+         {
+            dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+            for (j = 0; j < dofs.numFaceDofs; j++)
+            {
+               // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
+               // 0 < alpha < 1 can be used for limiting within the low order method.
+               y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
+                            (xDiff(i) + (xDiff(j)-xDiff(i)) *
+                             alpha(dofs.BdrDofs(i,BdrID)) *
+                             alpha(dofs.BdrDofs(j,BdrID)) );
+            }
+         }
+
+      }//for each face
+
+   }//No of Elements
+
 }
 
 void Assembly::NonlinFluxLumping(const int k, const int nd,

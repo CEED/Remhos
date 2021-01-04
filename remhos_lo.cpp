@@ -137,14 +137,18 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
    // Boundary contributions - stored in du
    //will want this in a seperate kernel to do forall elements
+   /*
    for (int k=0; k < ne; ++k)
    {
       for (int f = 0; f < assembly.dofs.numBdrs; f++)
       {
-
-         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+        //assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
+   */
+
+   //Linear Flux Lumping forall elements/faces //alpha is 0 for us here
+   assembly.LinearFluxLumping_all(ndof, u, du, u_nd, alpha);
 
 #if 1
 

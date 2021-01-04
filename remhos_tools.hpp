@@ -175,6 +175,12 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
+
+   //forall k, and bdryId
+   void LinearFluxLumping_all(const int nd, const Vector &x,
+                              Vector &y, const Vector &x_nd,
+                              const Vector &alpha) const;
+
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
