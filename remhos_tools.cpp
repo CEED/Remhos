@@ -850,13 +850,82 @@ void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
                                      Vector &y, const Vector &x_nd,
                                      const Vector &alpha) const
 {
-   int i, j, dofInd;
-   double xNeighbor;
-   Vector xDiff(dofs.numFaceDofs);
+   const int NE = fes->GetNE();
+   const int numBdrs = dofs.numBdrs;
+   const int numFaceDofs = dofs.numFaceDofs;
+
+   Vector xDiff_vec(numFaceDofs * NE);
    const int size_x = x.Size();
 
-   const int NE = fes->GetNE();
+   auto xDiff   = Reshape(xDiff_vec.Write(), dofs.numFaceDofs, NE);
+   auto BdrDofs = Reshape(dofs.BdrDofs.Read(),
+                          dofs.BdrDofs.Height(),
+                          dofs.BdrDofs.Width());
+   auto NbrDof = Reshape(dofs.NbrDof.Read(), dofs.NbrDof.SizeI(),
+                         dofs.NbrDof.SizeJ(),
+                         dofs.NbrDof.SizeK());
 
+   auto bdryInt_view = Reshape(bdrInt.Read(), bdrInt.SizeI(),
+                               bdrInt.SizeJ(), bdrInt.SizeK());
+
+   const double * d_inflow_gf = inflow_gf.Read();
+   const double * d_x = x.Read();
+   const double * d_x_nd = x_nd.Read();
+   double * d_y = y.ReadWrite();
+#if 1
+   MFEM_FORALL(k, NE,
+   {
+
+      //for all faces in the element
+      for (int BdrID=0; BdrID<numBdrs; ++BdrID)
+      {
+
+         for (int j=0; j<numBdrs; ++j)
+         {
+            int dofInd = k*nd+BdrDofs(j,BdrID);
+            const int nbr_dof_id = NbrDof(k, BdrID, j);
+
+            // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
+            // s.t. this value will not matter.
+            double xNeighbor(0.0);
+            if (nbr_dof_id < 0)
+            {
+               xNeighbor = d_inflow_gf[dofInd];
+            }
+            else
+            {
+               xNeighbor = (nbr_dof_id < size_x) ? d_x[nbr_dof_id]
+                           : d_x_nd[nbr_dof_id - size_x];
+            }
+
+            xDiff(j,k) = xNeighbor - d_x[dofInd];
+         }
+
+         for (int i=0; i< numFaceDofs; ++i)
+         {
+
+            int dofInd = k*nd+BdrDofs(i,BdrID);
+            for (int j=0; j<dofs.numFaceDofs; ++j)
+            {
+
+               //Simplify for now and take alpha = 0.
+               //this gives us the low order solution
+
+               //TODO: Double check, does this actually require an atomic add?
+               //      see if we can accumulate without atomics
+               //TODO - try to do without atomics
+               double val  = bdryInt_view(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i,k);
+               AtomicAdd(d_y[dofInd], val);
+               //d_y[dofInd] += bdryInt_view(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i,k)
+            }
+
+         }
+
+      }//for each face
+   });//for all elements
+
+
+#else
    //Forall elements
    for (int k=0; k<NE; ++k)
    {
@@ -864,7 +933,6 @@ void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
       //for all faces in elements
       for (int BdrID=0; BdrID<dofs.numBdrs; ++BdrID)
       {
-
          for (j = 0; j < dofs.numFaceDofs; j++)
          {
             dofInd = k*nd+dofs.BdrDofs(j,BdrID);
@@ -897,6 +965,7 @@ void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
       }//for each face
 
    }//No of Elements
+#endif
 
 }
 
