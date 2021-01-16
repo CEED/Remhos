@@ -151,6 +151,7 @@ private:
    BilinearFormIntegrator *VolumeTerms;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Mesh *subcell_mesh;
+   Array<int> ElemBdryToFaceNo;
 
 public:
    Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,

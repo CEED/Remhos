@@ -683,6 +683,12 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
       SubFes1 = lom.SubFes1;
    }
 
+   //Create a map between elem,face -> face no
+   //if(exec_mode !=0)
+   {
+     ElemBdryToFaceNo.SetSize(ne * dofs.numBdrs);
+   }
+
    // Initialization for transport mode.
    if (exec_mode == 0)
    {
@@ -723,6 +729,17 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
    const FiniteElement &el = *fes->GetFE(e_id);
 
    Vector vval, nor(dim), shape(el.GetDof());
+
+   //Create a map going from elem, bdry -> face no
+   //encode direction of the normal
+   const int id = e_id * dofs.numBdrs + BdrID;
+   if (Trans->Elem1No != e_id)
+   {
+     ElemBdryToFaceNo[id] = -1 * Trans->Face->ElementNo;
+   }else{
+     ElemBdryToFaceNo[id] = Trans->Face->ElementNo;
+   }
+
 
    for (l = 0; l < lom.irF->GetNPoints(); l++)
    {
