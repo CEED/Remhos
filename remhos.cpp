@@ -610,6 +610,7 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::ResDist)
    {
+      printf("Running LOSolverType::ResDist \n");
       const bool subcell_scheme = false;
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
                                            subcell_scheme, time_dep);
@@ -1104,7 +1105,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
-
+      printf("Calling mult! \n");
       for (int k = 0; k < ne; k++)
       {
          if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
@@ -1114,9 +1115,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          for (int i = 0; i < dofs.numBdrs; i++)
          {
             Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.ComputeFluxTerms(k, i, Trans, lom);
+            asmbl.DeviceComputeFluxTerms(k, i, Trans, lom);
          }
+
       }
+      printf("checked all elements \n");
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();

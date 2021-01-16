@@ -686,11 +686,14 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
    //Create a map between elem,face -> face no
    //if(exec_mode !=0)
    {
+     //TODO::Allocate with the correct size of interior and bdry faces
      ElemBdryToFaceNo.SetSize(ne * dofs.numBdrs);
+     IntElemBdryToFaceNo.SetSize(ne * dofs.numBdrs); //are these needed?
+     BdryElemBdryToFaceNo.SetSize(ne * dofs.numBdrs); // ??
    }
 
    // Initialization for transport mode.
-   if (exec_mode == 0)
+   //if (exec_mode == 0)
    {
       for (k = 0; k < ne; k++)
       {
@@ -720,7 +723,6 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
                                 FaceElementTransformations *Trans,
                                 LowOrderMethod &lom)
 {
-   //printf("Computing flux terms %d %d \n", e_id, BdrID);
    Mesh *mesh = fes->GetMesh();
 
    int i, j, l, dim = mesh->Dimension();
@@ -733,12 +735,19 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
    //Create a map going from elem, bdry -> face no
    //encode direction of the normal
    const int id = e_id * dofs.numBdrs + BdrID;
+
+   int e1, e2;
+   int f = Trans->Face->ElementNo;  //global face no
+   fes->GetMesh()->GetFaceInfos(f, &e1, &e2);
+
+   //printf("setup id %d face no %d \n", id , Trans->Face->ElementNo);
    if (Trans->Elem1No != e_id)
    {
      ElemBdryToFaceNo[id] = -1 * Trans->Face->ElementNo;
    }else{
      ElemBdryToFaceNo[id] = Trans->Face->ElementNo;
    }
+
 
 
    for (l = 0; l < lom.irF->GetNPoints(); l++)
@@ -799,6 +808,156 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
       }
    }
 }
+
+template <typename T> int sgn(T val)
+{
+  int v_out = 1;
+  if (val < 0){ v_out = -1;}
+  return v_out;
+}
+
+
+void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
+                                      FaceElementTransformations *Trans,
+                                      LowOrderMethod &lom)
+{
+
+  //printf("Running Device ComputeFlux Terms \n");
+   Mesh *mesh = fes->GetMesh();
+   int nf = fes->GetNF();
+
+   //Use new PA routines//Will need to seperate for interior and bdry faces
+   x_gf.FESpace()->GetMesh()->DeleteGeometricFactors();
+   const FaceGeometricFactors *geom =
+     x_gf.FESpace()->GetMesh()->GetFaceGeometricFactors(*lom.irF,
+      FaceGeometricFactors::DETERMINANTS | FaceGeometricFactors::JACOBIANS |
+                                       FaceGeometricFactors::NORMALS, FaceType::Interior);
+   const FiniteElement &el_trace =
+      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
+
+   const DofToQuad * maps = &el_trace.GetDofToQuad(*lom.irF, DofToQuad::TENSOR);
+
+   int i, j, l, dim = mesh->Dimension();
+   double aux, vn;
+
+   int quad1D = maps->nqpt;
+   int dofs1D = maps->ndof;
+
+   //printf("normal size %d \n", geom->normal.Size());
+   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
+   //auto jac = mfem::Reshape(geom->J.HostRead(), quad1D, dim, nf);
+   //printf("nquad1D %d lom.irF->GetNPoints() %d \n",quad1D, lom.irF->GetNPoints());
+
+   const int id = e_id * dofs.numBdrs + BdrID;
+   //Enumarate the face so they may start at 1, so we have sign for each face.
+   //TODO propagate this up!
+   if (Trans->Elem1No != e_id)
+   {
+     ElemBdryToFaceNo[id] =  -1*(Trans->Face->ElementNo+1);
+   }else{
+     ElemBdryToFaceNo[id] = (Trans->Face->ElementNo+1);
+   }
+
+   //
+   //Recall need to account f
+
+   int f = Trans->Face->ElementNo;
+   int inf1, inf2;
+   fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
+   int face_id = inf1 / 64;
+   printf("face no %d elem %d %d \n",
+          Trans->Face->ElementNo, Trans->Elem1No, Trans->Elem2No);
+
+   const FiniteElement &el = *fes->GetFE(e_id);
+
+   Vector vval, nor(dim), shape(el.GetDof());
+
+   for (l = 0; l < lom.irF->GetNPoints(); l++)
+   {
+      const IntegrationPoint &ip = lom.irF->IntPoint(l);
+      IntegrationPoint eip1;
+      Trans->Face->SetIntPoint(&ip);
+
+      if (dim == 1)
+      {
+         Trans->Loc1.Transform(ip, eip1);
+         nor(0) = 2.*eip1.x - 1.0;
+      }
+      else
+      {
+         CalcOrtho(Trans->Face->Jacobian(), nor);
+      }
+
+      if (Trans->Elem1No != e_id)
+      {
+         Trans->Loc2.Transform(ip, eip1);
+         el.CalcShape(eip1, shape);
+         Trans->Elem2->SetIntPoint(&eip1);
+         lom.coef->Eval(vval, *Trans->Elem2, eip1);
+         nor *= -1.;
+      }
+      else
+      {
+         Trans->Loc1.Transform(ip, eip1);
+         el.CalcShape(eip1, shape);
+         Trans->Elem1->SetIntPoint(&eip1);
+         lom.coef->Eval(vval, *Trans->Elem1, eip1);
+      }
+
+      //printf("id %d face_id %d \n", id, face_id);
+      nor /= nor.Norml2();
+
+      int iq = ToLexOrdering(dim, face_id, quad1D, l);
+
+      const int id = e_id * dofs.numBdrs + BdrID;
+      int face_id = abs(ElemBdryToFaceNo[id]) - 1;
+      double nx = sgn(ElemBdryToFaceNo[id])*n(iq, 0, face_id);
+      double ny = sgn(ElemBdryToFaceNo[id])*n(iq, 1, face_id);
+
+      //double nx = n(iq, 0, face_id);
+      //double ny = n(iq, 1, face_id);
+
+      if (Trans->Elem1No != e_id)
+      {
+        //nx = -nx; ny = -ny;
+      }
+
+      if(abs(nx - nor(0)) > 1e-12 || abs(ny - nor(1)) > 1e-12) {
+        // printf("myjacobian %f %f \n",jac(l, 0, face_id), jac(l,1,face_id));
+        printf("error with normals face_id %d \n", face_id);
+        //nor.Print(); printf("%f %f \n",n(l, 0, face_id), n(l, 1, face_id));
+        printf("%.15f %.15f \n",nor(0), nor(1));
+        printf("%.15f %.15f \n",nx, ny);
+        exit(-1);
+      }
+      //printf("nor %f %f \n \n", n(l, 0, face_id), n(l, 1, face_id));
+
+      if (exec_mode == 0)
+      {
+         // Transport.
+         vn = std::min(0., vval * nor);
+      }
+      else
+      {
+         // Remap.
+         vn = std::max(0., vval * nor);
+         vn *= -1.0;
+      }
+
+      const double w = ip.weight * Trans->Face->Weight();
+      for (i = 0; i < dofs.numFaceDofs; i++)
+      {
+         aux = w * shape(dofs.BdrDofs(i,BdrID)) * vn;
+         for (j = 0; j < dofs.numFaceDofs; j++)
+         {
+            bdrInt(e_id, BdrID, i*dofs.numFaceDofs+j) -=
+               aux * shape(dofs.BdrDofs(j,BdrID));
+         }
+      }
+   }
+
+}
+
 
 void Assembly::ComputeSubcellWeights(const int k, const int m)
 {

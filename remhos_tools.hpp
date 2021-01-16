@@ -151,6 +151,8 @@ private:
    BilinearFormIntegrator *VolumeTerms;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Mesh *subcell_mesh;
+   Array<int> IntElemBdryToFaceNo;
+   Array<int> BdryElemBdryToFaceNo;
    Array<int> ElemBdryToFaceNo;
 
 public:
@@ -169,6 +171,10 @@ public:
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
                          LowOrderMethod &lom);
+
+   void  DeviceComputeFluxTerms(const int e_id, const int BdrID,
+                                FaceElementTransformations *Trans,
+                                LowOrderMethod &lom);
 
    void ComputeSubcellWeights(const int k, const int m);
 
