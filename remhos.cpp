@@ -1099,13 +1099,17 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          lom.pk->Assemble();
       }
 
+
+      asmbl.SampleVelocity(lom);
+
+
       // Face contributions.
       asmbl.bdrInt = 0.;
       Mesh *mesh = M_HO.FESpace()->GetMesh();
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
-      printf("Calling mult! \n");
+      //printf("Calling mult! \n");
       for (int k = 0; k < ne; k++)
       {
          if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
@@ -1119,7 +1123,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          }
 
       }
-      printf("checked all elements \n");
+      //printf("checked all elements \n");
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();

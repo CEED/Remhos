@@ -154,6 +154,7 @@ private:
    Array<int> IntElemBdryToFaceNo;
    Array<int> BdryElemBdryToFaceNo;
    Array<int> ElemBdryToFaceNo;
+   Array<double> vel;
 
 public:
    Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,
@@ -171,6 +172,8 @@ public:
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
                          LowOrderMethod &lom);
+
+  void SampleVelocity(LowOrderMethod &lom);
 
    void  DeviceComputeFluxTerms(const int e_id, const int BdrID,
                                 FaceElementTransformations *Trans,

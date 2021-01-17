@@ -817,6 +817,55 @@ template <typename T> int sgn(T val)
 }
 
 
+void Assembly::SampleVelocity(LowOrderMethod &lom)
+{
+
+  Mesh *mesh = fes->GetMesh();
+  int nf = fes->GetNF();
+
+  int dim = mesh->Dimension();
+  const int nq = lom.irF->GetNPoints();
+  auto type = FaceType::Interior; //assume all interior for now (periodic mesh);
+ vel.SetSize(dim*nq*nf);
+  auto C = mfem::Reshape(vel.Write(), dim, nq, nf);
+  Vector Vq(dim);
+
+  int quad1D = nq; //true for 2D, need to fix for 3D
+
+  int f_idx = 0;
+  for (int f = 0; f < fes->GetNF(); ++f)
+  {
+    int e1, e2;
+    int inf1, inf2;
+    fes->GetMesh()->GetFaceElements(f, &e1, &e2);
+    fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
+    int my_face_id = inf1 / 64;
+
+    if ((type==FaceType::Interior && (e2>=0 || (e2<0 && inf2>=0))) ||
+        (type==FaceType::Boundary && e2<0 && inf2<0) )
+      {
+
+        FaceElementTransformations &T =
+        *fes->GetMesh()->GetFaceElementTransformations(f);
+           for (int q = 0; q < nq; ++q)
+             {
+               // Convert to lexicographic ordering
+               int iq = ToLexOrdering(dim, my_face_id, quad1D, q);
+               T.SetAllIntPoints(&lom.irF->IntPoint(q));
+               const IntegrationPoint &eip1 = T.GetElement1IntPoint();
+               lom.coef->Eval(Vq, *T.Elem1, eip1);
+               for (int i = 0; i < dim; ++i)
+                 {
+                   C(i,iq,f_idx) = Vq(i);
+                 }
+             }
+           f_idx++;
+      }
+
+  }
+
+}
+
 void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
                                       FaceElementTransformations *Trans,
                                       LowOrderMethod &lom)
@@ -845,8 +894,9 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
 
    //printf("normal size %d \n", geom->normal.Size());
    auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
-   //auto jac = mfem::Reshape(geom->J.HostRead(), quad1D, dim, nf);
-   //printf("nquad1D %d lom.irF->GetNPoints() %d \n",quad1D, lom.irF->GetNPoints());
+   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
+   const double *w = lom.irF->GetWeights().Read();
+   auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
 
    const int id = e_id * dofs.numBdrs + BdrID;
    //Enumarate the face so they may start at 1, so we have sign for each face.
@@ -859,19 +909,28 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
    }
 
    //
-   //Recall need to account f
+   //Sample velocity field  - done sequentially for now
+   //
+   auto C = mfem::Reshape(vel.Read(), dim,  lom.irF->GetNPoints(), nf);
 
+
+   //
+   //Recall need to account for lexicographical ordering
+   //
    int f = Trans->Face->ElementNo;
    int inf1, inf2;
    fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
    int face_id = inf1 / 64;
-   printf("face no %d elem %d %d \n",
-          Trans->Face->ElementNo, Trans->Elem1No, Trans->Elem2No);
+
+   //printf("face no %d elem %d %d \n",
+   //Trans->Face->ElementNo, Trans->Elem1No, Trans->Elem2No);
+   DenseMatrix FaceIntegral(dofs.numFaceDofs, dofs.numFaceDofs);
 
    const FiniteElement &el = *fes->GetFE(e_id);
 
    Vector vval, nor(dim), shape(el.GetDof());
 
+   printf("\n");
    for (l = 0; l < lom.irF->GetNPoints(); l++)
    {
       const IntegrationPoint &ip = lom.irF->IntPoint(l);
@@ -910,21 +969,21 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
       int iq = ToLexOrdering(dim, face_id, quad1D, l);
 
       const int id = e_id * dofs.numBdrs + BdrID;
-      int face_id = abs(ElemBdryToFaceNo[id]) - 1;
-      double nx = sgn(ElemBdryToFaceNo[id])*n(iq, 0, face_id);
-      double ny = sgn(ElemBdryToFaceNo[id])*n(iq, 1, face_id);
+      int t_f = abs(ElemBdryToFaceNo[id]) - 1;
+      double nx = sgn(ElemBdryToFaceNo[id])*n(iq, 0, f);
+      double ny = sgn(ElemBdryToFaceNo[id])*n(iq, 1, f);
 
       //double nx = n(iq, 0, face_id);
       //double ny = n(iq, 1, face_id);
 
-      if (Trans->Elem1No != e_id)
-      {
-        //nx = -nx; ny = -ny;
-      }
+      //if (Trans->Elem1No != e_id)
+      //{
+      //nx = -nx; ny = -ny;
+      //}
 
       if(abs(nx - nor(0)) > 1e-12 || abs(ny - nor(1)) > 1e-12) {
         // printf("myjacobian %f %f \n",jac(l, 0, face_id), jac(l,1,face_id));
-        printf("error with normals face_id %d \n", face_id);
+        printf("error with normals face_id %d \n", t_f);
         //nor.Print(); printf("%f %f \n",n(l, 0, face_id), n(l, 1, face_id));
         printf("%.15f %.15f \n",nor(0), nor(1));
         printf("%.15f %.15f \n",nx, ny);
@@ -944,7 +1003,14 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
          vn *= -1.0;
       }
 
+      //vval.Print();
+      printf("vn %f \n", vn);
+
       const double w = ip.weight * Trans->Face->Weight();
+      printf("geo facts %f \n",w*vn);
+      for (i = 0; i < dofs.numFaceDofs; i++) {
+        printf("%f \n", shape(dofs.BdrDofs(i,BdrID)));
+      }
       for (i = 0; i < dofs.numFaceDofs; i++)
       {
          aux = w * shape(dofs.BdrDofs(i,BdrID)) * vn;
@@ -954,7 +1020,77 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
                aux * shape(dofs.BdrDofs(j,BdrID));
          }
       }
+
    }
+
+   printf("basis mat start \n");
+   for(int q1=0; q1<quad1D; ++q1) {
+     for(int i1=0; i1<dofs1D; ++i1) {
+       printf("%f ",B(q1, i1));
+     }
+     printf("\n");
+   }
+   printf("basis mat end \n");
+
+   int t_f = abs(ElemBdryToFaceNo[id]) - 1;
+   // tensor contraction based
+   for (int i1=0; i1<dofs1D; ++i1) {
+     for(int j1=0; j1<dofs1D; ++j1) {
+
+       double val = 0.0;
+       for(int k1 = 0; k1 < quad1D; ++k1) {
+         //vval is constant so this works..
+         //vval is not constant!!! need to change this
+         //TODO ART!!! Fix this!
+         //01/16/2021
+         double vvalnor =
+           C(0,k1,f)*sgn(ElemBdryToFaceNo[id])*n(k1, 0, f) +
+           C(1,k1,f)*sgn(ElemBdryToFaceNo[id])*n(k1, 1, f);
+         vvalnor = -std::max(0., vvalnor);
+         //  printf("vval again %f %f \n", C(0, k1, f), C(1, k1, f));
+         double t_vn = vvalnor* w[k1] * detJ(k1, f);
+         if(i1 == 0 && j1 == 0) printf("vvalnor %f \n", vvalnor);
+         if(i1 == 0 && j1 == 0) printf("t_vn %f \n", t_vn);
+         val -= B(k1, i1) * B(k1,j1) * t_vn;
+       }
+       FaceIntegral(i1,j1) = val;
+
+     }
+   }
+
+   //Note ordering is different...
+   //Code above is correct, ordering is just different...
+   //TODO organize and clean up
+   printf("e_id %d BdrID  %d \n",e_id, BdrID);
+   for (int i1=0; i1<dofs1D; ++i1) {
+     for(int j1=0; j1<dofs1D; ++j1) {
+
+       int numFaceDofs = dofs.numFaceDofs;
+       double ref = bdrInt(e_id, BdrID,
+       (numFaceDofs-1-j1)*dofs.numFaceDofs+(numFaceDofs-1-i1));
+       //double ref = bdrInt(e_id, BdrID,
+       //j1*dofs.numFaceDofs+i1);
+       if( abs(FaceIntegral(j1,i1) - ref) > 1e-12) {
+       //if( abs(FaceIntegral(i1,j1) - ref) > 1e-12) {
+         printf("dofs1D %d numFaceDofs %d \n",dofs1D, numFaceDofs);
+         printf("%d %d %d %d \n",numFaceDofs-1-j1, numFaceDofs-1-i1, j1, i1);
+         printf("Error too high %.15f %.15f \n",
+                ref, FaceIntegral(j1,i1));
+         FaceIntegral.Print();
+         for (int i1=0; i1<dofs1D; ++i1) {
+           for(int j1=0; j1<dofs1D; ++j1) {
+             double ref = bdrInt(e_id, BdrID, j1*dofs.numFaceDofs+i1);
+             printf("%f ",ref);
+           }
+           printf("\n");
+         }
+         exit(-1);
+       }
+
+     }
+   }
+
+
 
 }
 
