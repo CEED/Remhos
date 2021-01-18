@@ -1101,9 +1101,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
 
       asmbl.SampleVelocity(lom);
+      {
+        asmbl.SampleVelocity(lom, FaceType::Interior);
+        asmbl.SampleVelocity(lom, FaceType::Boundary);
+      }
 
 
       // Face contributions.
+      //reset counters
+      asmbl.int_face_ct = 0; asmbl.bdry_face_ct = 0;
       asmbl.bdrInt = 0.;
       Mesh *mesh = M_HO.FESpace()->GetMesh();
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
@@ -1119,10 +1125,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          for (int i = 0; i < dofs.numBdrs; i++)
          {
             Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.DeviceComputeFluxTerms(k, i, Trans, lom);
+            //asmbl.DeviceComputeFluxTerms(k, i, Trans, lom); //proof of concept code
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
          }
 
       }
+      asmbl.SampleVelocity(lom, FaceType::Interior);
+      asmbl.SampleVelocity(lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms(Trans, lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms(Trans, lom, FaceType::Boundary);
       //printf("checked all elements \n");
    }
 

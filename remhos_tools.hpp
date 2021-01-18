@@ -155,8 +155,14 @@ private:
    Array<int> BdryElemBdryToFaceNo;
    Array<int> ElemBdryToFaceNo;
    Array<double> vel;
+   Array<double> IntVelocity;
+   Array<double> BdryVelocity;
 
 public:
+   // Find better place for these
+   int int_face_ct{0};
+   int bdry_face_ct{0};
+
    Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,
             ParFiniteElementSpace &pfes, ParMesh *submesh, int mode);
 
@@ -168,16 +174,22 @@ public:
    // bdrInt - eq (32).
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
+   DenseTensor mybdrInt;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
                          LowOrderMethod &lom);
 
-  void SampleVelocity(LowOrderMethod &lom);
+   void SampleVelocity(LowOrderMethod &lom);
+
+   void SampleVelocity(LowOrderMethod &lom, FaceType type);
 
    void  DeviceComputeFluxTerms(const int e_id, const int BdrID,
                                 FaceElementTransformations *Trans,
                                 LowOrderMethod &lom);
+
+   void DeviceComputeFluxTerms(FaceElementTransformations *Trans,
+                               LowOrderMethod &lom, FaceType type);
 
    void ComputeSubcellWeights(const int k, const int m);
 
