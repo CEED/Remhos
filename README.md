@@ -199,7 +199,7 @@ This first of the above runs can produce the following plots (notice the `-vis` 
 <table border="0">
 <td> <img src="data/remap_0.png">
 <td> <img src="data/remap_1.png">
-<td> <a href="https://glvis.org/live/?stream=../data/remhos.saved" target="_blank"><img src="data/remap_2.png"></a>
+<td> <a href="https://glvis.org/live/?stream=../data/remhos.saved"><img src="data/remap_2.png"></a>
 </table>
 
 #### Sample transport examples
