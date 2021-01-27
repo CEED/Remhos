@@ -175,6 +175,7 @@ public:
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
    DenseTensor mybdrInt;
+   Vector mybdrInt_face_mats;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
@@ -190,6 +191,9 @@ public:
 
    void DeviceComputeFluxTerms(FaceElementTransformations *Trans,
                                LowOrderMethod &lom, FaceType type);
+
+   void DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
+                                LowOrderMethod &lom, FaceType type);
 
    void ComputeSubcellWeights(const int k, const int m);
 

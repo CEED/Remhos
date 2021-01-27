@@ -1176,7 +1176,7 @@ void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
 
 //
 //Note this assembles by faces
-//
+//Don't think this is quite right...
 void Assembly::DeviceComputeFluxTerms(FaceElementTransformations *Trans,
                                       LowOrderMethod &lom, FaceType type)
 {
@@ -1184,6 +1184,8 @@ void Assembly::DeviceComputeFluxTerms(FaceElementTransformations *Trans,
 
   int nf = fes->GetNFbyType(type);
   if (nf == 0) {return;}
+
+  printf("Number of faces %d \n",nf); exit(-1);
 
   Mesh *mesh = fes->GetMesh();
   int dim = mesh->Dimension();
@@ -1208,8 +1210,8 @@ void Assembly::DeviceComputeFluxTerms(FaceElementTransformations *Trans,
    const double *w = lom.irF->GetWeights().Read();
    auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
 
-   if(type == FaceType::Interior) printf("Interior faces \n");
-   if(type == FaceType::Boundary) printf("boundary faces \n");
+   //if(type == FaceType::Interior) printf("Interior faces \n");
+   //if(type == FaceType::Boundary) printf("boundary faces \n");
 
    const double *vel_ptr;
    const int *ElemBdryToFaceNo_ptr;
@@ -1244,6 +1246,98 @@ void Assembly::DeviceComputeFluxTerms(FaceElementTransformations *Trans,
          }
 
          mybdrInt(j1, i1, f) = val; // loop over faces
+       }
+     }
+
+   }
+
+
+}
+
+//Only does interior
+void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
+                                       LowOrderMethod &lom, FaceType type)
+{
+
+
+  int nf = fes->GetNFbyType(type);
+  if (nf == 0) {return;}
+
+  static bool display_face_ct = true;
+  if(display_face_ct) {
+    printf("Number of faces %d \n",nf);
+    display_face_ct = false;
+  }
+
+  Mesh *mesh = fes->GetMesh();
+  int dim = mesh->Dimension();
+  //Use new PA routines
+  mesh->DeleteGeometricFactors();
+
+   const FaceGeometricFactors *geom =
+     mesh->GetFaceGeometricFactors(*lom.irF,
+                                   FaceGeometricFactors::DETERMINANTS |
+                                   FaceGeometricFactors::NORMALS, type);
+
+   const FiniteElement &el_trace =
+     *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
+
+   const DofToQuad * maps = &el_trace.GetDofToQuad(*lom.irF, DofToQuad::TENSOR);
+
+   const int quad1D = maps->nqpt;
+   const int dofs1D = maps->ndof;
+
+   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
+   const double *w = lom.irF->GetWeights().Read();
+   auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
+
+   //if(type == FaceType::Interior) printf("Interior faces \n");
+   //if(type == FaceType::Boundary) printf("boundary faces \n");
+
+   const double *vel_ptr;
+   const int *ElemBdryToFaceNo_ptr;
+   if(type == FaceType::Interior) vel_ptr = IntVelocity.Read();
+   if(type == FaceType::Boundary) vel_ptr = BdryVelocity.Read();
+
+   if(type == FaceType::Interior) ElemBdryToFaceNo_ptr = IntElemBdryToFaceNo.Read();
+   if(type == FaceType::Boundary) ElemBdryToFaceNo_ptr = BdryElemBdryToFaceNo.Read();
+
+   //True face number
+   auto vel = mfem::Reshape(vel_ptr, dim,  lom.irF->GetNPoints(), nf);
+
+   //two sides per face  - proof of concept for 2D.
+   mybdrInt_face_mats.SetSize(dofs1D*dofs1D*2*nf); // loop over faces
+
+   auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Write(),
+                                    dofs1D, dofs1D, 2, nf);
+
+   //const int id = e_id * dofs.numBdrs + BdrID;
+   for(int f_iter = 0; f_iter < nf; ++f_iter) {
+
+     int f = abs(ElemBdryToFaceNo_ptr[f_iter]) - 1;
+
+     for(int f_side=0; f_side<2; ++f_side) {
+       for (int i1=0; i1<dofs1D; ++i1) {
+         for(int j1=0; j1<dofs1D; ++j1) {
+
+           double val = 0.0;
+           for(int k1 = 0; k1 < quad1D; ++k1) {
+
+             int direction = -1 + 2*f_side;
+
+             double vvalnor =
+               vel(0,k1,f)*direction*n(k1, 0, f) +
+               vel(1,k1,f)*direction*n(k1, 1, f);
+
+             vvalnor = -std::max(0., vvalnor);
+             double t_vn = vvalnor* w[k1] * detJ(k1, f);
+
+             val -= B(k1, i1) * B(k1,j1) * t_vn;
+           }
+
+           bdrInt_face(j1, i1, f_side, f) = val; // loop over faces
+         }
        }
      }
 

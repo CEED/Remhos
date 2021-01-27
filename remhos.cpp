@@ -1132,8 +1132,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
       asmbl.SampleVelocity(lom, FaceType::Interior);
       asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms(Trans, lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms(Trans, lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Boundary);
       //printf("checked all elements \n");
    }
 
