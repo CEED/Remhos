@@ -200,13 +200,15 @@ static void GetPerElementMinMax(const ParGridFunction &gf,
    }
 }
 
-Operator::Operator(ParMesh *pmesh,
-                   ParGridFunction &u,
+Operator::Operator(ParFiniteElementSpace &pfes,
+                   ParMesh *pmesh,
+                   ParGridFunction &sol,
                    int est,
                    double ref_t, double jac_t, double deref_t,
                    int max_level, int nc_limit):
+   pfes(pfes),
    pmesh(pmesh),
-   u(u),
+   sol(sol),
    myid(pmesh->GetMyRank()),
    dim(pmesh->Dimension()),
    sdim(pmesh->SpaceDimension()),
@@ -228,7 +230,7 @@ Operator::Operator(ParMesh *pmesh,
                                            opt.jac_threshold);
       smooth_flux_fec = new RT_FECollection(order-1, dim);
       auto smooth_flux_fes = new ParFiniteElementSpace(pmesh, smooth_flux_fec);
-      estimator = new L2ZienkiewiczZhuEstimator(*integ, u, &flux_fes,
+      estimator = new L2ZienkiewiczZhuEstimator(*integ, sol, &flux_fes,
                                                 smooth_flux_fes);
    }
 
@@ -236,7 +238,7 @@ Operator::Operator(ParMesh *pmesh,
    {
       integ = new amr::EstimatorIntegrator(pmesh, opt.max_level,
                                            opt.jac_threshold);
-      estimator = new KellyErrorEstimator(*integ, u, flux_fes);
+      estimator = new KellyErrorEstimator(*integ, sol, flux_fes);
    }
 
    if (estimator)
@@ -266,14 +268,13 @@ void Operator::Reset()
    if (derefiner) { derefiner->Reset(); }
 }
 
-static void Update(BlockVector &S, Array<int> &offset, ParGridFunction &u);
-
-void Operator::Update(AdvectionOperator &advec,
+void Operator::Update(AdvectionOperator &adv,
                       ODESolver *ode_solver,
                       BlockVector &S,
-                      Array<int> &offset)
+                      Array<int> &offset,
+                      ParGridFunction &u)
 {
-   //dbg("u:"); //u.Print();
+   dbg();
    double umin_new, umax_new;
    GetMinMax(u, umin_new, umax_new);
    const double range = umax_new - umin_new;
@@ -298,7 +299,7 @@ void Operator::Update(AdvectionOperator &advec,
          {
             //dbg("u(%d) in [%f,%f]", e, u_max(e), u_min(e));
             const double delta = (u_max(e) - u_min(e))/range;
-            //dbg("delta: %f, threshold: %f", delta, threshold);
+            dbg("delta: %f, threshold: %f", delta, threshold);
             if (delta > opt.ref_threshold &&
                 pmesh->pncmesh->GetElementDepth(e) < opt.max_level )
             {
@@ -360,37 +361,54 @@ void Operator::Update(AdvectionOperator &advec,
       dbg();
       constexpr bool quick = true;
 
-      amr::Update(S, offset, u);
-      advec.AMRUpdate(S, quick);
+      AMRUpdate(S, offset, u);
+      adv.AMRUpdate(S, quick);
 
       pmesh->Rebalance();
 
-      amr::Update(S, offset, u);
-      advec.AMRUpdate(S, !quick);
+      AMRUpdate(S, offset, u);
+      adv.AMRUpdate(S, !quick);
 
-      //GetZeroBCDofs(pmesh, H1FESpace, bdr_attr_max, ess_tdofs, ess_vdofs);
-      //ode_solver->Init(hydro);
+      ode_solver->Init(adv);
 
-      //fes.PrintPartitionStats();
+      u.ParFESpace()->PrintPartitionStats();
    }
 }
 
-static void Update(BlockVector &S, Array<int> &offset, ParGridFunction &u)
+void Operator::AMRUpdate(BlockVector &S,
+                         Array<int> &offset,
+                         ParGridFunction &u)
 {
-   ParFiniteElementSpace *pfes = u.ParFESpace();
-   pfes->Update();
+   pfes.Update();
+   u.SyncMemory(S);
+   dbg("u.Size:%d",u.Size());
 
-   const int vsize = pfes->GetVSize();
+   const int vsize = pfes.GetVSize();
+   dbg("vsize:%d",vsize);
    MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
-   offset[0] = vsize;
+   offset[0] = 0;
    offset[1] = vsize;
 
-   //BlockVector S_tmp(S);
-   S.Update(offset);
-   //const mfem::Operator* PFesUpdateOp = pfes->GetUpdateOperator();
-   //PFesUpdateOp->Mult(S_tmp.GetBlock(0), S.GetBlock(0));
+   BlockVector S_tmp(S);
+   dbg("S:%f S_tmp:%f Sizes:%d %d", S*S, S_tmp*S_tmp, S.Size(), S_tmp.Size());
+   S_tmp = S;
+   S.Update(offset, Device::GetMemoryType());
+
+   dbg("Sizes %d %d", S.Size(), S_tmp.Size());
+
+   Vector &us = S.GetBlock(0);
+   Vector &us_tmp = S_tmp.GetBlock(0);
+
+   dbg("Sizes0 %d %d", us.Size(), us_tmp.Size());
+
+   const mfem::Operator* PFesUpdateOp = pfes.GetUpdateOperator();
+   MFEM_VERIFY(PFesUpdateOp,"");
+   PFesUpdateOp->Mult(us_tmp, us);
    //u.Update();
-   u.MakeRef(pfes, S, offset[0]);
+   u.MakeRef(&pfes, S, offset[0]);
+   //u.SyncMemory(S);
+   u.SyncAliasMemory(S);
+   dbg("u.Size:%d",u.Size());
 }
 
 } // namespace amr

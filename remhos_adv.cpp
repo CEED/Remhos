@@ -200,5 +200,55 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 }
 
 void AdvectionOperator::AMRUpdate(const Vector &S,
-                                  const bool quick) { dbg(); }
+                                  const bool quick)
+{
+   dbg();
+   int skip_zeros = 0;
+
+   width = height = S.Size();
+
+   Mbf.FESpace()->Update();
+   Mbf.Update();
+   Mbf.Assemble();
+   Mbf.Finalize();
+
+   ml.FESpace()->Update();
+   ml.Update();
+   ml.Assemble();
+   ml.Finalize();
+   //ml.SpMat().GetDiag(lumpedM);
+
+   Kbf.ParFESpace()->Update();
+   Kbf.Update();
+   Kbf.Assemble(skip_zeros);
+   Kbf.Finalize(skip_zeros);
+
+   M_HO.ParFESpace()->Update();
+   M_HO.Update();
+   M_HO.Assemble();
+   M_HO.Finalize();
+
+   K_HO.ParFESpace()->Update();
+   K_HO.Update();
+   K_HO.Assemble(skip_zeros);
+   K_HO.Finalize(skip_zeros);
+
+   //Vector lumpedM;
+   //Vector start_mesh_pos, start_submesh_pos;
+   //GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
+   x_gf.Update();
+
+   //double dt;
+   //Assembly &asmbl;
+
+   //LowOrderMethod &lom;
+   //DofInfo &dofs;
+
+   //HOSolver *ho_solver;
+   ho_solver->Update();
+   //LOSolver *lo_solver;
+   //FCTSolver *fct_solver;
+   //MonolithicSolver *mono_solver;
+}
+
 } // namespace mfem

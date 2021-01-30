@@ -86,7 +86,7 @@ int main(int argc, char *argv[])
    const char *device_config = "cpu";
    bool amr = false;
    int amr_estimator = amr::estimator::custom;
-   double amr_ref_threshold = 0.5;
+   double amr_ref_threshold = 0.2;
    double amr_jac_threshold = 0.9;
    double amr_deref_threshold = 0.75;
    int amr_max_level = rs_levels + rp_levels;
@@ -768,7 +768,9 @@ int main(int argc, char *argv[])
    amr::Operator *AMR = nullptr;
    if (amr)
    {
-      AMR = new amr::Operator(&pmesh, u,
+      MFEM_VERIFY(pmesh.GetNodes(),"");
+      AMR = new amr::Operator(pfes,
+                              &pmesh, x,
                               amr_estimator,
                               amr_ref_threshold,
                               amr_jac_threshold,
@@ -781,6 +783,8 @@ int main(int argc, char *argv[])
    bool done = false;
    for (int ti = 0; !done;)
    {
+      dbg("\033[31m######################");
+      dbg("\033[31m######## LOOP ########");
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
@@ -791,7 +795,8 @@ int main(int argc, char *argv[])
       ti++;
 
       //S has been modified, update the alias
-      u.SyncMemory(S);
+      //u.SyncMemory(S);
+      u.SyncAliasMemory(S);
       if (product_sync) { us.SyncMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
@@ -823,7 +828,13 @@ int main(int argc, char *argv[])
          }
       }
 
-      if (amr) { AMR->Update(adv, ode_solver, S, offset); }
+      /// AMR UPDATE
+      if (amr)
+      {
+         AMR->Update(adv, ode_solver, S, offset, u);
+         double umin_new, umax_new;
+         GetMinMax(u, umin_new, umax_new);
+      }
 
       if (exec_mode == 1)
       {

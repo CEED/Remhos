@@ -74,8 +74,9 @@ private:
 class Operator
 {
    const int order = 3; // should be computed
+   ParFiniteElementSpace &pfes;
    ParMesh *pmesh;
-   ParGridFunction &u;
+   ParGridFunction &sol;
    const int myid, dim, sdim;
 
    L2_FECollection flux_fec;
@@ -98,8 +99,9 @@ class Operator
    } opt;
 
 public:
-   Operator(ParMesh *pmesh,
-            ParGridFunction &u,
+   Operator(ParFiniteElementSpace &pfes,
+            ParMesh *pmesh,
+            ParGridFunction &sol,
             int estimator,
             double ref_t, double jac_t, double deref_t,
             int max_level, int nc_limit);
@@ -111,7 +113,13 @@ public:
    void Update(AdvectionOperator&,
                ODESolver *ode_solver,
                BlockVector &S,
-               Array<int> &offset);
+               Array<int> &offset,
+               ParGridFunction &u);
+
+private:
+   void AMRUpdate(BlockVector &S,
+                  Array<int> &offset,
+                  ParGridFunction &u);
 };
 
 } // namespace amr
