@@ -71,7 +71,7 @@ public:
 
    virtual ~AdvectionOperator() { }
 
-   void AMRUpdate(const Vector &S, const bool quick);
+   void AMRUpdate(const Vector &S);
 };
 
 } // namespace mfem

@@ -32,14 +32,14 @@ class EstimatorIntegrator: public DiffusionIntegrator
    enum class mode { diffusion, one, two };
 
    int NE, e;
-   ParMesh *pmesh;
+   ParMesh &pmesh;
    const mode flux_mode;
    const int max_level;
    const double jac_threshold;
    ConstantCoefficient one {1.0};
 
 public:
-   EstimatorIntegrator(ParMesh *pmesh,
+   EstimatorIntegrator(ParMesh &pmesh,
                        const int max_level,
                        const double jac_threshold,
                        const mode flux_mode = mode::two);
@@ -73,11 +73,12 @@ private:
 // AMR operator
 class Operator
 {
-   const int order = 3; // should be computed
-   ParFiniteElementSpace &pfes;
-   ParMesh *pmesh;
-   ParGridFunction &sol;
+   ParMesh &pmesh;
+   ParGridFunction &x, &xsub, &sol;
+   ParFiniteElementSpace &pfes, &mesh_pfes;
+
    const int myid, dim, sdim;
+   const int order = 3; // should be computed
 
    L2_FECollection flux_fec;
    ParFiniteElementSpace flux_fes;
@@ -100,7 +101,10 @@ class Operator
 
 public:
    Operator(ParFiniteElementSpace &pfes,
-            ParMesh *pmesh,
+            ParFiniteElementSpace &mesh_pfes,
+            ParMesh &pmesh,
+            ParGridFunction &x,
+            ParGridFunction &xsub,
             ParGridFunction &sol,
             int estimator,
             double ref_t, double jac_t, double deref_t,

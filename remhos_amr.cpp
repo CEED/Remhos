@@ -40,18 +40,18 @@ static const char *EstimatorName(const int est)
    return nullptr;
 }
 
-EstimatorIntegrator::EstimatorIntegrator(ParMesh *pmesh,
+EstimatorIntegrator::EstimatorIntegrator(ParMesh &pmesh,
                                          const int max_level,
                                          const double jac_threshold,
                                          const mode flux_mode):
    DiffusionIntegrator(one),
-   NE(pmesh->GetNE()),
+   NE(pmesh.GetNE()),
    pmesh(pmesh),
    flux_mode(flux_mode),
    max_level(max_level),
    jac_threshold(jac_threshold) { dbg(); }
 
-void EstimatorIntegrator::Reset() { e = 0; NE = pmesh->GetNE(); }
+void EstimatorIntegrator::Reset() { e = 0; NE = pmesh.GetNE(); }
 
 double EstimatorIntegrator::ComputeFluxEnergy(const FiniteElement &fluxelem,
                                               ElementTransformation &Trans,
@@ -120,7 +120,7 @@ void EstimatorIntegrator::ComputeElementFlux2(const int e,
    double minW = +NL_DMAX;
    double maxW = -NL_DMAX;
 
-   const int depth = pmesh->pncmesh->GetElementDepth(e);
+   const int depth = pmesh.pncmesh->GetElementDepth(e);
 
    for (int q = 0; q < NQ; q++)
    {
@@ -153,7 +153,7 @@ void EstimatorIntegrator::ComputeElementFlux(const FiniteElement &el,
                                              Vector &flux,
                                              bool with_coef)
 {
-   MFEM_VERIFY(NE == pmesh->GetNE(), "");
+   MFEM_VERIFY(NE == pmesh.GetNE(), "");
    // ZZ comes with with_coef set to true, not Kelly
    switch (flux_mode)
    {
@@ -201,19 +201,26 @@ static void GetPerElementMinMax(const ParGridFunction &gf,
 }
 
 Operator::Operator(ParFiniteElementSpace &pfes,
-                   ParMesh *pmesh,
+                   ParFiniteElementSpace &mesh_pfes,
+                   ParMesh &pmesh,
+                   ParGridFunction &x,
+                   ParGridFunction &xsub,
                    ParGridFunction &sol,
                    int est,
                    double ref_t, double jac_t, double deref_t,
                    int max_level, int nc_limit):
-   pfes(pfes),
+
    pmesh(pmesh),
+   x(x),
+   xsub(xsub),
    sol(sol),
-   myid(pmesh->GetMyRank()),
-   dim(pmesh->Dimension()),
-   sdim(pmesh->SpaceDimension()),
+   pfes(pfes),
+   mesh_pfes(mesh_pfes),
+   myid(pmesh.GetMyRank()),
+   dim(pmesh.Dimension()),
+   sdim(pmesh.SpaceDimension()),
    flux_fec(order, dim),
-   flux_fes(pmesh, &flux_fec, sdim),
+   flux_fes(&pmesh, &flux_fec, sdim),
    opt( {est, ref_t, jac_t, deref_t, max_level, nc_limit})
 {
    dbg("AMR Setup");
@@ -229,7 +236,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
       integ = new amr::EstimatorIntegrator(pmesh, opt.max_level,
                                            opt.jac_threshold);
       smooth_flux_fec = new RT_FECollection(order-1, dim);
-      auto smooth_flux_fes = new ParFiniteElementSpace(pmesh, smooth_flux_fec);
+      auto smooth_flux_fes = new ParFiniteElementSpace(&pmesh, smooth_flux_fec);
       estimator = new L2ZienkiewiczZhuEstimator(*integ, sol, &flux_fes,
                                                 smooth_flux_fes);
    }
@@ -298,10 +305,10 @@ void Operator::Update(AdvectionOperator &adv,
          for (int e = 0; e < NE; e++)
          {
             //dbg("u(%d) in [%f,%f]", e, u_max(e), u_min(e));
-            const double delta = (u_max(e) - u_min(e))/range;
-            dbg("delta: %f, threshold: %f", delta, threshold);
+            const double delta = (u_max(e) - u_min(e)) / range;
+            //dbg("delta: %f, threshold: %f", delta, threshold);
             if (delta > opt.ref_threshold &&
-                pmesh->pncmesh->GetElementDepth(e) < opt.max_level )
+                pmesh.pncmesh->GetElementDepth(e) < opt.max_level )
             {
                dbg("\033[32mRefinement #%d",e);
                refs.Append(Refinement(e));
@@ -313,7 +320,7 @@ void Operator::Update(AdvectionOperator &adv,
       case amr::estimator::zz:
       case amr::estimator::kelly:
       {
-         refiner->Apply(*pmesh);
+         refiner->Apply(pmesh);
          if (refiner->Refined()) { mesh_refined = true; }
          MFEM_VERIFY(!refiner->Derefined(),"");
          MFEM_VERIFY(!refiner->Rebalanced(),"");
@@ -323,12 +330,15 @@ void Operator::Update(AdvectionOperator &adv,
    }
 
    // custom uses refs, ZZ and Kelly will set mesh_refined
-   const int nref = pmesh->ReduceInt(refs.Size());
+   const int nref = pmesh.ReduceInt(refs.Size());
 
    if (nref && !mesh_refined)
    {
       constexpr int non_conforming = 1;
-      pmesh->GeneralRefinement(refs, non_conforming, opt.nc_limit);
+      pmesh.GetNodes()->HostReadWrite();
+      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
+      pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
+      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
       mesh_refined = true;
       if (myid == 0)
       {
@@ -345,7 +355,7 @@ void Operator::Update(AdvectionOperator &adv,
              opt.estimator == amr::estimator::kelly) && !mesh_refined)
    {
       MFEM_VERIFY(derefiner,"");
-      if (derefiner->Apply(*pmesh))
+      if (derefiner->Apply(pmesh))
       {
          if (myid == 0)
          {
@@ -359,19 +369,27 @@ void Operator::Update(AdvectionOperator &adv,
    if (mesh_refined)
    {
       dbg();
-      constexpr bool quick = true;
 
       AMRUpdate(S, offset, u);
-      adv.AMRUpdate(S, quick);
+      pmesh.GetNodes()->FESpace()->Update();
+      pmesh.GetNodes()->Update();
+      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
 
-      pmesh->Rebalance();
+      //dbg("Rebalance");
+      //pmesh.Rebalance();
 
-      AMRUpdate(S, offset, u);
-      adv.AMRUpdate(S, !quick);
+      //mesh_pfes.Update();
+      //x.ParFESpace()->Update();
+      //x.Update();
+      //pmesh.SetNodalGridFunction(&x);
+
+      //xsub.ParFESpace()->Update();
+      //xsub.Update();
+
+      //AMRUpdate(S, offset, u);
+      adv.AMRUpdate(S);
 
       ode_solver->Init(adv);
-
-      u.ParFESpace()->PrintPartitionStats();
    }
 }
 
@@ -379,36 +397,24 @@ void Operator::AMRUpdate(BlockVector &S,
                          Array<int> &offset,
                          ParGridFunction &u)
 {
+   dbg();
    pfes.Update();
-   u.SyncMemory(S);
-   dbg("u.Size:%d",u.Size());
+   //pfes.PrintPartitionStats();
 
    const int vsize = pfes.GetVSize();
-   dbg("vsize:%d",vsize);
    MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
    offset[0] = 0;
    offset[1] = vsize;
 
-   BlockVector S_tmp(S);
-   dbg("S:%f S_tmp:%f Sizes:%d %d", S*S, S_tmp*S_tmp, S.Size(), S_tmp.Size());
-   S_tmp = S;
+   BlockVector S_bkp(S);
    S.Update(offset, Device::GetMemoryType());
+   const mfem::Operator* update_op = pfes.GetUpdateOperator();
+   MFEM_VERIFY(update_op,"");
+   update_op->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
 
-   dbg("Sizes %d %d", S.Size(), S_tmp.Size());
-
-   Vector &us = S.GetBlock(0);
-   Vector &us_tmp = S_tmp.GetBlock(0);
-
-   dbg("Sizes0 %d %d", us.Size(), us_tmp.Size());
-
-   const mfem::Operator* PFesUpdateOp = pfes.GetUpdateOperator();
-   MFEM_VERIFY(PFesUpdateOp,"");
-   PFesUpdateOp->Mult(us_tmp, us);
-   //u.Update();
    u.MakeRef(&pfes, S, offset[0]);
-   //u.SyncMemory(S);
-   u.SyncAliasMemory(S);
-   dbg("u.Size:%d",u.Size());
+   u.SyncMemory(S);
+   MFEM_VERIFY(u.Size() == vsize,"");
 }
 
 } // namespace amr

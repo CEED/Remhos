@@ -208,6 +208,7 @@ int main(int argc, char *argv[])
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+   //MFEM_VERIFY(pmesh.GetNodes(),"");
 
 
    // Define the ODE solver used for time integration. Several explicit
@@ -247,7 +248,7 @@ int main(int argc, char *argv[])
    // Current mesh positions.
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
    ParGridFunction x(&mesh_pfes);
-   pmesh.SetNodalGridFunction(&x);
+   //pmesh.SetNodalGridFunction(&x);
 
    // Store initial mesh positions.
    Vector x0(x.Size());
@@ -299,6 +300,7 @@ int main(int argc, char *argv[])
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
    {
+      assert(false);
       MFEM_VERIFY(btype == 2,
                   "Monotonicity treatment requires Bernstein basis.");
 
@@ -585,9 +587,7 @@ int main(int argc, char *argv[])
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
    Array<int> offset((product_sync) ? 3 : 2);
-   dbg("product_sync: %s, vsize:%d",product_sync?"yes":"no", vsize);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
-   dbg("offset[0]:%d", offset[1]-offset[0]);
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
@@ -642,6 +642,7 @@ int main(int argc, char *argv[])
    bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
    if (mono_type == MonolithicSolverType::ResDistMono)
    {
+      assert(false);
       const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
@@ -649,6 +650,7 @@ int main(int argc, char *argv[])
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
+      assert(false);
       const bool subcell_scheme = true;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
@@ -770,7 +772,9 @@ int main(int argc, char *argv[])
    {
       MFEM_VERIFY(pmesh.GetNodes(),"");
       AMR = new amr::Operator(pfes,
-                              &pmesh, x,
+                              mesh_pfes,
+                              pmesh,
+                              x, *xsub, u,
                               amr_estimator,
                               amr_ref_threshold,
                               amr_jac_threshold,
@@ -795,8 +799,7 @@ int main(int argc, char *argv[])
       ti++;
 
       //S has been modified, update the alias
-      //u.SyncMemory(S);
-      u.SyncAliasMemory(S);
+      u.SyncMemory(S);
       if (product_sync) { us.SyncMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
@@ -828,13 +831,8 @@ int main(int argc, char *argv[])
          }
       }
 
-      /// AMR UPDATE
-      if (amr)
-      {
-         AMR->Update(adv, ode_solver, S, offset, u);
-         double umin_new, umax_new;
-         GetMinMax(u, umin_new, umax_new);
-      }
+      /// AMR UPDATE ///
+      if (amr) { AMR->Update(adv, ode_solver, S, offset, u); }
 
       if (exec_mode == 1)
       {
@@ -872,6 +870,9 @@ int main(int argc, char *argv[])
 
          if (visualization)
          {
+            MPI_Barrier(pmesh.GetComm());
+            u.HostRead();
+
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution",

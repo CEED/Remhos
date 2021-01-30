@@ -14,6 +14,9 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
+#define MFEM_DEBUG_COLOR 226
+#include "debug.hpp"
+
 #include "remhos_tools.hpp"
 
 using namespace std;
@@ -399,7 +402,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+         maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -1414,8 +1417,10 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
                     ParGridFunction &gf, const char *title,
                     int x, int y, int w, int h, const char *keys, bool vec)
 {
+   dbg("gf:%d", gf.Size());
    ParMesh &pmesh = *gf.ParFESpace()->GetParMesh();
    MPI_Comm comm = pmesh.GetComm();
+   dbg("GetNodes:%d", pmesh.GetNodes()->Size());
 
    int num_procs, myid;
    MPI_Comm_size(comm, &num_procs);
