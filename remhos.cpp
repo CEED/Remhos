@@ -29,27 +29,17 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
-#include "mfem.hpp"
-#include <fstream>
-#include <iostream>
-#include "remhos_ho.hpp"
-#include "remhos_lo.hpp"
-#include "remhos_fct.hpp"
-#include "remhos_mono.hpp"
-#include "remhos_tools.hpp"
-#include "remhos_sync.hpp"
+#define MFEM_DEBUG_COLOR 154
+#include "debug.hpp"
+
+#include "remhos.hpp"
 
 using namespace std;
 using namespace mfem;
 
-enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell};
-enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
-enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
-
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
-int problem_num;
+int problem_num = 0;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -67,53 +57,6 @@ double inflow_function(const Vector &x);
 
 // Mesh bounding box
 Vector bb_min, bb_max;
-
-class AdvectionOperator : public TimeDependentOperator
-{
-private:
-   BilinearForm &Mbf, &ml;
-   ParBilinearForm &Kbf;
-   ParBilinearForm &M_HO, &K_HO;
-   Vector &lumpedM;
-
-   Vector start_mesh_pos, start_submesh_pos;
-   GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
-
-   mutable ParGridFunction x_gf;
-
-   double dt;
-   Assembly &asmbl;
-
-   LowOrderMethod &lom;
-   DofInfo &dofs;
-
-   HOSolver *ho_solver;
-   LOSolver *lo_solver;
-   FCTSolver *fct_solver;
-   MonolithicSolver *mono_solver;
-
-public:
-   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
-                     Vector &_lumpedM,
-                     ParBilinearForm &Kbf_,
-                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                     GridFunction &pos, GridFunction *sub_pos,
-                     GridFunction &vel, GridFunction &sub_vel,
-                     Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
-                     MonolithicSolver *mos);
-
-   virtual void Mult(const Vector &x, Vector &y) const;
-
-   virtual void SetDt(double _dt) { dt = _dt; }
-   void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
-   {
-      start_mesh_pos    = m_pos;
-      start_submesh_pos = sm_pos;
-   }
-
-   virtual ~AdvectionOperator() { }
-};
 
 int main(int argc, char *argv[])
 {
@@ -141,6 +84,13 @@ int main(int argc, char *argv[])
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
+   bool amr = false;
+   int amr_estimator = amr::estimator::custom;
+   double amr_ref_threshold = 0.5;
+   double amr_jac_threshold = 0.9;
+   double amr_deref_threshold = 0.75;
+   int amr_max_level = rs_levels + rp_levels;
+   const int amr_nc_limit = 1; // maximum level of hanging nodes
 
    int precision = 8;
    cout.precision(precision);
@@ -208,6 +158,17 @@ int main(int argc, char *argv[])
                   "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
+   args.AddOption(&amr, "-amr", "--enable-amr", "-no-amr", "--disable-amr",
+                  "Enable adaptive mesh refinement.");
+   args.AddOption(&amr_estimator, "-ae", "--amr-estimator",
+                  "AMR estimator: 0:Custom, 1:Rho, 2:ZZ, 3:Kelly");
+   args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
+                  "AMR Jacobian refinement threshold.");
+   args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
+                  "AMR refinement threshold.");
+   args.AddOption(&amr_max_level, "-am", "--amr-max-level",
+                  "AMR max refined level (default to 'rs_levels + rp_levels')");
+
    args.Parse();
    if (!args.Good())
    {
@@ -226,18 +187,28 @@ int main(int argc, char *argv[])
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
 
+   // AMR sanity checks
+   // Re-evaluate amr_max_level after arguments have been parsed
+   if (amr)
+   {
+      MFEM_VERIFY(exec_mode == 0, "Only standard transport is supported.")
+      amr_max_level = std::max(amr_max_level, rs_levels + rp_levels);
+   }
+
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
    const int dim = mesh->Dimension();
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+   if (amr) { mesh->EnsureNCMesh(); }
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
@@ -614,7 +585,9 @@ int main(int argc, char *argv[])
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
    Array<int> offset((product_sync) ? 3 : 2);
+   dbg("product_sync: %s, vsize:%d",product_sync?"yes":"no", vsize);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
+   dbg("offset[0]:%d", offset[1]-offset[0]);
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
@@ -791,6 +764,19 @@ int main(int argc, char *argv[])
    ParGridFunction res = u;
    double residual;
 
+   // AMR operator
+   amr::Operator *AMR = nullptr;
+   if (amr)
+   {
+      AMR = new amr::Operator(&pmesh, u,
+                              amr_estimator,
+                              amr_ref_threshold,
+                              amr_jac_threshold,
+                              amr_deref_threshold,
+                              amr_max_level,
+                              amr_nc_limit);
+   }
+
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    for (int ti = 0; !done;)
@@ -798,6 +784,8 @@ int main(int argc, char *argv[])
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
+
+      if (amr) { AMR->Reset(); }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -834,6 +822,8 @@ int main(int argc, char *argv[])
             }
          }
       }
+
+      if (amr) { AMR->Update(adv, ode_solver, S, offset); }
 
       if (exec_mode == 1)
       {
@@ -1022,179 +1012,6 @@ int main(int argc, char *argv[])
    }
 
    return 0;
-}
-
-AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
-                                     BilinearForm &_ml, Vector &_lumpedM,
-                                     ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                                     GridFunction &pos, GridFunction *sub_pos,
-                                     GridFunction &vel, GridFunction &sub_vel,
-                                     Assembly &_asmbl,
-                                     LowOrderMethod &_lom, DofInfo &_dofs,
-                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
-                                     MonolithicSolver *mos) :
-   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_),
-   lumpedM(_lumpedM),
-   start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
-   mesh_pos(pos), submesh_pos(sub_pos),
-   mesh_vel(vel), submesh_vel(sub_vel),
-   x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
-
-void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
-{
-   if (exec_mode == 1)
-   {
-      // Move the mesh positions.
-      const double t = GetTime();
-      add(start_mesh_pos, t, mesh_vel, mesh_pos);
-      if (submesh_pos)
-      {
-         add(start_submesh_pos, t, submesh_vel, *submesh_pos);
-      }
-      // Reset precomputed geometric data.
-      Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
-
-      // Reassemble on the new mesh. Element contributions.
-      // Currently needed to have the sparse matrices used by the LO methods.
-      Mbf.BilinearForm::operator=(0.0);
-      Mbf.Assemble();
-      Kbf.BilinearForm::operator=(0.0);
-      Kbf.Assemble(0);
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostReadWrite();
-      ml.SpMat().GetDiag(lumpedM);
-
-      M_HO.BilinearForm::operator=(0.0);
-      M_HO.Assemble();
-      K_HO.BilinearForm::operator=(0.0);
-      K_HO.Assemble(0);
-
-      if (lom.pk)
-      {
-         lom.pk->BilinearForm::operator=(0.0);
-         lom.pk->Assemble();
-      }
-
-      // Face contributions.
-      asmbl.bdrInt = 0.;
-      Mesh *mesh = M_HO.FESpace()->GetMesh();
-      const int dim = mesh->Dimension(), ne = mesh->GetNE();
-      Array<int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-
-      for (int k = 0; k < ne; k++)
-      {
-         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-         for (int i = 0; i < dofs.numBdrs; i++)
-         {
-            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.ComputeFluxTerms(k, i, Trans, lom);
-         }
-      }
-   }
-
-   const int size = Kbf.ParFESpace()->GetVSize();
-   const int NE   = Kbf.ParFESpace()->GetNE();
-
-   // Needed because X and Y are allocated on the host by the ODESolver.
-   X.Read(); Y.Read();
-
-   Vector u, d_u;
-   Vector* xptr = const_cast<Vector*>(&X);
-   u.MakeRef(*xptr, 0, size);
-   d_u.MakeRef(Y, 0, size);
-   Vector du_HO(u.Size()), du_LO(u.Size());
-
-   x_gf = u;
-   x_gf.ExchangeFaceNbrData();
-
-   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
-   else if (fct_solver)
-   {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
-
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
-   }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
-   else { MFEM_ABORT("No solver was chosen."); }
-
-   d_u.SyncAliasMemory(Y);
-
-   // Remap the product field, if there is a product field.
-   if (X.Size() > size)
-   {
-      Vector us, d_us;
-      us.MakeRef(*xptr, size, size);
-      d_us.MakeRef(Y, size, size);
-
-      x_gf = us;
-      x_gf.ExchangeFaceNbrData();
-
-      if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
-      else if (fct_solver)
-      {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
-         lo_solver->CalcLOSolution(us, d_us_LO);
-         ho_solver->CalcHOSolution(us, d_us_HO);
-
-         // Compute the ratio s = us_old / u_old, and old active dofs.
-         Vector s(size);
-         Array<bool> s_bool_el, s_bool_dofs;
-         ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
-#ifdef REMHOS_FCT_DEBUG
-         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
-#endif
-
-         // Bounds for s, based on the old values (and old active dofs).
-         // This doesn't consider s values from the old inactive dofs, because
-         // there were no bounds restriction on them at the previous time step.
-         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
-                                    &s_bool_el, &s_bool_dofs);
-         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
-                            dofs.xi_min, dofs.xi_max, &s_bool_el);
-
-         // Evolve u and get the new active dofs.
-         Vector u_new(size);
-         add(1.0, u, dt, d_u, u_new);
-         Array<bool> s_bool_el_new, s_bool_dofs_new;
-         ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
-
-         fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
-                                    dofs.xi_min, dofs.xi_max,
-                                    u_new,
-                                    s_bool_el_new, s_bool_dofs_new, d_us);
-
-#ifdef REMHOS_FCT_DEBUG
-         Vector us_new(size);
-         add(1.0, us, dt, d_us, us_new);
-         int myid = x_gf.ParFESpace()->GetMyRank();
-         ComputeMinMaxS(NE, us_new, u_new, myid);
-         if (myid == 0) { std::cout << " --- " << std::endl; }
-#endif
-      }
-      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
-      else { MFEM_ABORT("No solver was chosen."); }
-
-      d_us.SyncAliasMemory(Y);
-   }
 }
 
 // Velocity coefficient

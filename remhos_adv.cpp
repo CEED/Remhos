@@ -1,0 +1,204 @@
+// Copyright (c) 2017, Lawrence Livermore National Security, LLC. Produced at
+// the Lawrence Livermore National Laboratory. LLNL-CODE-734707. All Rights
+// reserved. See files LICENSE and NOTICE for details.
+//
+// This file is part of CEED, a collection of benchmarks, miniapps, software
+// libraries and APIs for efficient high-order finite element and spectral
+// element discretizations for exascale applications. For more information and
+// source code availability see http://github.com/ceed.
+//
+// The CEED research is supported by the Exascale Computing Project 17-SC-20-SC,
+// a collaborative effort of two U.S. Department of Energy organizations (Office
+// of Science and the National Nuclear Security Administration) responsible for
+// the planning and preparation of a capable exascale ecosystem, including
+// software, applications, hardware, advanced system engineering and early
+// testbed platforms, in support of the nation's exascale computing imperative.
+
+#define MFEM_DEBUG_COLOR 220
+#include "debug.hpp"
+
+#include "remhos.hpp"
+
+using namespace std;
+using namespace mfem;
+
+namespace mfem
+{
+
+AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
+                                     BilinearForm &_ml, Vector &_lumpedM,
+                                     ParBilinearForm &Kbf_,
+                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     GridFunction &pos, GridFunction *sub_pos,
+                                     GridFunction &vel, GridFunction &sub_vel,
+                                     Assembly &_asmbl,
+                                     LowOrderMethod &_lom, DofInfo &_dofs,
+                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                                     MonolithicSolver *mos) :
+   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   M_HO(M_HO_), K_HO(K_HO_),
+   lumpedM(_lumpedM),
+   start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
+   mesh_pos(pos), submesh_pos(sub_pos),
+   mesh_vel(vel), submesh_vel(sub_vel),
+   x_gf(Kbf.ParFESpace()),
+   asmbl(_asmbl), lom(_lom), dofs(_dofs),
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { dbg(); }
+
+void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
+{
+   dbg();
+   if (exec_mode == 1)
+   {
+      // Move the mesh positions.
+      const double t = GetTime();
+      add(start_mesh_pos, t, mesh_vel, mesh_pos);
+      if (submesh_pos)
+      {
+         add(start_submesh_pos, t, submesh_vel, *submesh_pos);
+      }
+      // Reset precomputed geometric data.
+      Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
+
+      // Reassemble on the new mesh. Element contributions.
+      // Currently needed to have the sparse matrices used by the LO methods.
+      Mbf.BilinearForm::operator=(0.0);
+      Mbf.Assemble();
+      Kbf.BilinearForm::operator=(0.0);
+      Kbf.Assemble(0);
+      ml.BilinearForm::operator=(0.0);
+      ml.Assemble();
+      lumpedM.HostReadWrite();
+      ml.SpMat().GetDiag(lumpedM);
+
+      M_HO.BilinearForm::operator=(0.0);
+      M_HO.Assemble();
+      K_HO.BilinearForm::operator=(0.0);
+      K_HO.Assemble(0);
+
+      if (lom.pk)
+      {
+         lom.pk->BilinearForm::operator=(0.0);
+         lom.pk->Assemble();
+      }
+
+      // Face contributions.
+      asmbl.bdrInt = 0.;
+      Mesh *mesh = M_HO.FESpace()->GetMesh();
+      const int dim = mesh->Dimension(), ne = mesh->GetNE();
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+
+      for (int k = 0; k < ne; k++)
+      {
+         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+
+         for (int i = 0; i < dofs.numBdrs; i++)
+         {
+            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
+         }
+      }
+   }
+
+   const int size = Kbf.ParFESpace()->GetVSize();
+   const int NE   = Kbf.ParFESpace()->GetNE();
+
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
+   Vector u, d_u;
+   Vector* xptr = const_cast<Vector*>(&X);
+   u.MakeRef(*xptr, 0, size);
+   d_u.MakeRef(Y, 0, size);
+   Vector du_HO(u.Size()), du_LO(u.Size());
+
+   x_gf = u;
+   x_gf.ExchangeFaceNbrData();
+
+   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
+   else if (fct_solver)
+   {
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      lo_solver->CalcLOSolution(u, du_LO);
+      ho_solver->CalcHOSolution(u, du_HO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, d_u);
+   }
+   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+   else { MFEM_ABORT("No solver was chosen."); }
+
+   d_u.SyncAliasMemory(Y);
+
+   // Remap the product field, if there is a product field.
+   if (X.Size() > size)
+   {
+      Vector us, d_us;
+      us.MakeRef(*xptr, size, size);
+      d_us.MakeRef(Y, size, size);
+
+      x_gf = us;
+      x_gf.ExchangeFaceNbrData();
+
+      if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
+      else if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
+         lo_solver->CalcLOSolution(us, d_us_LO);
+         ho_solver->CalcHOSolution(us, d_us_HO);
+
+         // Compute the ratio s = us_old / u_old, and old active dofs.
+         Vector s(size);
+         Array<bool> s_bool_el, s_bool_dofs;
+         ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
+#ifdef REMHOS_FCT_DEBUG
+         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
+#endif
+
+         // Bounds for s, based on the old values (and old active dofs).
+         // This doesn't consider s values from the old inactive dofs, because
+         // there were no bounds restriction on them at the previous time step.
+         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+                                    &s_bool_el, &s_bool_dofs);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                            dofs.xi_min, dofs.xi_max, &s_bool_el);
+
+         // Evolve u and get the new active dofs.
+         Vector u_new(size);
+         add(1.0, u, dt, d_u, u_new);
+         Array<bool> s_bool_el_new, s_bool_dofs_new;
+         ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
+
+         fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
+                                    dofs.xi_min, dofs.xi_max,
+                                    u_new,
+                                    s_bool_el_new, s_bool_dofs_new, d_us);
+
+#ifdef REMHOS_FCT_DEBUG
+         Vector us_new(size);
+         add(1.0, us, dt, d_us, us_new);
+         int myid = x_gf.ParFESpace()->GetMyRank();
+         ComputeMinMaxS(NE, us_new, u_new, myid);
+         if (myid == 0) { std::cout << " --- " << std::endl; }
+#endif
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
+   }
+}
+
+void AdvectionOperator::AMRUpdate(const Vector &S,
+                                  const bool quick) { dbg(); }
+} // namespace mfem
