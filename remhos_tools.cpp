@@ -684,15 +684,6 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
       SubFes1 = lom.SubFes1;
    }
 
-   //Create a map between elem,face -> face no
-   //if(exec_mode !=0)
-   {
-     //TODO::Allocate with the correct size of interior and bdry faces
-     ElemBdryToFaceNo.SetSize(ne * dofs.numBdrs);
-     IntElemBdryToFaceNo.SetSize(ne * dofs.numBdrs); //are these needed?
-     BdryElemBdryToFaceNo.SetSize(ne * dofs.numBdrs); // ??
-   }
-
    // Initialization for transport mode.
    //if (exec_mode == 0)
    {
@@ -732,50 +723,6 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
    const FiniteElement &el = *fes->GetFE(e_id);
 
    Vector vval, nor(dim), shape(el.GetDof());
-
-   //Create a map going from elem, bdry -> face no
-   //encode direction of the normal
-
-   int e1, e2;
-   int inf1, inf2;
-   int f = Trans->Face->ElementNo;  //global face no
-   fes->GetMesh()->GetFaceInfos(f, &e1, &e2);
-   fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
-
-   //Interior
-   if(e2>=0 || (e2<0 && inf2>=0)) {
-     if (Trans->Elem1No != e_id){
-       IntElemBdryToFaceNo[int_face_ct] = -1 * (Trans->Face->ElementNo + 1);
-     }else{
-       IntElemBdryToFaceNo[int_face_ct] = (Trans->Face->ElementNo + 1);
-     }
-     int_face_ct++;
-     //return ;
-   }
-
-   //Boundary face
-   if(e2<0 && inf2<0)
-   {
-     if (Trans->Elem1No != e_id){
-       IntElemBdryToFaceNo[bdry_face_ct] = -1 * (Trans->Face->ElementNo+1);
-     }else{
-       IntElemBdryToFaceNo[bdry_face_ct] = (Trans->Face->ElementNo+1);
-     }
-     bdry_face_ct++;
-     //return;
-   }
-
-   const int id = e_id * dofs.numBdrs + BdrID;
-
-   //Enumerates all faces
-   if (Trans->Elem1No != e_id)
-   {
-     ElemBdryToFaceNo[id] =  -1*(Trans->Face->ElementNo+1);
-   }else{
-     ElemBdryToFaceNo[id] = (Trans->Face->ElementNo+1);
-   }
-
-
 
    for (l = 0; l < lom.irF->GetNPoints(); l++)
    {
@@ -855,55 +802,6 @@ template <typename T> int sgn(T val)
   return v_out;
 }
 
-
-void Assembly::SampleVelocity(LowOrderMethod &lom)
-{
-
-  Mesh *mesh = fes->GetMesh();
-  int nf = fes->GetNF();
-
-  int dim = mesh->Dimension();
-  const int nq = lom.irF->GetNPoints();
-  auto type = FaceType::Interior; //assume all interior for now (periodic mesh);
-  vel.SetSize(dim*nq*nf);
-  auto C = mfem::Reshape(vel.Write(), dim, nq, nf);
-  Vector Vq(dim);
-
-  int quad1D = nq; //true for 2D, need to fix for 3D
-
-  int f_idx = 0;
-  for (int f = 0; f < fes->GetNF(); ++f)
-  {
-    int e1, e2;
-    int inf1, inf2;
-    fes->GetMesh()->GetFaceElements(f, &e1, &e2);
-    fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
-    int my_face_id = inf1 / 64;
-
-    if ((type==FaceType::Interior && (e2>=0 || (e2<0 && inf2>=0))) ||
-        (type==FaceType::Boundary && e2<0 && inf2<0) )
-      {
-
-        FaceElementTransformations &T =
-        *fes->GetMesh()->GetFaceElementTransformations(f);
-           for (int q = 0; q < nq; ++q)
-             {
-               // Convert to lexicographic ordering
-               int iq = ToLexOrdering(dim, my_face_id, quad1D, q);
-               T.SetAllIntPoints(&lom.irF->IntPoint(q));
-               const IntegrationPoint &eip1 = T.GetElement1IntPoint();
-               lom.coef->Eval(Vq, *T.Elem1, eip1);
-               for (int i = 0; i < dim; ++i)
-                 {
-                   C(i,iq,f_idx) = Vq(i);
-                 }
-             }
-           f_idx++;
-      }
-
-  }
-
-}
 
 //Taken from bilininteg_dgtrace_pa.cpp :L180
 void Assembly::SampleVelocity(LowOrderMethod &lom, FaceType type)
@@ -1011,12 +909,8 @@ void Assembly::DeviceComputeFluxTerms2(LowOrderMethod &lom, FaceType type)
    auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
 
    const double *vel_ptr;
-   const int *ElemBdryToFaceNo_ptr;
    if(type == FaceType::Interior) vel_ptr = IntVelocity.Read();
    if(type == FaceType::Boundary) vel_ptr = BdryVelocity.Read();
-
-   if(type == FaceType::Interior) ElemBdryToFaceNo_ptr = IntElemBdryToFaceNo.Read();
-   if(type == FaceType::Boundary) ElemBdryToFaceNo_ptr = BdryElemBdryToFaceNo.Read();
 
    auto vel = mfem::Reshape(vel_ptr, dim,  lom.irF->GetNPoints(), nf);
 
@@ -1288,129 +1182,6 @@ void Assembly::DeviceLinearFluxLumping(const Vector &x, Vector &y,
 
     face_restrict_lex->MultTranspose(y_loc,y);
   }
-
-}
-
-void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
-                                     Vector &y, const Vector &x_nd,
-                                     const Vector &alpha) const
-{
-   const int NE = fes->GetNE();
-   const int numBdrs = dofs.numBdrs;
-   const int numFaceDofs = dofs.numFaceDofs;
-
-   Vector xDiff_vec(numFaceDofs * NE);
-   const int size_x = x.Size();
-
-   auto xDiff   = Reshape(xDiff_vec.Write(), dofs.numFaceDofs, NE);
-   auto BdrDofs = Reshape(dofs.BdrDofs.Read(),
-                          dofs.BdrDofs.Height(),
-                          dofs.BdrDofs.Width());
-   auto NbrDof = Reshape(dofs.NbrDof.Read(), dofs.NbrDof.SizeI(),
-                         dofs.NbrDof.SizeJ(),
-                         dofs.NbrDof.SizeK());
-
-   auto bdryInt_view = Reshape(bdrInt.Read(), bdrInt.SizeI(),
-                               bdrInt.SizeJ(), bdrInt.SizeK());
-
-   const double * d_inflow_gf = inflow_gf.Read();
-   const double * d_x = x.Read();
-   const double * d_x_nd = x_nd.Read();
-   double * d_y = y.ReadWrite();
-#if 1
-   MFEM_FORALL(k, NE,
-   {
-
-      //for all faces in the element
-      for (int BdrID=0; BdrID<numBdrs; ++BdrID)
-      {
-
-         for (int j=0; j<numBdrs; ++j)
-         {
-            int dofInd = k*nd+BdrDofs(j,BdrID);
-            const int nbr_dof_id = NbrDof(k, BdrID, j);
-
-            // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-            // s.t. this value will not matter.
-            double xNeighbor(0.0);
-            if (nbr_dof_id < 0)
-            {
-               xNeighbor = d_inflow_gf[dofInd];
-            }
-            else
-            {
-               xNeighbor = (nbr_dof_id < size_x) ? d_x[nbr_dof_id]
-                           : d_x_nd[nbr_dof_id - size_x];
-            }
-
-            xDiff(j,k) = xNeighbor - d_x[dofInd];
-         }
-
-         for (int i=0; i< numFaceDofs; ++i)
-         {
-
-            int dofInd = k*nd+BdrDofs(i,BdrID);
-            for (int j=0; j<dofs.numFaceDofs; ++j)
-            {
-
-               //Simplify for now and take alpha = 0.
-               //this gives us the low order solution
-
-               //TODO: Double check, does this actually require an atomic add?
-               //      see if we can accumulate without atomics
-               //TODO - try to do without atomics
-               double val  = bdryInt_view(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i,k);
-               AtomicAdd(d_y[dofInd], val);
-               //d_y[dofInd] += bdryInt_view(k, BdrID, i*dofs.numFaceDofs + j) * xDiff(i,k)
-            }
-
-         }
-
-      }//for each face
-   });//for all elements
-
-
-#else
-   //Forall elements
-   for (int k=0; k<NE; ++k)
-   {
-
-      //for all faces in elements
-      for (int BdrID=0; BdrID<dofs.numBdrs; ++BdrID)
-      {
-         for (j = 0; j < dofs.numFaceDofs; j++)
-         {
-            dofInd = k*nd+dofs.BdrDofs(j,BdrID);
-            const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
-            // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
-            // s.t. this value will not matter.
-            if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
-            else
-            {
-               xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
-                           : x_nd(nbr_dof_id - size_x);
-            }
-            xDiff(j) = xNeighbor - x(dofInd);
-         }
-
-         for (i = 0; i < dofs.numFaceDofs; i++)
-         {
-            dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-            for (j = 0; j < dofs.numFaceDofs; j++)
-            {
-               // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
-               // 0 < alpha < 1 can be used for limiting within the low order method.
-               y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
-                            (xDiff(i) + (xDiff(j)-xDiff(i)) *
-                             alpha(dofs.BdrDofs(i,BdrID)) *
-                             alpha(dofs.BdrDofs(j,BdrID)) );
-            }
-         }
-
-      }//for each face
-
-   }//No of Elements
-#endif
 
 }
 

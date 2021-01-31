@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
-   int vis_steps = 20;
+   int vis_steps = 100;
    const char *device_config = "cpu";
 
    int precision = 8;
@@ -1102,25 +1102,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          lom.pk->Assemble();
       }
 
-
-      /*
-      asmbl.SampleVelocity(lom);
-      {
-        asmbl.SampleVelocity(lom, FaceType::Interior);
-        asmbl.SampleVelocity(lom, FaceType::Boundary);
-      }
-      */
-
-
-      // Face contributions.
-      //reset counters
-      asmbl.int_face_ct = 0; asmbl.bdry_face_ct = 0;
-      asmbl.bdrInt = 0.;
       Mesh *mesh = M_HO.FESpace()->GetMesh();
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
-      //printf("Calling mult! \n");
       for (int k = 0; k < ne; k++)
       {
          if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
@@ -1130,7 +1115,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          for (int i = 0; i < dofs.numBdrs; i++)
          {
             Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            //asmbl.DeviceComputeFluxTerms(k, i, Trans, lom); //proof of concept code
             asmbl.ComputeFluxTerms(k, i, Trans, lom);
          }
 
@@ -1142,6 +1126,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 
 
+   //TODO only needed once in advection mode
    static bool compute_things = true;
    if(compute_things){
      asmbl.SampleVelocity(lom, FaceType::Interior);
@@ -1149,7 +1134,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
    }
-
 
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();

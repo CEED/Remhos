@@ -154,18 +154,10 @@ private:
 
   const DofToQuad * maps;
 
-   Array<int> IntElemBdryToFaceNo;//TODO delete
-   Array<int> BdryElemBdryToFaceNo;//TODO delete
-   Array<int> ElemBdryToFaceNo;//TODO delete
-   Array<double> vel;
    Array<double> IntVelocity;
    Array<double> BdryVelocity;
 
 public:
-   // Find better place for these
-   int int_face_ct{0};
-   int bdry_face_ct{0};
-
    Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,
             ParFiniteElementSpace &pfes, ParMesh *submesh, int mode);
 
@@ -185,8 +177,6 @@ public:
                          FaceElementTransformations *Trans,
                          LowOrderMethod &lom);
 
-   void SampleVelocity(LowOrderMethod &lom);
-
    void SampleVelocity(LowOrderMethod &lom, FaceType type);
 
 
@@ -201,11 +191,6 @@ public:
 
   void DeviceLinearFluxLumping(const Vector &x, Vector &y,
                                const Vector &x_nd, FaceType type) const;
-
-   //forall k, and bdryId
-   void LinearFluxLumping_all(const int nd, const Vector &x,
-                              Vector &y, const Vector &x_nd,
-                              const Vector &alpha) const;
 
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,
