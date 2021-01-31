@@ -292,26 +292,39 @@ void Operator::Update(AdvectionOperator &adv,
    bool mesh_refined = false;
    const FiniteElementSpace *fes = u.FESpace();
    const int NE = fes->GetNE();
-   //ParFiniteElementSpace &pfes = *u.ParFESpace();
-   //constexpr double NL_DMAX = std::numeric_limits<double>::max();
+   Vector derefs(NE), one(NE);
+   derefs = 0.0;
+   one = 1.0;
 
    switch (opt.estimator)
    {
       case amr::estimator::custom:
       {
+         //dbg("opt.max_level: %d",opt.max_level);
          Vector u_max, u_min;
          GetPerElementMinMax(u, u_min, u_max);
-         const double threshold = opt.ref_threshold;
+         const double ref_threshold = opt.ref_threshold;
+         const double deref_threshold = opt.deref_threshold;
          for (int e = 0; e < NE; e++)
          {
-            //dbg("u(%d) in [%f,%f]", e, u_max(e), u_min(e));
+            const int depth = pmesh.pncmesh->GetElementDepth(e);
+            //dbg("#%d (@%d) in [%f,%f]", e, depth, u_min(e), u_max(e));
+
             const double delta = (u_max(e) - u_min(e)) / range;
-            //dbg("delta: %f, threshold: %f", delta, threshold);
-            if (delta > opt.ref_threshold &&
-                pmesh.pncmesh->GetElementDepth(e) < opt.max_level )
+
+            dbg("#%d (@%d) %.2f [%.2f, %.2f]", e, depth, delta,
+                ref_threshold, deref_threshold);
+
+            if ((delta > ref_threshold) && depth < opt.max_level )
             {
                dbg("\033[32mRefinement #%d",e);
                refs.Append(Refinement(e));
+            }
+
+            if ((delta < deref_threshold) && depth > 0 )
+            {
+               dbg("\033[31mDeRefinement #%d",e);
+               derefs(e) = 1.0;
             }
          }
          break;
@@ -332,13 +345,11 @@ void Operator::Update(AdvectionOperator &adv,
    // custom uses refs, ZZ and Kelly will set mesh_refined
    const int nref = pmesh.ReduceInt(refs.Size());
 
-   if (nref && !mesh_refined)
+   if (nref && opt.ref_threshold >= 0.0 && !mesh_refined)
    {
       constexpr int non_conforming = 1;
       pmesh.GetNodes()->HostReadWrite();
-      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
       pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
-      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
       mesh_refined = true;
       if (myid == 0)
       {
@@ -348,8 +359,17 @@ void Operator::Update(AdvectionOperator &adv,
    else if (opt.estimator == amr::estimator::custom &&
             opt.deref_threshold >= 0.0 && !mesh_refined)
    {
-      // no derefinement
-      //MFEM_VERIFY(false, "Not yet implemented!");
+      const int nderef = derefs * one;
+      if (nderef > 0)
+      {
+         if (myid == 0)
+         {
+            std::cout << "DE-Refining " << nderef << " elements." << std::endl;
+         }
+         const int op = 2; // maximum value of fine elements
+         mesh_refined = pmesh.DerefineByError(derefs, 2.0, opt.nc_limit, op);
+         MFEM_VERIFY(mesh_refined,"");
+      }
    }
    else if ((opt.estimator == amr::estimator::zz ||
              opt.estimator == amr::estimator::kelly) && !mesh_refined)
@@ -369,26 +389,11 @@ void Operator::Update(AdvectionOperator &adv,
    if (mesh_refined)
    {
       dbg();
-
       AMRUpdate(S, offset, u);
-      pmesh.GetNodes()->FESpace()->Update();
-      pmesh.GetNodes()->Update();
-      dbg("pmesh.GetNodes():%d",pmesh.GetNodes()->Size());
-
-      //dbg("Rebalance");
-      //pmesh.Rebalance();
-
-      //mesh_pfes.Update();
-      //x.ParFESpace()->Update();
-      //x.Update();
-      //pmesh.SetNodalGridFunction(&x);
-
+      pmesh.Rebalance();
       //xsub.ParFESpace()->Update();
       //xsub.Update();
-
-      //AMRUpdate(S, offset, u);
       adv.AMRUpdate(S);
-
       ode_solver->Init(adv);
    }
 }
@@ -399,7 +404,6 @@ void Operator::AMRUpdate(BlockVector &S,
 {
    dbg();
    pfes.Update();
-   //pfes.PrintPartitionStats();
 
    const int vsize = pfes.GetVSize();
    MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");

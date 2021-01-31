@@ -78,6 +78,7 @@ int main(int argc, char *argv[])
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
+   int max_tsteps = -1;
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
@@ -88,7 +89,7 @@ int main(int argc, char *argv[])
    int amr_estimator = amr::estimator::custom;
    double amr_ref_threshold = 0.2;
    double amr_jac_threshold = 0.9;
-   double amr_deref_threshold = 0.75;
+   double amr_deref_threshold = 1e-8;
    int amr_max_level = rs_levels + rp_levels;
    const int amr_nc_limit = 1; // maximum level of hanging nodes
 
@@ -144,6 +145,8 @@ int main(int argc, char *argv[])
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
                   "Time step.");
+   args.AddOption(&max_tsteps, "-ms", "--max-steps",
+                  "Maximum number of steps (negative means no restriction).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -199,16 +202,15 @@ int main(int argc, char *argv[])
    // Refine the mesh in serial to increase the resolution.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
    const int dim = mesh->Dimension();
+   if (amr) { mesh->EnsureNCMesh(); }
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
-   if (amr) { mesh->EnsureNCMesh(); }
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
-   //MFEM_VERIFY(pmesh.GetNodes(),"");
 
 
    // Define the ODE solver used for time integration. Several explicit
@@ -248,7 +250,7 @@ int main(int argc, char *argv[])
    // Current mesh positions.
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
    ParGridFunction x(&mesh_pfes);
-   //pmesh.SetNodalGridFunction(&x);
+   pmesh.SetNodalGridFunction(&x);
 
    // Store initial mesh positions.
    Vector x0(x.Size());
@@ -832,7 +834,10 @@ int main(int argc, char *argv[])
       }
 
       /// AMR UPDATE ///
-      if (amr) { AMR->Update(adv, ode_solver, S, offset, u); }
+      if (amr)
+      {
+         AMR->Update(adv, ode_solver, S, offset, u);
+      }
 
       if (exec_mode == 1)
       {
@@ -859,6 +864,8 @@ int main(int argc, char *argv[])
          if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
          else { res = u; }
       }
+
+      if (ti == max_tsteps) { done = true; }
 
       if (done || ti % vis_steps == 0)
       {
@@ -926,6 +933,8 @@ int main(int argc, char *argv[])
    }
    else
    {
+      ml.SpMat().GetDiag(lumpedM);
+      Vector masses(lumpedM);
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }

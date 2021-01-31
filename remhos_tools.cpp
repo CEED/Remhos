@@ -1417,10 +1417,12 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
                     ParGridFunction &gf, const char *title,
                     int x, int y, int w, int h, const char *keys, bool vec)
 {
-   dbg("gf:%d", gf.Size());
+   //dbg("gf:%d", gf.Size());
    ParMesh &pmesh = *gf.ParFESpace()->GetParMesh();
+
+   dbg("NE:%d", pmesh.GetNE());
    MPI_Comm comm = pmesh.GetComm();
-   dbg("GetNodes:%d", pmesh.GetNodes()->Size());
+   //dbg("GetNodes:%d", pmesh.GetNodes()->Size());
 
    int num_procs, myid;
    MPI_Comm_size(comm, &num_procs);
