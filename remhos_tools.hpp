@@ -151,6 +151,9 @@ private:
    BilinearFormIntegrator *VolumeTerms;
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Mesh *subcell_mesh;
+
+  const DofToQuad * maps;
+
    Array<int> IntElemBdryToFaceNo;
    Array<int> BdryElemBdryToFaceNo;
    Array<int> ElemBdryToFaceNo;
@@ -185,10 +188,6 @@ public:
 
    void SampleVelocity(LowOrderMethod &lom, FaceType type);
 
-   //eventually delete
-   void  DeviceComputeFluxTerms(const int e_id, const int BdrID,
-                                FaceElementTransformations *Trans,
-                                LowOrderMethod &lom);
 
   void DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
                                LowOrderMethod &lom, FaceType type);

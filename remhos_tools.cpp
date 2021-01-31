@@ -956,232 +956,6 @@ void Assembly::SampleVelocity(LowOrderMethod &lom, FaceType type)
 
 }
 
-void Assembly::DeviceComputeFluxTerms(const int e_id, const int BdrID,
-                                      FaceElementTransformations *Trans,
-                                      LowOrderMethod &lom)
-{
-
-  //printf("Running Device ComputeFlux Terms \n");
-   Mesh *mesh = fes->GetMesh();
-   int nf = fes->GetNF();
-
-   //Use new PA routines//Will need to seperate for interior and bdry faces
-   x_gf.FESpace()->GetMesh()->DeleteGeometricFactors();
-   const FaceGeometricFactors *geom =
-     x_gf.FESpace()->GetMesh()->GetFaceGeometricFactors(*lom.irF,
-      FaceGeometricFactors::DETERMINANTS | FaceGeometricFactors::JACOBIANS |
-                                       FaceGeometricFactors::NORMALS, FaceType::Interior);
-   const FiniteElement &el_trace =
-      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
-
-   const DofToQuad * maps = &el_trace.GetDofToQuad(*lom.irF, DofToQuad::TENSOR);
-
-   int i, j, l, dim = mesh->Dimension();
-   double aux, vn;
-
-   int quad1D = maps->nqpt;
-   int dofs1D = maps->ndof;
-
-   //printf("normal size %d \n", geom->normal.Size());
-   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
-   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
-   const double *w = lom.irF->GetWeights().Read();
-   auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
-
-   const int id = e_id * dofs.numBdrs + BdrID;
-   //Enumarate the face so they may start at 1, so we have sign for each face.
-   //TODO propagate this up!
-   if (Trans->Elem1No != e_id)
-   {
-     ElemBdryToFaceNo[id] =  -1*(Trans->Face->ElementNo+1);
-   }else{
-     ElemBdryToFaceNo[id] = (Trans->Face->ElementNo+1);
-   }
-
-   //
-   //Sample velocity field  - done sequentially for now
-   //
-   auto C = mfem::Reshape(vel.Read(), dim,  lom.irF->GetNPoints(), nf);
-
-
-   //
-   //Recall need to account for lexicographical ordering
-   //
-   int f = Trans->Face->ElementNo;
-   int inf1, inf2;
-   fes->GetMesh()->GetFaceInfos(f, &inf1, &inf2);
-   int face_id = inf1 / 64;
-
-   //printf("face no %d elem %d %d \n",
-   //Trans->Face->ElementNo, Trans->Elem1No, Trans->Elem2No);
-   DenseMatrix FaceIntegral(dofs.numFaceDofs, dofs.numFaceDofs);
-
-   const FiniteElement &el = *fes->GetFE(e_id);
-
-   Vector vval, nor(dim), shape(el.GetDof());
-
-   printf("\n");
-   for (l = 0; l < lom.irF->GetNPoints(); l++)
-   {
-      const IntegrationPoint &ip = lom.irF->IntPoint(l);
-      IntegrationPoint eip1;
-      Trans->Face->SetIntPoint(&ip);
-
-      if (dim == 1)
-      {
-         Trans->Loc1.Transform(ip, eip1);
-         nor(0) = 2.*eip1.x - 1.0;
-      }
-      else
-      {
-         CalcOrtho(Trans->Face->Jacobian(), nor);
-      }
-
-      if (Trans->Elem1No != e_id)
-      {
-         Trans->Loc2.Transform(ip, eip1);
-         el.CalcShape(eip1, shape);
-         Trans->Elem2->SetIntPoint(&eip1);
-         lom.coef->Eval(vval, *Trans->Elem2, eip1);
-         nor *= -1.;
-      }
-      else
-      {
-         Trans->Loc1.Transform(ip, eip1);
-         el.CalcShape(eip1, shape);
-         Trans->Elem1->SetIntPoint(&eip1);
-         lom.coef->Eval(vval, *Trans->Elem1, eip1);
-      }
-
-      //printf("id %d face_id %d \n", id, face_id);
-      nor /= nor.Norml2();
-
-      int iq = ToLexOrdering(dim, face_id, quad1D, l);
-
-      const int id = e_id * dofs.numBdrs + BdrID;
-      int t_f = abs(ElemBdryToFaceNo[id]) - 1;
-      double nx = sgn(ElemBdryToFaceNo[id])*n(iq, 0, f);
-      double ny = sgn(ElemBdryToFaceNo[id])*n(iq, 1, f);
-
-      //double nx = n(iq, 0, face_id);
-      //double ny = n(iq, 1, face_id);
-
-      //if (Trans->Elem1No != e_id)
-      //{
-      //nx = -nx; ny = -ny;
-      //}
-
-      if(abs(nx - nor(0)) > 1e-12 || abs(ny - nor(1)) > 1e-12) {
-        // printf("myjacobian %f %f \n",jac(l, 0, face_id), jac(l,1,face_id));
-        printf("error with normals face_id %d \n", t_f);
-        //nor.Print(); printf("%f %f \n",n(l, 0, face_id), n(l, 1, face_id));
-        printf("%.15f %.15f \n",nor(0), nor(1));
-        printf("%.15f %.15f \n",nx, ny);
-        exit(-1);
-      }
-      //printf("nor %f %f \n \n", n(l, 0, face_id), n(l, 1, face_id));
-
-      if (exec_mode == 0)
-      {
-         // Transport.
-         vn = std::min(0., vval * nor);
-      }
-      else
-      {
-         // Remap.
-         vn = std::max(0., vval * nor);
-         vn *= -1.0;
-      }
-
-      //vval.Print();
-      printf("vn %f \n", vn);
-
-      const double w = ip.weight * Trans->Face->Weight();
-      printf("geo facts %f \n",w*vn);
-      for (i = 0; i < dofs.numFaceDofs; i++) {
-        printf("%f \n", shape(dofs.BdrDofs(i,BdrID)));
-      }
-      for (i = 0; i < dofs.numFaceDofs; i++)
-      {
-         aux = w * shape(dofs.BdrDofs(i,BdrID)) * vn;
-         for (j = 0; j < dofs.numFaceDofs; j++)
-         {
-            bdrInt(e_id, BdrID, i*dofs.numFaceDofs+j) -=
-               aux * shape(dofs.BdrDofs(j,BdrID));
-         }
-      }
-
-   }
-
-   printf("basis mat start \n");
-   for(int q1=0; q1<quad1D; ++q1) {
-     for(int i1=0; i1<dofs1D; ++i1) {
-       printf("%f ",B(q1, i1));
-     }
-     printf("\n");
-   }
-   printf("basis mat end \n");
-
-   int t_f = abs(ElemBdryToFaceNo[id]) - 1;
-   // tensor contraction based
-   for (int i1=0; i1<dofs1D; ++i1) {
-     for(int j1=0; j1<dofs1D; ++j1) {
-
-       double val = 0.0;
-       for(int k1 = 0; k1 < quad1D; ++k1) {
-         //vval is constant so this works..
-         //vval is not constant!!! need to change this
-         //TODO ART!!! Fix this!
-         //01/16/2021
-         double vvalnor =
-           C(0,k1,f)*sgn(ElemBdryToFaceNo[id])*n(k1, 0, f) +
-           C(1,k1,f)*sgn(ElemBdryToFaceNo[id])*n(k1, 1, f);
-         vvalnor = -std::max(0., vvalnor);
-         //  printf("vval again %f %f \n", C(0, k1, f), C(1, k1, f));
-         double t_vn = vvalnor* w[k1] * detJ(k1, f);
-         if(i1 == 0 && j1 == 0) printf("vvalnor %f \n", vvalnor);
-         if(i1 == 0 && j1 == 0) printf("t_vn %f \n", t_vn);
-         val -= B(k1, i1) * B(k1,j1) * t_vn;
-       }
-       FaceIntegral(i1,j1) = val;
-
-     }
-   }
-
-   //Note ordering is different...
-   //Code above is correct, ordering is just different...
-   //TODO organize and clean up
-   printf("e_id %d BdrID  %d \n",e_id, BdrID);
-   for (int i1=0; i1<dofs1D; ++i1) {
-     for(int j1=0; j1<dofs1D; ++j1) {
-
-       int numFaceDofs = dofs.numFaceDofs;
-       double ref = bdrInt(e_id, BdrID,
-       (numFaceDofs-1-j1)*dofs.numFaceDofs+(numFaceDofs-1-i1));
-       //double ref = bdrInt(e_id, BdrID,
-       //j1*dofs.numFaceDofs+i1);
-       if( abs(FaceIntegral(j1,i1) - ref) > 1e-12) {
-       //if( abs(FaceIntegral(i1,j1) - ref) > 1e-12) {
-         printf("dofs1D %d numFaceDofs %d \n",dofs1D, numFaceDofs);
-         printf("%d %d %d %d \n",numFaceDofs-1-j1, numFaceDofs-1-i1, j1, i1);
-         printf("Error too high %.15f %.15f \n",
-                ref, FaceIntegral(j1,i1));
-         FaceIntegral.Print();
-         for (int i1=0; i1<dofs1D; ++i1) {
-           for(int j1=0; j1<dofs1D; ++j1) {
-             double ref = bdrInt(e_id, BdrID, j1*dofs.numFaceDofs+i1);
-             printf("%f ",ref);
-           }
-           printf("\n");
-         }
-         exit(-1);
-       }
-
-     }
-   }
-
-}
-
 //2D Version
 void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
                                        LowOrderMethod &lom, FaceType type)
@@ -1214,7 +988,7 @@ void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
    const FiniteElement &el_trace =
      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
 
-   const DofToQuad * maps = &el_trace.GetDofToQuad(*lom.irF, DofToQuad::TENSOR);
+   maps = &el_trace.GetDofToQuad(*lom.irF, DofToQuad::TENSOR);
 
    const int quad1D = maps->nqpt;
    const int dofs1D = maps->ndof;
@@ -1327,13 +1101,16 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    }
 }
 
+//Works for 2D
+//TODO Generalize add boundaries
 void Assembly::DeviceLinearFluxLumping(const int ndof, const Vector &x,
                                        Vector &y, const Vector &x_nd) const
 
 {
 
   const int nf = fes->GetNFbyType(FaceType::Interior);
-  const int dofs1D = 4;
+
+  const int dofs1D = maps->ndof;
   const Operator * int_face_restrict_lex =
     fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,
                             FaceType::Interior);
@@ -1350,13 +1127,13 @@ void Assembly::DeviceLinearFluxLumping(const int ndof, const Vector &x,
   auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Read(),
                                     dofs1D, dofs1D, 2, nf);
 
-  for(int f=0; f<nf; ++f) {
+  MFEM_FORALL(f, nf, {
     for(int i=0; i<dofs1D; ++i) {
 
       double res0(0.0), res1(0.0);
       for(int j=0; j<dofs1D; j++)
       {
-        res0 += bdrInt_face(i,j,0,f)*(X(i,1,f) - X(i,0,f)); 
+        res0 += bdrInt_face(i,j,0,f)*(X(i,1,f) - X(i,0,f));
         res1 += bdrInt_face(i,j,1,f)*(X(i,0,f) - X(i,1,f));
       }
 
@@ -1364,7 +1141,7 @@ void Assembly::DeviceLinearFluxLumping(const int ndof, const Vector &x,
       Y(i,1,f) = res1;
 
     }
-  }
+  });
 
   int_face_restrict_lex->MultTranspose(y_loc,y);
 
