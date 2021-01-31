@@ -615,8 +615,13 @@ int main(int argc, char *argv[])
    {
       printf("Running LOSolverType::ResDist \n");
       const bool subcell_scheme = false;
+#if 1
+      lo_solver = new MFResidualDistribution(pfes, k, asmbl, lumpedM,
+                                             subcell_scheme, time_dep);
+#else
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
                                            subcell_scheme, time_dep);
+#endif
    }
    else if (lo_type == LOSolverType::ResDistSubcell)
    {
@@ -1128,11 +1133,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    //TODO only needed once in advection mode
    static bool compute_things = true;
-   if(compute_things){
-     asmbl.SampleVelocity(lom, FaceType::Interior);
-     asmbl.SampleVelocity(lom, FaceType::Boundary);
-     asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
-     asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
+   if (compute_things)
+   {
+      asmbl.SampleVelocity(lom, FaceType::Interior);
+      asmbl.SampleVelocity(lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();

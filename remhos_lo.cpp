@@ -138,31 +138,32 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    // Boundary contributions - stored in du
    //will want this in a seperate kernel to do forall elements
    for (int k=0; k < ne; ++k)
-   //int k=15;
+      //int k=15;
    {
-     for (int f = 0; f < assembly.dofs.numBdrs; f++)
-     //int f = 0;
+      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+         //int f = 0;
       {
-        assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
 
    Vector mydu(du.Size()); mydu = 0.0;
-   assembly.DeviceLinearFluxLumping(u, mydu, u_nd, FaceType::Interior);
-   assembly.DeviceLinearFluxLumping(u, mydu, u_nd, FaceType::Boundary);
+   assembly.DeviceLinearFluxLumping(u, mydu, FaceType::Interior);
+   assembly.DeviceLinearFluxLumping(u, mydu, FaceType::Boundary);
 
    Vector diff(mydu);
    diff -= du;
    double error = diff.Norml2();
-   if(error > 1e-12) {
-     printf("error %g \n",error);
-     printf("----------\n");
-     du.Print(mfem::out,16);
-     printf("\n------ \n");
-     mydu.Print(mfem::out,16);
-     printf("\n------ \n");
-     diff.Print(mfem::out,16);
-     exit(-1);
+   if (error > 1e-12)
+   {
+      printf("error %g \n",error);
+      printf("----------\n");
+      du.Print(mfem::out,16);
+      printf("\n------ \n");
+      mydu.Print(mfem::out,16);
+      printf("\n------ \n");
+      diff.Print(mfem::out,16);
+      exit(-1);
    }
 
    //Linear Flux Lumping forall elements/faces //alpha is 0 for us here
@@ -257,6 +258,95 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
       }
    }
 #endif
+
+}
+
+MFResidualDistribution::MFResidualDistribution(ParFiniteElementSpace &space,
+                                               ParBilinearForm &Kbf,
+                                               Assembly &asmbly, const Vector &Mlump,
+                                               bool subcell, bool timedep)
+   : LOSolver(space),
+     K(Kbf), assembly(asmbly),
+     M_lumped(Mlump), subcell_scheme(subcell), time_dep(timedep)
+{ }
+
+void MFResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int ne = pfes.GetMesh()->GetNE();
+   Vector z(u.Size());
+
+   const double eps = 1.E-15;
+   const double infinity = numeric_limits<double>::infinity();
+
+   // Discretization terms
+   du = 0.;
+   K.Mult(u, z);
+
+   //z = Conv * u
+
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+
+   z.HostReadWrite();
+   u.HostRead();
+   du.HostReadWrite();
+   M_lumped.HostRead();
+
+   //Apply the face terms
+   assembly.DeviceLinearFluxLumping(u, du, FaceType::Interior);
+   assembly.DeviceLinearFluxLumping(u, du, FaceType::Boundary);
+
+   //initialize to infinity
+   assembly.dofs.xe_min =  infinity;
+   assembly.dofs.xe_max = -infinity;
+
+   double *xe_min = assembly.dofs.xe_min.ReadWrite();
+   double *xe_max = assembly.dofs.xe_max.ReadWrite();
+
+   const double *d_u = u.Read();
+   const double *d_z = z.Read();
+   const double *d_M_lumped = M_lumped.Read();
+
+   double *d_du = du.ReadWrite();
+
+   MFEM_FORALL(k, ne,
+   {
+
+      // Boundary contributions - stored in du
+      // done before this loop
+
+      // Element contributions
+      double rhoP(0.), rhoN(0.), xSum(0.);
+      for (int j = 0; j < ndof; ++j)
+      {
+         int dof_id = k*ndof+j;
+         xe_max[k] = max(xe_max[k], d_u[dof_id]);
+         xe_min[k] = min(xe_min[k], d_u[dof_id]);
+         xSum += d_u[dof_id];
+         rhoP += max(0., d_z[dof_id]);
+         rhoN += min(0., d_z[dof_id]);
+      }
+
+      //denominator of equation 47
+      double sumWeightsP = ndof*xe_max[k] - xSum + eps;
+      double sumWeightsN = ndof*xe_min[k] - xSum - eps;
+
+      for (int i = 0; i < ndof; i++)
+      {
+         int dof_id = k*ndof+i;
+         //eq 46
+         double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
+         double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
+
+         // (lumpped trace term  + LED convection )/lumpped mass matrix
+         d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
+         d_M_lumped[dof_id];
+      }
+
+   });
 
 }
 

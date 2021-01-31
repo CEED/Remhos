@@ -152,7 +152,7 @@ private:
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Mesh *subcell_mesh;
 
-  const DofToQuad * maps;
+   const DofToQuad * maps;
 
    Array<double> IntVelocity;
    Array<double> BdryVelocity;
@@ -169,7 +169,7 @@ public:
    // bdrInt - eq (32).
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
-  //DenseTensor mybdrInt;
+   //DenseTensor mybdrInt;
    Vector mybdrInt_face_mats;
    Vector mybdrBdry_face_mats;
 
@@ -189,8 +189,8 @@ public:
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
 
-  void DeviceLinearFluxLumping(const Vector &x, Vector &y,
-                               const Vector &x_nd, FaceType type) const;
+   void DeviceLinearFluxLumping(const Vector &x, Vector &y,
+                                FaceType type) const;
 
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,
