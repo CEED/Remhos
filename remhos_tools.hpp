@@ -179,8 +179,11 @@ public:
 
    void SampleVelocity(LowOrderMethod &lom, FaceType type);
 
+   void DeviceComputeFluxTerms(LowOrderMethod &lom, FaceType type);
 
-   void DeviceComputeFluxTerms2(LowOrderMethod &lom, FaceType type);
+   void DeviceComputeFluxTerms2D(LowOrderMethod &lom, FaceType type);
+
+   void DeviceComputeFluxTerms3D(LowOrderMethod &lom, FaceType type);
 
    void ComputeSubcellWeights(const int k, const int m);
 
@@ -191,6 +194,12 @@ public:
 
    void DeviceLinearFluxLumping(const Vector &x, Vector &y,
                                 FaceType type) const;
+
+   void DeviceLinearFluxLumping2D(const Vector &x, Vector &y,
+                                  FaceType type) const;
+
+   void DeviceLinearFluxLumping3D(const Vector &x, Vector &y,
+                                  FaceType type) const;
 
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,

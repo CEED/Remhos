@@ -75,7 +75,7 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
-//Matrix free version of Residual distribution
+//Matrix free version of Residual Distribution
 class MFResidualDistribution : public LOSolver
 {
 protected:

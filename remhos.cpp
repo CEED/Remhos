@@ -122,7 +122,9 @@ int main(int argc, char *argv[])
    const int myid = mpi.WorldRank();
 
    //const char *mesh_file = "data/periodic-square.mesh";
-   const char *mesh_file = "data/inline-quad.mesh";
+   //const char *mesh_file = "data/inline-quad.mesh";
+   //const char *mesh_file = "data/periodic-cube.mesh";
+   const char *mesh_file = "data/inline-hex.mesh";
    int rs_levels = 0;
    int rp_levels = 0;
    int order = 3;
@@ -1126,19 +1128,20 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
       asmbl.SampleVelocity(lom, FaceType::Interior);
       asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms(lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms(lom, FaceType::Boundary);
    }
 
 
    //TODO only needed once in advection mode
-   static bool compute_things = true;
-   if (compute_things)
+   static bool compute_face_terms = true;
+   if (compute_face_terms)
    {
       asmbl.SampleVelocity(lom, FaceType::Interior);
       asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms(lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms(lom, FaceType::Boundary);
+      compute_face_terms = false;
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
