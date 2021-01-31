@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
    const int myid = mpi.WorldRank();
 
    const char *mesh_file = "data/periodic-square.mesh";
-   int rs_levels = 2;
+   int rs_levels = 0;
    int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
@@ -1100,11 +1100,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
 
 
+      /*
       asmbl.SampleVelocity(lom);
       {
         asmbl.SampleVelocity(lom, FaceType::Interior);
         asmbl.SampleVelocity(lom, FaceType::Boundary);
       }
+      */
 
 
       // Face contributions.
@@ -1134,7 +1136,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       asmbl.SampleVelocity(lom, FaceType::Boundary);
       asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Interior);
       asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Boundary);
-      //printf("checked all elements \n");
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();

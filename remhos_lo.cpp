@@ -142,13 +142,27 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    {
       for (int f = 0; f < assembly.dofs.numBdrs; f++)
       {
-         //assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+        assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
 
+   Vector mydu(du.Size()); mydu = 0.0;
+   assembly.DeviceLinearFluxLumping( ndof, u, mydu, u_nd);
+
+   Vector diff(mydu);
+   diff -= du;
+   double error = diff.Norml2();
+   printf("error %f \n",error);
+   if(error > 1e-12) {
+     printf("----------\n");
+     du.Print(mfem::out,16);
+     printf("\n------ \n");
+     mydu.Print(mfem::out,16);
+     exit(-1);
+   }
 
    //Linear Flux Lumping forall elements/faces //alpha is 0 for us here
-   assembly.LinearFluxLumping_all(ndof, u, du, u_nd, alpha);
+   //assembly.LinearFluxLumping_all(ndof, u, du, u_nd, alpha);
 
 #if 1
 
