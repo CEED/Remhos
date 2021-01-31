@@ -672,7 +672,7 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
    FaceElementTransformations *Trans;
 
    bdrInt.SetSize(ne, dofs.numBdrs, dofs.numFaceDofs*dofs.numFaceDofs);
-   mybdrInt.SetSize(dofs.numFaceDofs, dofs.numFaceDofs, ne*dofs.numBdrs);
+   //mybdrInt.SetSize(dofs.numFaceDofs, dofs.numFaceDofs, ne*dofs.numBdrs);
    bdrInt = 0.;
 
    if (lom.subcell_scheme)
@@ -750,8 +750,8 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
        IntElemBdryToFaceNo[int_face_ct] = (Trans->Face->ElementNo + 1);
      }
      int_face_ct++;
+     //return ;
    }
-
 
    //Boundary face
    if(e2<0 && inf2<0)
@@ -762,6 +762,7 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
        IntElemBdryToFaceNo[bdry_face_ct] = (Trans->Face->ElementNo+1);
      }
      bdry_face_ct++;
+     //return;
    }
 
    const int id = e_id * dofs.numBdrs + BdrID;
@@ -833,6 +834,18 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
          }
       }
    }
+
+   /*
+   printf("face no %d e_id %d bdrId %d \n", f, e_id, BdrID);
+   for(int i=0; i<dofs.numFaceDofs; ++i) {
+     for(int j=0; j<dofs.numFaceDofs; ++j) {
+       printf("%f ", bdrInt(e_id, BdrID, i*dofs.numFaceDofs+j));
+     }
+     printf("\n");
+   }
+   */
+
+
 }
 
 template <typename T> int sgn(T val)
@@ -957,8 +970,7 @@ void Assembly::SampleVelocity(LowOrderMethod &lom, FaceType type)
 }
 
 //2D Version
-void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
-                                       LowOrderMethod &lom, FaceType type)
+void Assembly::DeviceComputeFluxTerms2(LowOrderMethod &lom, FaceType type)
 {
 
 
@@ -970,9 +982,9 @@ void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
   if(display_face_ct) {
     printf("Number of faces %d \n",nf);
     display_face_ct = false;
-    if(type == FaceType::Interior) printf("Assembling Interior faces \n");
-    if(type == FaceType::Boundary) printf("Assembling boundary faces \n");
   }
+  //if(type == FaceType::Interior) printf("Assembling Interior faces %d \n",nf);
+  //if(type == FaceType::Boundary) printf("Assembling boundary faces %d \n",nf);
 
   Mesh *mesh = fes->GetMesh();
   int dim = mesh->Dimension();
@@ -1008,40 +1020,94 @@ void Assembly::DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
 
    auto vel = mfem::Reshape(vel_ptr, dim,  lom.irF->GetNPoints(), nf);
 
-   //two sides per face  - proof of concept for 2D.
-   mybdrInt_face_mats.SetSize(dofs1D*dofs1D*2*nf); // loop over faces
+   auto execMode = exec_mode;
 
-   auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Write(),
-                                    dofs1D, dofs1D, 2, nf);
-
-   MFEM_FORALL(f, nf,
+   if(type == FaceType::Interior)
    {
-     for(int f_side=0; f_side<2; ++f_side) {
+
+     //two sides per face  - proof of concept for 2D.
+     mybdrInt_face_mats.SetSize(dofs1D*dofs1D*2*nf); // loop over faces
+
+     auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Write(),
+                                      dofs1D, dofs1D, 2, nf);
+
+     MFEM_FORALL(f, nf,
+     {
+       for(int f_side=0; f_side<2; ++f_side) {
+
+         for (int i1=0; i1<dofs1D; ++i1) {
+           for(int j1=0; j1<dofs1D; ++j1) {
+
+             double val = 0.0;
+             for(int k1 = 0; k1 < quad1D; ++k1) {
+
+               int direction = 1 - 2*f_side;
+
+               double vvalnor =
+                 vel(0,k1,f)*direction*n(k1, 0, f) +
+                 vel(1,k1,f)*direction*n(k1, 1, f);
+
+               if(execMode == 0) {
+                 vvalnor = std::min(0., vvalnor); //advection
+               }else{
+                 vvalnor = -std::max(0., vvalnor);
+               }
+
+
+               double t_vn = vvalnor* w[k1] * detJ(k1, f);
+
+               val -= B(k1, i1) * B(k1,j1) * t_vn;
+             }
+
+             bdrInt_face(j1, i1, f_side, f) = val; // loop over faces
+           }
+         }
+
+       }//f_side
+
+     });
+   }
+
+   if(type == FaceType::Boundary)
+   {
+     //printf("Assemble boundary %d \n", nf);
+     //Only one side per face now
+     mybdrBdry_face_mats.SetSize(dofs1D*dofs1D*nf); // loop over faces
+
+     auto bdrInt_face = mfem::Reshape(mybdrBdry_face_mats.Write(),
+                                      dofs1D, dofs1D, nf);
+
+     MFEM_FORALL(f, nf,
+     {
        for (int i1=0; i1<dofs1D; ++i1) {
          for(int j1=0; j1<dofs1D; ++j1) {
 
            double val = 0.0;
            for(int k1 = 0; k1 < quad1D; ++k1) {
 
-             int direction = 1 - 2*f_side;
-
+             int mysign = 1;
              double vvalnor =
-               vel(0,k1,f)*direction*n(k1, 0, f) +
-               vel(1,k1,f)*direction*n(k1, 1, f);
+               vel(0,k1,f)*mysign*n(k1, 0, f) +
+               vel(1,k1,f)*mysign*n(k1, 1, f);
 
-             vvalnor = -std::max(0., vvalnor);
-             double t_vn = vvalnor* w[k1] * detJ(k1, f);
+               if(execMode == 0) {
+               vvalnor = std::min(0., vvalnor);
+               }else{
+                 vvalnor = -std::max(0., vvalnor);
+               }
 
-             val -= B(k1, i1) * B(k1,j1) * t_vn;
-           }
 
-           bdrInt_face(j1, i1, f_side, f) = val; // loop over faces
+               double t_vn = vvalnor* w[k1] * detJ(k1, f);
+
+               val -= B(k1, i1) * B(k1,j1) * t_vn;
+             }
+
+           bdrInt_face(j1, i1, f) = val; // loop over faces
          }
        }
-     }
+     });
 
-   });
-
+   }
 
 }
 
@@ -1070,83 +1136,160 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
-
+   //printf("e_id %d BdrID %d \n",k, BdrID);
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
       const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
       // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
       // s.t. this value will not matter.
-      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
+      if (nbr_dof_id < 0) {
+        xNeighbor = inflow_gf(dofInd);}
       else
       {
          xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
                      : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
+      //printf(" %g \n",xDiff(j));
    }
 
+   /*
+   for(int i=0; i<dofs.numFaceDofs; ++i){
+     for(int j=0; j<dofs.numFaceDofs;++j){
+       printf("%f ",bdrInt(k, BdrID, i*dofs.numFaceDofs + j));
+     }
+     printf("\n");
+   }
+   */
+
+
+   //printf("---\n");
    for (i = 0; i < dofs.numFaceDofs; i++)
    {
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
+      double val=0.0;
       for (j = 0; j < dofs.numFaceDofs; j++)
       {
          // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
          // 0 < alpha < 1 can be used for limiting within the low order method.
+        val += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
+                      (xDiff(i) + (xDiff(j)-xDiff(i)) *
+                       alpha(dofs.BdrDofs(i,BdrID)) *
+                       alpha(dofs.BdrDofs(j,BdrID)) );
+
          y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
                       (xDiff(i) + (xDiff(j)-xDiff(i)) *
                        alpha(dofs.BdrDofs(i,BdrID)) *
                        alpha(dofs.BdrDofs(j,BdrID)) );
       }
+      //printf("%.10f \n",val);
    }
 }
 
 //Works for 2D
 //TODO Generalize add boundaries
-void Assembly::DeviceLinearFluxLumping(const int ndof, const Vector &x,
-                                       Vector &y, const Vector &x_nd) const
+void Assembly::DeviceLinearFluxLumping(const Vector &x, Vector &y,
+                                       const Vector &x_nd, FaceType type) const
+
 
 {
 
-  const int nf = fes->GetNFbyType(FaceType::Interior);
+  const int nf = fes->GetNFbyType(type);
+  if(nf == 0) return;
 
   const int dofs1D = maps->ndof;
-  const Operator * int_face_restrict_lex =
-    fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,
-                            FaceType::Interior);
+  const Operator * face_restrict_lex = nullptr;
 
-  Vector x_loc(int_face_restrict_lex->Height());
-  Vector y_loc(int_face_restrict_lex->Height());
 
-  //Apply face integrator restriction
-  int_face_restrict_lex->Mult(x, x_loc);
-  y_loc = 0.0;
+  if (type == FaceType::Interior)
+  {
+    //printf("Apply Interior \n");
+      face_restrict_lex =
+        fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
 
-  auto X = mfem::Reshape(x_loc.Read(), dofs1D, 2, nf);
-  auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, 2, nf);
-  auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Read(),
-                                    dofs1D, dofs1D, 2, nf);
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
 
-  MFEM_FORALL(f, nf, {
-    for(int i=0; i<dofs1D; ++i) {
+      //Apply face integrator restriction
+      face_restrict_lex->Mult(x, x_loc);
+      y_loc = 0.0;
 
-      double res0(0.0), res1(0.0);
-      for(int j=0; j<dofs1D; j++)
-      {
-        res0 += bdrInt_face(i,j,0,f)*(X(i,1,f) - X(i,0,f));
-        res1 += bdrInt_face(i,j,1,f)*(X(i,0,f) - X(i,1,f));
-      }
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, 2, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, 2, nf);
 
-      Y(i,0,f) = res0;
-      Y(i,1,f) = res1;
+      auto bdrInt_face = mfem::Reshape(mybdrInt_face_mats.Read(),
+                                       dofs1D, dofs1D, 2, nf);
+
+      MFEM_FORALL(f, nf, {
+          for(int i=0; i<dofs1D; ++i) {
+
+            double res0(0.0), res1(0.0);
+            for(int j=0; j<dofs1D; j++)
+              {
+                res0 += bdrInt_face(i,j,0,f)*(X(i,1,f) - X(i,0,f));
+                res1 += bdrInt_face(i,j,1,f)*(X(i,0,f) - X(i,1,f));
+              }
+
+            Y(i,0,f) = res0;
+            Y(i,1,f) = res1;
+
+          }
+        });
+
+      face_restrict_lex->MultTranspose(y_loc,y);
 
     }
-  });
 
-  int_face_restrict_lex->MultTranspose(y_loc,y);
+  if (type == FaceType::Boundary)
+  {
+
+    //printf("Apply boundary f_ct %d \n",nf);
+    face_restrict_lex =
+      fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                              L2FaceValues::SingleValued);
+    Vector x_loc(face_restrict_lex->Height());
+    Vector y_loc(face_restrict_lex->Height());
+
+    //Apply face integrator restriction
+    face_restrict_lex->Mult(x, x_loc);
+    y_loc = 0.0;
+
+    auto X = mfem::Reshape(x_loc.Read(), dofs1D, nf);
+    auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, nf);
+
+    auto bdrInt_face = mfem::Reshape(mybdrBdry_face_mats.Read(),
+                                     dofs1D, dofs1D, nf);
+
+    //MFEM_FORALL(f, nf,
+    //int f=14;
+    for(int f=0; f<nf; ++f)
+    {
+
+      /*
+      printf("input for face no %d \n",f);
+        for(int i=0; i<dofs1D; ++i){
+          printf("%.10f \n",-X(i,f));
+        }
+      */
+
+        for(int i=0; i<dofs1D; ++i) {
+
+          double res(0.0);
+          for(int j=0; j<dofs1D; j++)
+          {
+              res += -bdrInt_face(i,j,f)*X(i,f);
+              //printf("%f ",bdrInt_face(i,j,f));
+          }
+          //printf("\n");
+          Y(i,f) = res;
+        }
+    }
+
+    face_restrict_lex->MultTranspose(y_loc,y);
+  }
 
 }
-
 
 void Assembly::LinearFluxLumping_all(const int nd, const Vector &x,
                                      Vector &y, const Vector &x_nd,

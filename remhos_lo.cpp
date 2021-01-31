@@ -137,27 +137,31 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
    // Boundary contributions - stored in du
    //will want this in a seperate kernel to do forall elements
-
    for (int k=0; k < ne; ++k)
+   //int k=15;
    {
-      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+     for (int f = 0; f < assembly.dofs.numBdrs; f++)
+     //int f = 0;
       {
         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
 
    Vector mydu(du.Size()); mydu = 0.0;
-   assembly.DeviceLinearFluxLumping( ndof, u, mydu, u_nd);
+   assembly.DeviceLinearFluxLumping(u, mydu, u_nd, FaceType::Interior);
+   assembly.DeviceLinearFluxLumping(u, mydu, u_nd, FaceType::Boundary);
 
    Vector diff(mydu);
    diff -= du;
    double error = diff.Norml2();
-   printf("error %f \n",error);
    if(error > 1e-12) {
+     printf("error %g \n",error);
      printf("----------\n");
      du.Print(mfem::out,16);
      printf("\n------ \n");
      mydu.Print(mfem::out,16);
+     printf("\n------ \n");
+     diff.Print(mfem::out,16);
      exit(-1);
    }
 

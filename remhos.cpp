@@ -121,14 +121,17 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   const char *mesh_file = "data/periodic-square.mesh";
+   //const char *mesh_file = "data/periodic-square.mesh";
+   const char *mesh_file = "data/inline-quad.mesh";
    int rs_levels = 0;
    int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
+   //HOSolverType ho_type           = HOSolverType::CG;
    HOSolverType ho_type           = HOSolverType::None;
    LOSolverType lo_type           = LOSolverType::ResDist;
+   //FCTSolverType fct_type         = FCTSolverType::ClipScale;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
@@ -140,7 +143,7 @@ int main(int argc, char *argv[])
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
-   int vis_steps = 100;
+   int vis_steps = 20;
    const char *device_config = "cpu";
 
    int precision = 8;
@@ -1134,9 +1137,19 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
       asmbl.SampleVelocity(lom, FaceType::Interior);
       asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms2(Trans, lom, FaceType::Boundary);
+      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
+      asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
    }
+
+
+   static bool compute_things = true;
+   if(compute_things){
+     asmbl.SampleVelocity(lom, FaceType::Interior);
+     asmbl.SampleVelocity(lom, FaceType::Boundary);
+     asmbl.DeviceComputeFluxTerms2(lom, FaceType::Interior);
+     asmbl.DeviceComputeFluxTerms2(lom, FaceType::Boundary);
+   }
+
 
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();

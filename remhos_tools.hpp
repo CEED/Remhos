@@ -154,9 +154,9 @@ private:
 
   const DofToQuad * maps;
 
-   Array<int> IntElemBdryToFaceNo;
-   Array<int> BdryElemBdryToFaceNo;
-   Array<int> ElemBdryToFaceNo;
+   Array<int> IntElemBdryToFaceNo;//TODO delete
+   Array<int> BdryElemBdryToFaceNo;//TODO delete
+   Array<int> ElemBdryToFaceNo;//TODO delete
    Array<double> vel;
    Array<double> IntVelocity;
    Array<double> BdryVelocity;
@@ -177,8 +177,9 @@ public:
    // bdrInt - eq (32).
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
-   DenseTensor mybdrInt;
+  //DenseTensor mybdrInt;
    Vector mybdrInt_face_mats;
+   Vector mybdrBdry_face_mats;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
@@ -189,8 +190,7 @@ public:
    void SampleVelocity(LowOrderMethod &lom, FaceType type);
 
 
-  void DeviceComputeFluxTerms2(FaceElementTransformations *Trans,
-                               LowOrderMethod &lom, FaceType type);
+   void DeviceComputeFluxTerms2(LowOrderMethod &lom, FaceType type);
 
    void ComputeSubcellWeights(const int k, const int m);
 
@@ -199,8 +199,9 @@ public:
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
 
-  void DeviceLinearFluxLumping(const int ndof, const Vector &x,
-                               Vector &y, const Vector &x_nd) const;
+  void DeviceLinearFluxLumping(const Vector &x, Vector &y,
+                               const Vector &x_nd, FaceType type) const;
+
    //forall k, and bdryId
    void LinearFluxLumping_all(const int nd, const Vector &x,
                               Vector &y, const Vector &x_nd,
