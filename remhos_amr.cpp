@@ -361,7 +361,6 @@ void Operator::Update(AdvectionOperator &adv,
          dbg("pfes order:%d", pfes.GetOrder(0));
          const int order = pfes.GetOrder(0);
 
-
          constexpr int DIM = 2;
          constexpr int SDIM = 3;
          constexpr int VDIM = 3;
@@ -373,15 +372,16 @@ void Operator::Update(AdvectionOperator &adv,
          constexpr Element::Type QUAD = Element::QUADRILATERAL;
          //const double sx = 1.0, sy = 1.0;
          //const  bool sfc = true;
+         const int mesh_order = 2;
          Mesh quad(1, 1, QUAD);//, generate_edges, sx, sy, sfc);
-         if (false)
+         if (true)
          {
-            quad.SetCurvature(order, discont, SDIM, ordering);
+            quad.SetCurvature(mesh_order, discont, SDIM, ordering);
          }
          else
          {
             FiniteElementCollection *nfec =
-               new H1_FECollection(order, DIM, BasisType::Positive);
+               new H1_FECollection(mesh_order, DIM, BasisType::Positive);
             FiniteElementSpace* nfes =
                new FiniteElementSpace(&quad, nfec, SDIM, ordering);
             quad.SetNodalFESpace(nfes);
@@ -394,26 +394,25 @@ void Operator::Update(AdvectionOperator &adv,
             const_cast<FiniteElementSpace*>(quad.GetNodalFESpace());
          MFEM_VERIFY(fes->GetVDim() == VDIM,"")
 
-         dbg("u.Size():%d", u.Size());
+         //dbg("u.Size():%d", u.Size());
 
          const int geom = pfes.GetFE(0)->GetGeomType();
          MFEM_VERIFY(geom == Geometry::SQUARE,"");
-         const IntegrationRule &ir = IntRules.Get(geom, order + 2);
+
+         const IntegrationRule &ir = IntRules.Get(geom, mesh_order+2);
          const int nip = ir.GetNPoints();
 
+         //const IntegrationRule &mir = IntRules.Get(geom, mesh_order);
+         //dbg("ne: %d", NE);
+         //dbg("nip: %d", nip);
+
          GridFunction &u_nodes = *pmesh.GetNodes();
-         dbg("u_nodes.Size():%d", u_nodes.Size());
+         //dbg("u_nodes.Size():%d", u_nodes.Size()); //u_nodes.Print();
 
          GridFunction &q_nodes = *quad.GetNodes();
-         dbg("q_nodes.Size():%d", q_nodes.Size());
+         //dbg("q_nodes.Size():%d", q_nodes.Size()); //q_nodes.Print();
 
-         //MFEM_VERIFY(q_nodes.Size()/3 == 4, "");
-
-         Vector vals;
-         Vector coords;
-         IntegrationPoint ip;
-         constexpr int z = 0.0;
-         constexpr double w = 1.0;
+         Vector vals, coords;
          DenseMatrix Jadjt, Jadj(DIM, SDIM);
          constexpr double NL_DMAX = std::numeric_limits<double>::max();
 
@@ -422,25 +421,27 @@ void Operator::Update(AdvectionOperator &adv,
             const int depth = pmesh.pncmesh->GetElementDepth(e);
 
             u.GetValues(e, ir, vals);
-            dbg("vals:"); vals.Print();
+            //dbg("vals:"); vals.Print();
 
-            MFEM_VERIFY(vals.Size() == (q_nodes.Size()/SDIM),"");
-
-            for (int q=0, n=0, x=0; x <= 1; x++)
+            MFEM_VERIFY(vals.Size() == nip,"");
+            MFEM_VERIFY(nip == (q_nodes.Size()/SDIM),"");
+            const int idx[9] = {0,4,1,7,8,5,2,6,3};
+            for (int j = 0; j < nip; j++)
             {
-               for (int y=0; y <= 1; y++)
-               {
-                  ip.Set(x, y, z, w);
-                  u_nodes.GetVectorValue(e, ip, coords);
-                  dbg("coords:"); coords.Print();
-                  q_nodes(q+0) = coords[0];
-                  q_nodes(q+1) = coords[1];
-                  q_nodes(q+2) = vals(n++);
-                  q+=3;
-               }
+               const IntegrationPoint &ip = ir.IntPoint(j);
+               //dbg("(%f %f)", ip.x, ip.y);
+               ElementTransformation *eTr = pmesh.GetElementTransformation(e);
+               eTr->SetIntPoint(&ip);
+               u_nodes.GetVectorValue(e, ip, coords);
+               //dbg("coords:"); coords.Print();
+               int q = idx[j];
+               //dbg("q:%d",q);
+               q_nodes(3*q+0) = coords[0];
+               q_nodes(3*q+1) = coords[1];
+               q_nodes(3*q+2) = u.GetValue(e, ip);
             }
 
-            for (int q=0; q < q_nodes.Size(); q+=3)
+            /*for (int q=0; q < q_nodes.Size(); q+=3)
             {
                dbg("q: [%f, %f, %f]", q_nodes(q), q_nodes(q+1), q_nodes(q+2));
             }
@@ -448,6 +449,7 @@ void Operator::Update(AdvectionOperator &adv,
             socketstream glvis("localhost", 19916);
             glvis.precision(8);
             glvis << "mesh\n" << quad << std::flush;
+            //assert(false);*/
 
             MFEM_VERIFY(quad.GetNE() == 1, "");
             const int eq = 0;
@@ -457,9 +459,9 @@ void Operator::Update(AdvectionOperator &adv,
                ElementTransformation *eTr = quad.GetElementTransformation(eq);
                //const Geometry::Type &type = quad.GetElement(e)->GetGeometryType();
                //const IntegrationRule *ir = &IntRules.Get(type, 2);
-               const int NQ = ir.GetNPoints();
+               //const int NQ = pir.GetNPoints();
                //dbg("NQ:%d", NQ);
-               for (int q = 0; q < NQ; q++)
+               for (int q = 0; q < nip; q++)
                {
                   eTr->SetIntPoint(&ir.IntPoint(q));
                   const DenseMatrix &J = eTr->Jacobian();
@@ -482,8 +484,9 @@ void Operator::Update(AdvectionOperator &adv,
                   }
                }
             }
-            assert(false);
+            //assert(false);
          }
+         //assert(false);
          break;
       }
 
