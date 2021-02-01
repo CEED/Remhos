@@ -75,8 +75,8 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
-//Matrix free version of Residual Distribution
-class MFResidualDistribution : public LOSolver
+//PA based Residual Distribution
+class PAResidualDistribution : public LOSolver
 {
 protected:
    ParBilinearForm &K;
@@ -96,7 +96,7 @@ protected:
    void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
 
 public:
-   MFResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
+   PAResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
                           Assembly &asmbly, const Vector &Mlump,
                           bool subcell, bool timedep);
 

@@ -618,7 +618,7 @@ int main(int argc, char *argv[])
       printf("Running LOSolverType::ResDist \n");
       const bool subcell_scheme = false;
 #if 1
-      lo_solver = new MFResidualDistribution(pfes, k, asmbl, lumpedM,
+      lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
                                              subcell_scheme, time_dep);
 #else
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,

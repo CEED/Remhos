@@ -261,7 +261,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
 }
 
-MFResidualDistribution::MFResidualDistribution(ParFiniteElementSpace &space,
+PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                ParBilinearForm &Kbf,
                                                Assembly &asmbly, const Vector &Mlump,
                                                bool subcell, bool timedep)
@@ -270,7 +270,7 @@ MFResidualDistribution::MFResidualDistribution(ParFiniteElementSpace &space,
      M_lumped(Mlump), subcell_scheme(subcell), time_dep(timedep)
 { }
 
-void MFResidualDistribution::SampleVelocity(FaceType type) const
+void PAResidualDistribution::SampleVelocity(FaceType type) const
 {
    const FiniteElementSpace *fes = assembly.GetFes();
    int nf = fes->GetNFbyType(type);
@@ -342,7 +342,7 @@ void MFResidualDistribution::SampleVelocity(FaceType type) const
 
 }
 
-void MFResidualDistribution::SetupPA(FaceType type) const
+void PAResidualDistribution::SetupPA(FaceType type) const
 {
 
    const FiniteElementSpace *fes = assembly.GetFes();
@@ -360,7 +360,7 @@ void MFResidualDistribution::SetupPA(FaceType type) const
 
 }
 
-void MFResidualDistribution::SetupPA2D(FaceType type) const
+void PAResidualDistribution::SetupPA2D(FaceType type) const
 {
    const FiniteElementSpace *fes = assembly.GetFes();
    int nf = fes->GetNFbyType(type);
@@ -466,7 +466,7 @@ void MFResidualDistribution::SetupPA2D(FaceType type) const
 
 }
 
-void MFResidualDistribution::SetupPA3D(FaceType type) const
+void PAResidualDistribution::SetupPA3D(FaceType type) const
 {
 
    const FiniteElementSpace *fes = assembly.GetFes();
@@ -580,7 +580,7 @@ void MFResidualDistribution::SetupPA3D(FaceType type) const
    }//bdry
 }
 
-void MFResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
+void PAResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
                                             FaceType type) const
 {
 
@@ -595,7 +595,7 @@ void MFResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
    if (dim == 3) { return ApplyFaceTerms3D(x, y, type); }
 }
 
-void MFResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
+void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
                                               FaceType type) const
 {
    const FiniteElementSpace *fes = assembly.GetFes();
@@ -742,7 +742,7 @@ void MFResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
 }
 
-void MFResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
+void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
                                               FaceType type) const
 {
 
@@ -951,7 +951,7 @@ void MFResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 }
 
 
-void MFResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
+void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 {
 
    const int ndof = pfes.GetFE(0)->GetDof();
