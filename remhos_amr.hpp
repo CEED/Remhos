@@ -25,24 +25,26 @@ namespace mfem
 namespace amr
 {
 
-enum estimator: int { custom = 0, jjt, jjt0, zz, kelly};
+enum estimator: int { custom = 0, jjt, zz, kelly};
 
 class EstimatorIntegrator: public DiffusionIntegrator
 {
+public:
    enum class mode { diffusion, one, two };
 
-   int NE, e;
+private:
+   int NE, e2;
    ParMesh &pmesh;
    const mode flux_mode;
    const int max_level;
-   const double jac_threshold;
+   const double jjt_threshold;
    ConstantCoefficient one {1.0};
 
 public:
    EstimatorIntegrator(ParMesh &pmesh,
                        const int max_level,
-                       const double jac_threshold,
-                       const mode flux_mode = mode::two);
+                       const double jjt_threshold,
+                       const mode flux_mode = mode::diffusion);
 
    void Reset();
 
@@ -74,7 +76,7 @@ private:
 class Operator
 {
    ParMesh &pmesh;
-   ParGridFunction &x, &xsub, &sol;
+   ParGridFunction &u;
    ParFiniteElementSpace &pfes, &mesh_pfes;
 
    const int myid, dim, sdim;
@@ -88,12 +90,19 @@ class Operator
    ThresholdDerefiner *derefiner = nullptr;
    amr::EstimatorIntegrator *integ = nullptr;
 
+   socketstream amr_vis;
+   const char *host = "localhost";
+   const int port = 19916;
+   int Wx = 400, Wy = 400;
+   const int Ww = 400, Wh = 400;
+   const char *keys = "gAm";
+
    const struct Options
    {
       int order, mesh_order;
       int estimator;
       double ref_threshold;
-      double jac_threshold;
+      double jjt_threshold;
       double deref_threshold;
       int max_level;
       int nc_limit;
@@ -103,8 +112,6 @@ public:
    Operator(ParFiniteElementSpace &pfes,
             ParFiniteElementSpace &mesh_pfes,
             ParMesh &pmesh,
-            ParGridFunction &x,
-            ParGridFunction &xsub,
             ParGridFunction &sol,
             int order, int mesh_order,
             int estimator,
@@ -119,12 +126,24 @@ public:
                ODESolver *ode_solver,
                BlockVector &S,
                Array<int> &offset,
-               ParGridFunction &u);
+               LowOrderMethod &lom,
+               ParMesh *subcell_mesh,
+               ParFiniteElementSpace *pfes_sub,
+               ParGridFunction *xsub,
+               ParGridFunction &v_sub_gf);
 
 private:
+   void AMRUpdateEstimatorCustom(Array<Refinement>&, Vector&);
+   void AMRUpdateEstimatorJJt(Array<Refinement>&, Vector &);
+   void AMRUpdateEstimatorZZKelly(bool &mesh_refined);
+
    void AMRUpdate(BlockVector &S,
                   Array<int> &offset,
-                  ParGridFunction &u);
+                  LowOrderMethod &lom,
+                  ParMesh *subcell_mesh,
+                  ParFiniteElementSpace *pfes_sub,
+                  ParGridFunction *xsub,
+                  ParGridFunction &v_sub_gf);
 };
 
 } // namespace amr

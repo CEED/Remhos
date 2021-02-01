@@ -58,6 +58,25 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
+                           const ParGridFunction *xsub,
+                           ParGridFunction &v_sub_gf,
+                           VectorGridFunctionCoefficient &v_sub_coef)
+{
+   Array<int> ess_bdr, ess_vdofs;
+   if (subcell_mesh->bdr_attributes.Size() > 0)
+   {
+      ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
+   }
+   ess_bdr = 1;
+   xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
+   for (int i = 0; i < ess_vdofs.Size(); i++)
+   {
+      if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
+   }
+   v_sub_coef.SetGridFunction(&v_sub_gf);
+}
+
 int main(int argc, char *argv[])
 {
    // Initialize MPI.
@@ -79,16 +98,16 @@ int main(int argc, char *argv[])
    double t_final = 4.0;
    double dt = 0.005;
    int max_tsteps = -1;
-   bool visualization = false;
+   bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
    bool amr = false;
-   int amr_estimator = amr::estimator::custom;
+   int amr_estimator = amr::estimator::jjt;
    double amr_ref_threshold = 0.2;
-   double amr_jac_threshold = 0.9;
+   double amr_jjt_threshold = 0.8;
    double amr_deref_threshold = 1e-8;
    int amr_max_level = rs_levels + rp_levels;
    const int amr_nc_limit = 1; // maximum level of hanging nodes
@@ -166,7 +185,9 @@ int main(int argc, char *argv[])
    args.AddOption(&amr_estimator, "-ae", "--amr-estimator",
                   "AMR estimator: 0:Custom, 1:Rho, 2:ZZ, 3:Kelly");
    args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
-                  "AMR Jacobian refinement threshold.");
+                  "AMR refinement threshold.");
+   args.AddOption(&amr_jjt_threshold, "-aj", "--amr-jjt-threshold",
+                  "AMR JJt (rho) refinement threshold.");
    args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
                   "AMR refinement threshold.");
    args.AddOption(&amr_max_level, "-am", "--amr-max-level",
@@ -421,7 +442,7 @@ int main(int argc, char *argv[])
    LowOrderMethod lom;
    lom.subcell_scheme = use_subcell_RD;
 
-   lom.pk = NULL;
+   lom.pk = nullptr;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
       lom.smap = SparseMatrix_Build_smap(k.SpMat());
@@ -470,12 +491,12 @@ int main(int argc, char *argv[])
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
 
-   ParMesh *subcell_mesh = NULL;
-   lom.SubFes0 = NULL;
-   lom.SubFes1 = NULL;
-   FiniteElementCollection *fec_sub = NULL;
-   ParFiniteElementSpace *pfes_sub = NULL;;
-   ParGridFunction *xsub = NULL;
+   ParMesh *subcell_mesh = nullptr;
+   lom.SubFes0 = nullptr;
+   lom.SubFes1 = nullptr;
+   FiniteElementCollection *fec_sub = nullptr;
+   ParFiniteElementSpace *pfes_sub = nullptr;;
+   ParGridFunction *xsub = nullptr;
    ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
@@ -528,7 +549,8 @@ int main(int argc, char *argv[])
       v_sub_gf.ProjectCoefficient(velocity);
 
       // Zero it out on boundaries (not moving boundaries).
-      Array<int> ess_bdr, ess_vdofs;
+      ZeroItOutOnBoundaries(subcell_mesh, xsub, v_sub_gf, v_sub_coef);
+      /*Array<int> ess_bdr, ess_vdofs;
       if (subcell_mesh->bdr_attributes.Size() > 0)
       {
          ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
@@ -539,7 +561,7 @@ int main(int argc, char *argv[])
       {
          if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
       }
-      v_sub_coef.SetGridFunction(&v_sub_gf);
+      v_sub_coef.SetGridFunction(&v_sub_gf);*/
 
       // Store initial submesh positions.
       x0_sub = *xsub;
@@ -766,7 +788,7 @@ int main(int argc, char *argv[])
    }
 
    ParGridFunction res = u;
-   double residual;
+   double residual = 0.0;
 
    // AMR operator
    amr::Operator *AMR = nullptr;
@@ -776,12 +798,12 @@ int main(int argc, char *argv[])
       AMR = new amr::Operator(pfes,
                               mesh_pfes,
                               pmesh,
-                              x, *xsub, u,
+                              u,
                               order,
                               mesh_order,
                               amr_estimator,
                               amr_ref_threshold,
-                              amr_jac_threshold,
+                              amr_jjt_threshold,
                               amr_deref_threshold,
                               amr_max_level,
                               amr_nc_limit);
@@ -803,7 +825,7 @@ int main(int argc, char *argv[])
       ti++;
 
       //S has been modified, update the alias
-      u.SyncMemory(S);
+      u.SyncAliasMemory(S);
       if (product_sync) { us.SyncMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
@@ -838,7 +860,8 @@ int main(int argc, char *argv[])
       /// AMR UPDATE ///
       if (amr)
       {
-         AMR->Update(adv, ode_solver, S, offset, u);
+         AMR->Update(adv, ode_solver, S, offset,
+                     lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
       }
 
       if (exec_mode == 1)
@@ -847,12 +870,17 @@ int main(int argc, char *argv[])
          add(x0_sub, t, v_sub_gf, *xsub);
       }
 
-      if (problem_num != 6 && problem_num != 7 && problem_num != 8)
+      const bool steady_state_problem =
+         problem_num == 6 || problem_num == 7 || problem_num == 8;
+
+      if (!steady_state_problem)
       {
          done = (t >= t_final - 1.e-8*dt);
+         dbg("done: %s", done?"yes":"no");
       }
       else
       {
+         dbg("Steady state problems");
          // Steady state problems - stop at convergence.
          double res_loc = 0.;
          lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
@@ -867,14 +895,15 @@ int main(int argc, char *argv[])
          else { res = u; }
       }
 
-      if (ti == max_tsteps) { done = true; }
+      if (ti == max_tsteps) { dbg("max_tsteps reached!"); done = true; }
 
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
          {
-            cout << "time step: " << ti << ", time: " << t << ", residual: "
-                 << residual << endl;
+            cout << "time step: " << ti << ", time: " << t ;
+            if (steady_state_problem) { cout << ", residual: " << residual ; }
+            cout << endl;
          }
 
          if (visualization)
@@ -936,7 +965,7 @@ int main(int argc, char *argv[])
    else
    {
       ml.SpMat().GetDiag(lumpedM);
-      Vector masses(lumpedM);
+      masses = lumpedM;
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
