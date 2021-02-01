@@ -25,7 +25,7 @@ namespace mfem
 namespace amr
 {
 
-enum estimator: int { custom = 0, zz, kelly};
+enum estimator: int { custom = 0, jjt, zz, kelly};
 
 class EstimatorIntegrator: public DiffusionIntegrator
 {

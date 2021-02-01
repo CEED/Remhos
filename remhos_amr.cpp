@@ -33,6 +33,7 @@ static const char *EstimatorName(const int est)
    switch (static_cast<amr::estimator>(est))
    {
       case amr::estimator::custom: return "Custom";
+      case amr::estimator::jjt: return "JJt";
       case amr::estimator::zz: return "ZZ";
       case amr::estimator::kelly: return "Kelly";
       default: MFEM_ABORT("Unknown estimator!");
@@ -174,6 +175,31 @@ void EstimatorIntegrator::ComputeElementFlux(const FiniteElement &el,
          break;
       }
       default: MFEM_ABORT("Unknown mode!");
+   }
+}
+
+static void Eval2D(const ParGridFunction &sol, const double threshold,
+                   ParMesh &pmesh, Array<Refinement> &refs)
+{
+   Vector val;
+   IntegrationPoint ip;
+   constexpr int z = 0.0;
+   constexpr double w = 1.0;
+   const int NE = pmesh.GetNE();
+
+   for (int e = 0; e < NE; e++)
+   {
+      for (int x = 0; x <= 1; x++)
+      {
+         for (int y = 0; y <= 1; y++)
+         {
+            ip.Set(x, y, z, w);
+            sol.GridFunction::GetVectorValue(e, ip, val);
+            const double l2_norm = val.Norml2();
+            if (l2_norm > threshold) { refs.Append(Refinement(e)); }
+
+         }
+      }
    }
 }
 
@@ -330,6 +356,137 @@ void Operator::Update(AdvectionOperator &adv,
          break;
       }
 
+      case amr::estimator::jjt:
+      {
+         dbg("pfes order:%d", pfes.GetOrder(0));
+         const int order = pfes.GetOrder(0);
+
+
+         constexpr int DIM = 2;
+         constexpr int SDIM = 3;
+         constexpr int VDIM = 3;
+         MFEM_VERIFY(pmesh.SpaceDimension() == 2,"");
+
+         constexpr bool discont = false;
+         //constexpr bool generate_edges = false;
+         constexpr int ordering = Ordering::byVDIM;
+         constexpr Element::Type QUAD = Element::QUADRILATERAL;
+         //const double sx = 1.0, sy = 1.0;
+         //const  bool sfc = true;
+         Mesh quad(1, 1, QUAD);//, generate_edges, sx, sy, sfc);
+         if (false)
+         {
+            quad.SetCurvature(order, discont, SDIM, ordering);
+         }
+         else
+         {
+            FiniteElementCollection *nfec =
+               new H1_FECollection(order, DIM, BasisType::Positive);
+            FiniteElementSpace* nfes =
+               new FiniteElementSpace(&quad, nfec, SDIM, ordering);
+            quad.SetNodalFESpace(nfes);
+            quad.GetNodes()->MakeOwner(nfec);
+         }
+         MFEM_VERIFY(quad.GetNE() == 1,"");
+         MFEM_VERIFY(quad.SpaceDimension() == SDIM,"");
+
+         FiniteElementSpace *fes =
+            const_cast<FiniteElementSpace*>(quad.GetNodalFESpace());
+         MFEM_VERIFY(fes->GetVDim() == VDIM,"")
+
+         dbg("u.Size():%d", u.Size());
+
+         const int geom = pfes.GetFE(0)->GetGeomType();
+         MFEM_VERIFY(geom == Geometry::SQUARE,"");
+         const IntegrationRule &ir = IntRules.Get(geom, order + 2);
+         const int nip = ir.GetNPoints();
+
+         GridFunction &u_nodes = *pmesh.GetNodes();
+         dbg("u_nodes.Size():%d", u_nodes.Size());
+
+         GridFunction &q_nodes = *quad.GetNodes();
+         dbg("q_nodes.Size():%d", q_nodes.Size());
+
+         //MFEM_VERIFY(q_nodes.Size()/3 == 4, "");
+
+         Vector vals;
+         Vector coords;
+         IntegrationPoint ip;
+         constexpr int z = 0.0;
+         constexpr double w = 1.0;
+         DenseMatrix Jadjt, Jadj(DIM, SDIM);
+         constexpr double NL_DMAX = std::numeric_limits<double>::max();
+
+         for (int e = 0; e < pfes.GetNE(); e++)
+         {
+            const int depth = pmesh.pncmesh->GetElementDepth(e);
+
+            u.GetValues(e, ir, vals);
+            dbg("vals:"); vals.Print();
+
+            MFEM_VERIFY(vals.Size() == (q_nodes.Size()/SDIM),"");
+
+            for (int q=0, n=0, x=0; x <= 1; x++)
+            {
+               for (int y=0; y <= 1; y++)
+               {
+                  ip.Set(x, y, z, w);
+                  u_nodes.GetVectorValue(e, ip, coords);
+                  dbg("coords:"); coords.Print();
+                  q_nodes(q+0) = coords[0];
+                  q_nodes(q+1) = coords[1];
+                  q_nodes(q+2) = vals(n++);
+                  q+=3;
+               }
+            }
+
+            for (int q=0; q < q_nodes.Size(); q+=3)
+            {
+               dbg("q: [%f, %f, %f]", q_nodes(q), q_nodes(q+1), q_nodes(q+2));
+            }
+
+            socketstream glvis("localhost", 19916);
+            glvis.precision(8);
+            glvis << "mesh\n" << quad << std::flush;
+
+            MFEM_VERIFY(quad.GetNE() == 1, "");
+            const int eq = 0;
+            {
+               double minW = +NL_DMAX;
+               double maxW = -NL_DMAX;
+               ElementTransformation *eTr = quad.GetElementTransformation(eq);
+               //const Geometry::Type &type = quad.GetElement(e)->GetGeometryType();
+               //const IntegrationRule *ir = &IntRules.Get(type, 2);
+               const int NQ = ir.GetNPoints();
+               //dbg("NQ:%d", NQ);
+               for (int q = 0; q < NQ; q++)
+               {
+                  eTr->SetIntPoint(&ir.IntPoint(q));
+                  const DenseMatrix &J = eTr->Jacobian();
+                  CalcAdjugate(J, Jadj);
+                  Jadjt = Jadj;
+                  Jadjt.Transpose();
+                  const double w = Jadjt.Weight();
+                  //dbg("#%d w:%f",q,w);
+                  minW = std::fmin(minW, w);
+                  maxW = std::fmax(maxW, w);
+               }
+               assert(std::fabs(maxW) > 0.0);
+               {
+                  const double rho = minW / maxW;
+                  //dbg("#%d rho:%f", e, rho);
+                  MFEM_VERIFY(rho <= 1.0, "");
+                  if (rho < opt.jac_threshold && depth < opt.max_level)
+                  {
+                     refs.Append(Refinement(e));
+                  }
+               }
+            }
+            assert(false);
+         }
+         break;
+      }
+
       case amr::estimator::zz:
       case amr::estimator::kelly:
       {
@@ -345,8 +502,9 @@ void Operator::Update(AdvectionOperator &adv,
    // custom uses refs, ZZ and Kelly will set mesh_refined
    const int nref = pmesh.ReduceInt(refs.Size());
 
-   if (nref && opt.ref_threshold >= 0.0 && !mesh_refined)
+   if (nref /*&& opt.ref_threshold >= 0.0*/ && !mesh_refined)
    {
+      dbg("GeneralRefinement");
       constexpr int non_conforming = 1;
       pmesh.GetNodes()->HostReadWrite();
       pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
@@ -356,6 +514,7 @@ void Operator::Update(AdvectionOperator &adv,
          std::cout << "Refined " << nref << " elements." << std::endl;
       }
    }
+   /// deref only for custom for now
    else if (opt.estimator == amr::estimator::custom &&
             opt.deref_threshold >= 0.0 && !mesh_refined)
    {
@@ -366,7 +525,7 @@ void Operator::Update(AdvectionOperator &adv,
          {
             std::cout << "DE-Refining " << nderef << " elements." << std::endl;
          }
-         const int op = 2; // maximum value of fine elements
+         const int op = 1; // maximum value of fine elements
          mesh_refined = pmesh.DerefineByError(derefs, 2.0, opt.nc_limit, op);
          MFEM_VERIFY(mesh_refined,"");
       }
