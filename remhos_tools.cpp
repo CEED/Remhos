@@ -1037,7 +1037,7 @@ void Assembly::DeviceComputeFluxTerms3D(LowOrderMethod &lom, FaceType type)
 
    const int quad1D = maps->nqpt;
    const int dofs1D = maps->ndof;
-   const int face_dofs = dofs1D*dofs1D*dofs1D;
+   const int face_dofs = dofs1D*dofs1D;
 
    auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, quad1D, dim, nf);
    auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, quad1D, nf);

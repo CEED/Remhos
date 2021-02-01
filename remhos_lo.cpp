@@ -389,7 +389,7 @@ void MFResidualDistribution::SetupPA2D(FaceType type) const
 
    auto vel = mfem::Reshape(vel_ptr, dim, ir->GetNPoints(), nf);
 
-   int execMode = (int) assembly.GetExecMode();
+   const int execMode = (int) assembly.GetExecMode();
 
    if (type == FaceType::Interior)
    {
@@ -469,7 +469,79 @@ void MFResidualDistribution::SetupPA2D(FaceType type) const
 void MFResidualDistribution::SetupPA3D(FaceType type) const
 {
 
-   printf("need to implement 3D ... \n"); exit(-1);
+   const FiniteElementSpace *fes = assembly.GetFes();
+   int nf = fes->GetNFbyType(type);
+   Mesh *mesh = fes->GetMesh();
+   int dim = mesh->Dimension();
+
+   const IntegrationRule *ir = assembly.lom.irF;
+
+   const FaceGeometricFactors *geom =
+      mesh->GetFaceGeometricFactors(*ir,
+                                    FaceGeometricFactors::DETERMINANTS |
+                                    FaceGeometricFactors::NORMALS, type);
+
+   const FiniteElement &el_trace =
+      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
+
+   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, quad1D, nf);
+   const double *w = ir->GetWeights().Read();
+
+   const double *vel_ptr;
+   if (type == FaceType::Interior) { vel_ptr = IntVelocity.Read(); }
+   if (type == FaceType::Boundary) { vel_ptr = BdryVelocity.Read(); }
+
+   auto vel = mfem::Reshape(vel_ptr, dim,  quad1D, quad1D, nf);
+
+   const int execMode = (int) assembly.GetExecMode();
+
+   if (type == FaceType::Interior)
+   {
+      D_int.SetSize(quad1D*quad1D*2*nf);
+      auto D = mfem::Reshape(D_int.Write(), quad1D, quad1D, 2, nf);
+      auto int_weights = mfem::Reshape(w, quad1D, quad1D);
+
+      MFEM_FORALL(f, nf,
+      {
+         for (int f_side=0; f_side<2; ++f_side)
+         {
+
+           for (int k2 = 0; k2 < quad1D; ++k2)
+             {
+               for (int k1 = 0; k1 < quad1D; ++k1)
+                 {
+
+                   int direction = 1 - 2*f_side;
+
+                   double vvalnor =
+                     vel(0, k1, k2, f)*direction*n(k1, k2, 0, f) +
+                     vel(1, k1, k2, f)*direction*n(k1, k2, 1, f) +
+                     vel(2, k1, k2, f)*direction*n(k1, k2, 2, f);
+
+                   if (execMode == 0)
+                     {
+                       vvalnor = std::min(0., vvalnor); //advection
+                     }
+                   else
+                     {
+                       vvalnor = -std::max(0., vvalnor);
+                     }
+
+                   double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
+                   D(k1, k2, f_side, f) = -t_vn;
+                   //val -= B(k1, i1) * B(k1,j1) * t_vn * B(k2, i2) * B(k2,j2);
+                 }//k2
+             }//k1
+
+         }//f_side
+
+      });
+   }
+
+
 }
 
 void MFResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
@@ -523,7 +595,6 @@ void MFResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       //MFEM_FORALL(f, nf,
       for (int f=0; f<nf; ++f)
       {
-         constexpr int max_D1D = MAX_D1D;
          constexpr int max_Q1D = MAX_Q1D;
 
          double Bu0[max_Q1D];
@@ -593,7 +664,6 @@ void MFResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       //MFEM_FORALL(f, nf,
       for (int f=0; f<nf; ++f)
       {
-         constexpr int max_D1D = MAX_D1D;
          constexpr int max_Q1D = MAX_Q1D;
 
          double Bu0[max_Q1D];
@@ -634,14 +704,137 @@ void MFResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
    }
 
-
-
-
 }
 
 void MFResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
                                               FaceType type) const
 {
+
+
+   const FiniteElementSpace *fes = assembly.GetFes();
+
+   const int Q1D = quad1D;
+   const int D1D = dofs1D;
+   const int nf = fes->GetNFbyType(type);
+   const Operator * face_restrict_lex = nullptr;
+
+   const IntegrationRule *ir = assembly.lom.irF;
+   const FiniteElement &el_trace =
+      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
+   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
+
+   if (type == FaceType::Interior)
+   {
+      face_restrict_lex =
+         fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Apply face integrator restriction
+      face_restrict_lex->Mult(x, x_loc);
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, 2, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, 2, nf);
+      auto D = mfem::Reshape(D_int.Read(), quad1D, quad1D, 2, nf);
+
+      //MFEM_FORALL(f, nf,
+      for (int f=0; f<nf; ++f)
+      {
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+
+         double BX0[max_Q1D][max_D1D];
+         double BX1[max_Q1D][max_D1D];
+         for(int k2=0; k2<Q1D; ++k2){
+           for(int i1=0; i1<D1D; ++i1){
+
+             double res0(0), res1(0);
+             for(int i2=0; i2<D1D; ++i2){
+               res0 += B(k2,i2)*1.0;
+               res1 += B(k2,i2)*1.0;
+             }
+             BX0[k2][i1] = res0;
+             BX1[k2][i1] = res1;
+           }
+         }
+
+         double BBX0[max_Q1D][max_Q1D];
+         double BBX1[max_Q1D][max_Q1D];
+         for(int k2=0; k2<Q1D; ++k2){
+           for(int k1=0; k1<Q1D; ++k1){
+
+             double res0(0.0), res1(0.0);
+             for(int i1=0; i1<D1D; ++i1){
+               res0 += B(k1,i1)*BX0[k2][i1];
+               res1 += B(k1,i1)*BX1[k2][i1];
+             }
+             BBX0[k2][k1] = res0 * D(k1, k2, 0, f);
+             BBX1[k2][k1] = res1 * D(k1, k2, 1, f);
+           }
+         }
+
+         double BDBBX0[max_D1D][max_Q1D];
+         double BDBBX1[max_D1D][max_Q1D];
+         for(int j2=0; j2<D1D; ++j2){
+           for(int k1=0; k1<Q1D; ++k1){
+
+             double res0(0.0), res1(0.0);
+             for(int k2=0; k2<Q1D; ++k2){
+               res0 += B(k2, j2) * BBX0[k2][k1];
+               res1 += B(k2, j2) * BBX1[k2][k1];
+             }
+             BDBBX0[j2][k1] = res0;
+             BDBBX1[j2][k1] = res1;
+           }
+         }
+
+         for(int j2=0; j2<D1D; ++j2){
+           for(int j1=0; j1<D1D; ++j1){
+
+             double res0(0.0), res1(0.0);
+             for(int k1=0; k1<Q1D; ++k1){
+               res0 += B(k1, j1) * BDBBX0[j2][k1];
+               res1 += B(k1, j1) * BDBBX1[j2][k1];
+             }
+
+             Y(j1, j2, 0, f) = res0 * (X(j1,j2,1,f) - X(j1,j2,0,f));
+             Y(j1, j2, 1, f) = res1 * (X(j1,j2,0,f) - X(j1,j2,1,f));
+           }
+         }
+
+      }
+
+      face_restrict_lex->MultTranspose(y_loc,y);
+   }
+
+
+   if (type == FaceType::Boundary)
+   {
+
+      face_restrict_lex =
+         fes->GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                                 L2FaceValues::SingleValued);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Apply face integrator restriction
+      face_restrict_lex->Mult(x, x_loc);
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, nf);
+      auto D = mfem::Reshape(D_bdry.Read(), quad1D, nf);
+
+
+      face_restrict_lex->MultTranspose(y_loc,y);
+
+   }
+
 
 }
 
