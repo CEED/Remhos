@@ -245,8 +245,23 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
    : LOSolver(space),
      K(Kbf), assembly(asmbly),
      M_lumped(Mlump), subcell_scheme(subcell), time_dep(timedep)
-{ }
+{
+   const FiniteElementSpace *fes = assembly.GetFes();
+   const FiniteElement &el_trace =
+      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
 
+   const IntegrationRule *ir = assembly.lom.irF;
+   const DofToQuad * maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const Mesh *mesh = fes->GetMesh();
+   const int dim = mesh->Dimension();
+   quad1D = maps->nqpt;
+   dofs1D = maps->ndof;
+   if (dim == 2) { face_dofs = quad1D; }
+   if (dim == 3) { face_dofs = quad1D*quad1D; }
+}
+
+//Taken from DGTraceIntegrator::SetupPA L:145
 void PAResidualDistribution::SampleVelocity(FaceType type) const
 {
    const FiniteElementSpace *fes = assembly.GetFes();
@@ -271,16 +286,6 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
       BdryVelocity.SetSize(dim * nq * nf);
       vel_ptr = BdryVelocity.Write();
    }
-
-   const FiniteElement &el_trace =
-      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
-
-   const DofToQuad * maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
-
-   quad1D = maps->nqpt;
-   dofs1D = maps->ndof;
-   if (dim == 2) { face_dofs = quad1D; }
-   if (dim == 3) { face_dofs = quad1D*quad1D; }
 
    auto C = mfem::Reshape(vel_ptr, dim, nq, nf);
    Vector Vq(dim);
@@ -345,11 +350,6 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
                                     FaceGeometricFactors::DETERMINANTS |
                                     FaceGeometricFactors::NORMALS, type);
 
-   const FiniteElement &el_trace =
-      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
-
-   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
-
    auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
    auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
    const double *w = ir->GetWeights().Read();
@@ -372,10 +372,8 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
       {
          for (int f_side=0; f_side<2; ++f_side)
          {
-
             for (int k1 = 0; k1 < quad1D; ++k1)
             {
-
                int direction = 1 - 2*f_side;
 
                double vvalnor =
@@ -399,20 +397,18 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
          }//f_side
 
       });
-   }//if interior
+   }//Interior
 
    if (type == FaceType::Boundary)
    {
-
+      //Only one side per face on the boundary
       D_bdry.SetSize(quad1D*nf);
-
       auto D = mfem::Reshape(D_bdry.Write(), quad1D, nf);
 
       MFEM_FORALL(f, nf,
       {
          for (int k1 = 0; k1 < quad1D; ++k1)
          {
-
             double vvalnor =
             vel(0,k1,f)*n(k1, 0, f) +
             vel(1,k1,f)*n(k1, 1, f);
@@ -428,9 +424,7 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
 
             double t_vn = vvalnor* w[k1] * detJ(k1, f);
             D(k1, f) = - t_vn;
-            //val -= B(k1, i1) * B(k1,j1) * t_vn;
          }
-
       });
    }//boundary
 }
@@ -448,11 +442,6 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
       mesh->GetFaceGeometricFactors(*ir,
                                     FaceGeometricFactors::DETERMINANTS |
                                     FaceGeometricFactors::NORMALS, type);
-
-   const FiniteElement &el_trace =
-      *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
-
-   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, quad1D, dim, nf);
    auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, quad1D, nf);
@@ -476,7 +465,6 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
       {
          for (int f_side=0; f_side<2; ++f_side)
          {
-
             for (int k2 = 0; k2 < quad1D; ++k2)
             {
                for (int k1 = 0; k1 < quad1D; ++k1)
@@ -500,9 +488,8 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 
                   double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
                   D(k1, k2, f_side, f) = -t_vn;
-                  //val -= B(k1, i1) * B(k1,j1) * t_vn * B(k2, i2) * B(k2,j2);
-               }//k2
-            }//k1
+               }//k1
+            }//k2
          }//f_side
       });
    }//interior
@@ -539,7 +526,6 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
                //val -= B(k1, i1) * B(k1,j1) * t_vn * B(k2, i2) * B(k2,j2);
             }//k2
          }//k1
-
       });
    }//bdry
 }
@@ -591,8 +577,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, 2, nf);
       auto D = mfem::Reshape(D_int.Read(), quad1D, 2, nf);
 
-      //MFEM_FORALL(f, nf,
-      for (int f=0; f<nf; ++f)
+      MFEM_FORALL(f, nf,
       {
          constexpr int max_Q1D = MAX_Q1D;
 
@@ -635,8 +620,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
             Y(d, 0, f) = res0 * (X(d,1,f) - X(d,0,f));
             Y(d, 1, f) = res1 * (X(d,0,f) - X(d,1,f));
          }
-
-      }
+      });
 
       face_restrict_lex->MultTranspose(y_loc,y);
    }
@@ -660,8 +644,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, nf);
       auto D = mfem::Reshape(D_bdry.Read(), quad1D, nf);
 
-      //MFEM_FORALL(f, nf,
-      for (int f=0; f<nf; ++f)
+      MFEM_FORALL(f, nf,
       {
          constexpr int max_Q1D = MAX_Q1D;
 
@@ -696,11 +679,9 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
             Y(d, f) = -res0 * X(d,f);
          }
-
-      }
+      });
 
       face_restrict_lex->MultTranspose(y_loc,y);
-
    }
 }
 
@@ -736,8 +717,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, 2, nf);
       auto D = mfem::Reshape(D_int.Read(), quad1D, quad1D, 2, nf);
 
-      //MFEM_FORALL(f, nf,
-      for (int f=0; f<nf; ++f)
+      MFEM_FORALL(f, nf,
       {
          constexpr int max_Q1D = MAX_Q1D;
          constexpr int max_D1D = MAX_D1D;
@@ -813,7 +793,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
             }
          }
 
-      }
+      });
 
       face_restrict_lex->MultTranspose(y_loc,y);
    }
@@ -837,7 +817,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, nf);
       auto D = mfem::Reshape(D_bdry.Read(), quad1D, quad1D, nf);
 
-      for (int f=0; f<nf; ++f)
+      MFEM_FORALL(f, nf,
       {
          constexpr int max_Q1D = MAX_Q1D;
          constexpr int max_D1D = MAX_D1D;
@@ -902,7 +882,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
             }
          }
 
-      }
+      });
 
       face_restrict_lex->MultTranspose(y_loc,y);
    }
