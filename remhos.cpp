@@ -105,11 +105,11 @@ int main(int argc, char *argv[])
    int vis_steps = 100;
    const char *device_config = "cpu";
    bool amr = false;
-   int amr_estimator = amr::estimator::jjt;
+   int amr_estimator = amr::estimator::l2zz;
    double amr_ref_threshold = 0.2;
-   double amr_jjt_threshold = 0.8;
+   double amr_jjt_threshold = 0.5;
    double amr_deref_threshold = 1e-8;
-   int amr_max_level = rs_levels + rp_levels;
+   int amr_max_level = rs_levels + rp_levels + 1;
    const int amr_nc_limit = 1; // maximum level of hanging nodes
 
    int precision = 8;
@@ -216,7 +216,7 @@ int main(int argc, char *argv[])
    if (amr)
    {
       MFEM_VERIFY(exec_mode == 0, "Only standard transport is supported.")
-      amr_max_level = std::max(amr_max_level, rs_levels + rp_levels);
+      amr_max_level = std::max(amr_max_level, rs_levels + rp_levels + 1);
    }
 
    // Read the serial mesh from the given mesh file on all processors.

@@ -334,7 +334,7 @@ void Operator::AMRUpdateEstimatorCustom(Array<Refinement> &refs,
 /// AMR Update for JJt Estimator
 void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
 {
-   dbg("JJt-LOR");
+   dbg("JJt");
    const int horder = opt.order;
    // The refinement factor, an integer > 1
    const int ref_factor = 2;
@@ -369,7 +369,7 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    const mfem::Operator &P = backward.BackwardOperator();
 
    R.Mult(rho_ho, rho_lo);
-   // VisualizeField(amr_vis, host, port, rho_lo, "rho_lo", Wx, Wy, Ww, Wh, keys);
+   //VisualizeField(amr_vis, host, port, rho_lo, "rho_lo", Wx, Wy, Ww, Wh, keys);
 
    // now work on LOR mesh
    Array<int> dofs;
@@ -441,19 +441,19 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    }
 
    P.Mult(rho_lo, rho_rf);
-   //VisualizeField(amr_vis,host,port,rho_rf,"AMR rho",Wx,Wy,Ww,Wh,keys);
+   VisualizeField(amr_vis,host,port,rho_rf,"AMR rho",Wx,Wy,Ww,Wh,keys);
 
    for (int e = 0; e < pmesh.GetNE(); e++)
    {
       const int depth = pmesh.pncmesh->GetElementDepth(e);
       const double rho = rho_rf(e);
-      dbg("#%d %.8e @%d",e,rho,depth);
+      //dbg("#%d %.8e @ %d/%d",e, rho, depth, opt.max_level);
       if ((rho < opt.jjt_threshold) && depth < opt.max_level )
       {
          dbg("\033[32mRefining #%d",e);
          refs.Append(Refinement(e));
       }
-      if ((fabs(1.0-rho)<1e-6) && depth > 0 )
+      if (rho >= 1.0 && depth > 0 )
       {
          dbg("\033[31mDeRefinement #%d",e);
          derefs(e) = 1.0;
