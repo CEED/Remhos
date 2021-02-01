@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
    double t_final = 4.0;
    double dt = 0.005;
    int max_tsteps = -1;
-   bool visualization = true;
+   bool visualization = false;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -777,6 +777,8 @@ int main(int argc, char *argv[])
                               mesh_pfes,
                               pmesh,
                               x, *xsub, u,
+                              order,
+                              mesh_order,
                               amr_estimator,
                               amr_ref_threshold,
                               amr_jac_threshold,

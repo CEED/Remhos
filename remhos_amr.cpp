@@ -33,7 +33,8 @@ static const char *EstimatorName(const int est)
    switch (static_cast<amr::estimator>(est))
    {
       case amr::estimator::custom: return "Custom";
-      case amr::estimator::jjt: return "JJt";
+      case amr::estimator::jjt: return "JJt-LOR";
+      case amr::estimator::jjt0: return "JJt0";
       case amr::estimator::zz: return "ZZ";
       case amr::estimator::kelly: return "Kelly";
       default: MFEM_ABORT("Unknown estimator!");
@@ -232,6 +233,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
                    ParGridFunction &x,
                    ParGridFunction &xsub,
                    ParGridFunction &sol,
+                   int order, int mesh_order,
                    int est,
                    double ref_t, double jac_t, double deref_t,
                    int max_level, int nc_limit):
@@ -247,7 +249,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    sdim(pmesh.SpaceDimension()),
    flux_fec(order, dim),
    flux_fes(&pmesh, &flux_fec, sdim),
-   opt( {est, ref_t, jac_t, deref_t, max_level, nc_limit})
+   opt( {order, mesh_order, est, ref_t, jac_t, deref_t, max_level, nc_limit})
 {
    dbg("AMR Setup");
    if (myid == 0)
@@ -299,6 +301,41 @@ void Operator::Reset()
    if (integ) { integ->Reset(); }
    if (refiner) { refiner->Reset(); }
    if (derefiner) { derefiner->Reset(); }
+}
+
+static double compute_mass(FiniteElementSpace *L2, double massL2,
+                           GridFunction &u,
+                           string space, string prefix)
+{
+   ConstantCoefficient constant_one(1.0);
+   BilinearForm ML2(L2);
+   ML2.AddDomainIntegrator(new MassIntegrator(constant_one));
+   ML2.Assemble();
+   GridFunction one(L2);
+   one = 1.0;
+   const double newmass = ML2.InnerProduct(u, one);
+   std::cout.precision(18);
+   cout << space << " " << prefix << " mass = " << newmass;
+   if (massL2 >= 0)
+   {
+      std::cout.precision(4);
+      std::cout << " ("  << fabs(newmass-massL2)*100/massL2 << "%)";
+   }
+   std::cout << endl;
+   return newmass;
+}
+
+static void glvis(GridFunction &u, string prefix,
+                  int x, int y, int w, int h)
+{
+   char vishost[] = "localhost";
+   int  visport   = 19916;
+   socketstream vis(vishost, visport);
+   vis.precision(8);
+   vis << "solution\n" << *u.FESpace()->GetMesh() << u
+       << "window_geometry " << x << " " << y << " " << w << " " << h
+       << "keys " << "gAm"
+       << std::flush;
 }
 
 void Operator::Update(AdvectionOperator &adv,
@@ -357,6 +394,156 @@ void Operator::Update(AdvectionOperator &adv,
       }
 
       case amr::estimator::jjt:
+      {
+         dbg("JJt-LOR");
+         std::string space;
+         std::string direction;
+
+         int Wx = 0, Wy = 0; // window position
+         int Ww = 480, Wh = 480; // window size
+         int offx = Ww+5; // window offsets
+
+         const int order = opt.order;
+         // The refinement factor, an integer > 1
+         const int ref_factor = 2;
+         // Specify the positions of the new vertices.
+         const int ref_type = BasisType::GaussLobatto;
+         const int lorder = 1;     // LOR space order
+         dbg("order:%d, ref_factor:%d, lorder:%d", order, ref_factor, lorder);
+
+         // Create the low-order refined mesh
+         Mesh mesh_lor(&pmesh, ref_factor, ref_type);
+         dbg("HO NE:%d", pmesh.GetNE());
+         dbg("LO NE:%d", mesh_lor.GetNE());
+
+         FiniteElementCollection *fec, *fec_lor, *fec0;
+         space = "L2";
+         fec = new L2_FECollection(order, dim);
+         fec_lor = new L2_FECollection(lorder, dim);
+         fec0 = new L2_FECollection(0, dim);
+
+         FiniteElementSpace fespace(&pmesh, fec);
+         FiniteElementSpace fespace_lor(&mesh_lor, fec_lor);
+         FiniteElementSpace fespace0(&pmesh, fec0);
+
+         GridFunction rho(&fespace); dbg("rho.Size:%d",rho.Size());
+         GridFunction rho_lor(&fespace_lor); dbg("rho_lor.Size:%d",rho_lor.Size());
+         GridFunction rho0(&fespace0); dbg("rho0.Size:%d",rho0.Size());
+
+         // this is what we need: the 'solution' coming back is of size 'NE'
+         assert(rho0.Size() == pmesh.GetNE());
+
+         rho.ProjectGridFunction(u);
+
+         //const double ho_mass = compute_mass(&fespace, -1.0, rho, space, "HO       ");
+         glvis(u, "HO", Wx, Wy, Ww, Wh); Wx += offx;
+
+         GridTransfer *forward, *backward;
+         forward = new L2ProjectionGridTransfer(fespace, fespace_lor);
+         backward = new L2ProjectionGridTransfer(fespace0, fespace_lor);
+
+         const mfem::Operator &R = forward->ForwardOperator();
+         const mfem::Operator &P = backward->BackwardOperator();
+
+         direction = "HO -> LOR @ LOR";
+         R.Mult(rho, rho_lor);
+         //compute_mass(&fespace_lor, ho_mass, rho_lor, space, "R(HO)    ");
+         glvis(rho_lor, "R(HO)", Wx, Wy, Ww, Wh); Wx += offx;
+
+         // now work on LOR mesh
+         Vector vals, elemvect, coords;
+         const int geom = fespace_lor.GetFE(0)->GetGeomType();
+         const IntegrationRule &ir = IntRules.Get(geom, lorder+1);
+         GridFunction &nodes_lor = *mesh_lor.GetNodes();
+         const int nip = ir.GetNPoints();
+         assert(nip == 4);
+
+         constexpr int DIM = 2;
+         constexpr int SDIM = 3;
+         constexpr int VDIM = 3;
+         constexpr bool discont = false;
+         Mesh quad(1, 1, Element::QUADRILATERAL);
+         constexpr int ordering = Ordering::byVDIM;
+         quad.SetCurvature(lorder, discont, SDIM, ordering);
+         FiniteElementSpace *qfes =
+            const_cast<FiniteElementSpace*>(quad.GetNodalFESpace());
+         assert(quad.GetNE() == 1);
+         assert(qfes->GetVDim() == VDIM);
+         assert(quad.SpaceDimension() == SDIM);
+         GridFunction &q_nodes = *quad.GetNodes();
+
+         DenseMatrix Jadjt, Jadj(DIM, SDIM);
+         constexpr double NL_DMAX = std::numeric_limits<double>::max();
+
+         //assert(rho_lor.Size() == mesh_lor.GetNE());
+         assert(rho0.Size() == pmesh.GetNE());
+         Array<int> dofs;
+         for (int e = 0; e < mesh_lor.GetNE(); e++)
+         {
+            //dbg("#%d rho_lor:%f", e, rho_lor[e]);
+            rho_lor.GetValues(e,ir,vals);
+            fespace_lor.GetElementVDofs(e, dofs);
+            elemvect.SetSize(dofs.Size());
+            assert(elemvect.Size() == 4);
+            assert(vals.Size() == 4);
+            if (e==0) { vals.Print(); }
+            for (int q = 0; q < nip; q++)
+            {
+               const IntegrationPoint &ip = ir.IntPoint(q);
+               ElementTransformation *eTr = mesh_lor.GetElementTransformation(e);
+               eTr->SetIntPoint(&ip);
+               nodes_lor.GetVectorValue(e, ip, coords);
+               assert(coords.Size() == 2);
+               q_nodes(3*q+0) = coords[0];
+               q_nodes(3*q+1) = coords[1];
+               q_nodes(3*q+2) = rho_lor.GetValue(e, ip);
+            }
+            /*for (int q=0; q < q_nodes.Size(); q+=3)
+            {
+               dbg("q: [%f, %f, %f]", q_nodes(q), q_nodes(q+1), q_nodes(q+2));
+            }*/
+            {
+               const int qe = 0;
+               double minW = +NL_DMAX;
+               double maxW = -NL_DMAX;
+               ElementTransformation *eTr = quad.GetElementTransformation(qe);
+               //const Geometry::Type &type = quad.GetElement(e)->GetGeometryType();
+               //const IntegrationRule *ir = &IntRules.Get(type, 2);
+               //const int NQ = pir.GetNPoints();
+               //dbg("NQ:%d", NQ);
+               for (int q = 0; q < nip; q++) // nip == 4
+               {
+                  eTr->SetIntPoint(&ir.IntPoint(q));
+                  const DenseMatrix &J = eTr->Jacobian();
+                  CalcAdjugate(J, Jadj);
+                  Jadjt = Jadj;
+                  Jadjt.Transpose();
+                  const double w = Jadjt.Weight();
+                  //dbg("#%d w:%f",q,w);
+                  minW = std::fmin(minW, w);
+                  maxW = std::fmax(maxW, w);
+               }
+               assert(std::fabs(maxW) > 0.0);
+               {
+                  const double rho = minW / maxW;
+                  dbg("#%d rho:%f", e, rho);
+                  MFEM_VERIFY(rho <= 1.0, "");
+                  //rho0[e] = rho;
+                  elemvect = rho;
+                  rho_lor.SetSubVector(dofs, elemvect);
+               }
+            }
+         }
+
+         P.Mult(rho_lor, rho0);
+         //compute_mass(&fespace0, ho_mass, rho0, space, "P0(R(HO))");
+         glvis(rho0, "P0(R(HO))", Wx, Wy, Ww, Wh); Wx += offx;
+
+         //assert(false);
+         break;
+      }
+
+      case amr::estimator::jjt0:
       {
          dbg("pfes order:%d", pfes.GetOrder(0));
          const int order = pfes.GetOrder(0);

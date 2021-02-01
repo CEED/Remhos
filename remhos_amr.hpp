@@ -25,7 +25,7 @@ namespace mfem
 namespace amr
 {
 
-enum estimator: int { custom = 0, jjt, zz, kelly};
+enum estimator: int { custom = 0, jjt, jjt0, zz, kelly};
 
 class EstimatorIntegrator: public DiffusionIntegrator
 {
@@ -78,7 +78,6 @@ class Operator
    ParFiniteElementSpace &pfes, &mesh_pfes;
 
    const int myid, dim, sdim;
-   const int order = 3; // should be computed
 
    L2_FECollection flux_fec;
    ParFiniteElementSpace flux_fes;
@@ -91,6 +90,7 @@ class Operator
 
    const struct Options
    {
+      int order, mesh_order;
       int estimator;
       double ref_threshold;
       double jac_threshold;
@@ -106,6 +106,7 @@ public:
             ParGridFunction &x,
             ParGridFunction &xsub,
             ParGridFunction &sol,
+            int order, int mesh_order,
             int estimator,
             double ref_t, double jac_t, double deref_t,
             int max_level, int nc_limit);
