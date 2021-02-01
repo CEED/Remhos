@@ -147,6 +147,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
       }
    }
 
+   /*
    Vector mydu(du.Size()); mydu = 0.0;
    assembly.DeviceLinearFluxLumping(u, mydu, FaceType::Interior);
    assembly.DeviceLinearFluxLumping(u, mydu, FaceType::Boundary);
@@ -165,7 +166,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
       diff.Print(mfem::out,16);
       exit(-1);
    }
-
+   */
    //Linear Flux Lumping forall elements/faces //alpha is 0 for us here
    //assembly.LinearFluxLumping_all(ndof, u, du, u_nd, alpha);
 

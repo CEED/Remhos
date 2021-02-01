@@ -152,11 +152,6 @@ private:
    FiniteElementSpace *fes, *SubFes0, *SubFes1;
    Mesh *subcell_mesh;
 
-   const DofToQuad * maps;
-
-   Array<double> IntVelocity;
-   Array<double> BdryVelocity;
-
 public:
    Assembly(DofInfo &_dofs, LowOrderMethod &inlom, const GridFunction &inflow,
             ParFiniteElementSpace &pfes, ParMesh *submesh, int mode);
@@ -171,21 +166,10 @@ public:
    // bdrInt - eq (32).
    // SubcellWeights - above eq (49).
    DenseTensor bdrInt, SubcellWeights;
-   //DenseTensor mybdrInt;
-   Vector mybdrInt_face_mats;
-   Vector mybdrBdry_face_mats;
 
    void ComputeFluxTerms(const int e_id, const int BdrID,
                          FaceElementTransformations *Trans,
                          LowOrderMethod &lom);
-
-   void SampleVelocity(LowOrderMethod &lom, FaceType type);
-
-   void DeviceComputeFluxTerms(LowOrderMethod &lom, FaceType type);
-
-   void DeviceComputeFluxTerms2D(LowOrderMethod &lom, FaceType type);
-
-   void DeviceComputeFluxTerms3D(LowOrderMethod &lom, FaceType type);
 
    void ComputeSubcellWeights(const int k, const int m);
 
@@ -193,15 +177,6 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
-
-   void DeviceLinearFluxLumping(const Vector &x, Vector &y,
-                                FaceType type) const;
-
-   void DeviceLinearFluxLumping2D(const Vector &x, Vector &y,
-                                  FaceType type) const;
-
-   void DeviceLinearFluxLumping3D(const Vector &x, Vector &y,
-                                  FaceType type) const;
 
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,

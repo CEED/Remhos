@@ -1126,22 +1126,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          }
 
       }
-      asmbl.SampleVelocity(lom, FaceType::Interior);
-      asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms(lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms(lom, FaceType::Boundary);
-   }
-
-
-   //TODO only needed once in advection mode
-   static bool compute_face_terms = true;
-   if (compute_face_terms)
-   {
-      asmbl.SampleVelocity(lom, FaceType::Interior);
-      asmbl.SampleVelocity(lom, FaceType::Boundary);
-      asmbl.DeviceComputeFluxTerms(lom, FaceType::Interior);
-      asmbl.DeviceComputeFluxTerms(lom, FaceType::Boundary);
-      compute_face_terms = false;
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
