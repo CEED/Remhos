@@ -102,8 +102,8 @@ public:
 
    void SampleVelocity(FaceType type) const;
 
-  void SetupPA(FaceType type) const;
-  void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
+   void SetupPA(FaceType type) const;
+   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
