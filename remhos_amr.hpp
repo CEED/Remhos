@@ -25,7 +25,7 @@ namespace mfem
 namespace amr
 {
 
-enum estimator: int { custom = 0, jjt, zz, kelly};
+enum estimator: int { custom = 0, jjt, zz, l2zz, kelly};
 
 class EstimatorIntegrator: public DiffusionIntegrator
 {
@@ -81,6 +81,7 @@ class Operator
 
    const int myid, dim, sdim;
 
+   H1_FECollection fec;
    L2_FECollection flux_fec;
    ParFiniteElementSpace flux_fes;
 

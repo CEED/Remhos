@@ -35,6 +35,7 @@ static const char *EstimatorName(const int est)
       case amr::estimator::custom: return "Custom";
       case amr::estimator::jjt: return "JJt";
       case amr::estimator::zz: return "ZZ";
+      case amr::estimator::l2zz: return "L2ZZ";
       case amr::estimator::kelly: return "Kelly";
       default: MFEM_ABORT("Unknown estimator!");
    }
@@ -218,8 +219,13 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    myid(pmesh.GetMyRank()),
    dim(pmesh.Dimension()),
    sdim(pmesh.SpaceDimension()),
+   fec(order, dim),
    flux_fec(order, dim),
-   flux_fes(&pmesh, &flux_fec, sdim),
+   flux_fes(&pmesh,
+            est == amr::estimator::kelly ?
+            static_cast<FiniteElementCollection*>(&flux_fec) :
+            static_cast<FiniteElementCollection*>(&fec),
+            sdim),
    opt( {order, mesh_order, est, ref_t, jjt_t, deref_t, max_level, nc_limit})
 {
    dbg("AMR Setup");
@@ -234,25 +240,35 @@ Operator::Operator(ParFiniteElementSpace &pfes,
 
    if (opt.estimator == amr::estimator::zz)
    {
+      MFEM_VERIFY(false, "Not yet fully implemented!");
+      integ = new amr::EstimatorIntegrator(pmesh,
+                                           opt.max_level,
+                                           opt.jjt_threshold);
+      estimator = new ZienkiewiczZhuEstimator(*integ, u, &flux_fes);
+   }
+
+   if (opt.estimator == amr::estimator::l2zz)
+   {
       integ = new amr::EstimatorIntegrator(pmesh,
                                            opt.max_level,
                                            opt.jjt_threshold);
       smooth_flux_fec = new RT_FECollection(order-1, dim);
       auto smooth_flux_fes = new ParFiniteElementSpace(&pmesh, smooth_flux_fec);
-      estimator = new L2ZienkiewiczZhuEstimator(*integ, u, &flux_fes,
-                                                smooth_flux_fes);
+      estimator = new L2ZienkiewiczZhuEstimator(*integ, u,
+                                                &flux_fes,smooth_flux_fes);
    }
 
    if (opt.estimator == amr::estimator::kelly)
    {
-      integ = new amr::EstimatorIntegrator(pmesh, opt.max_level,
+      integ = new amr::EstimatorIntegrator(pmesh,
+                                           opt.max_level,
                                            opt.jjt_threshold);
       estimator = new KellyErrorEstimator(*integ, u, flux_fes);
    }
 
    if (estimator)
    {
-      const double hysteresis = 0.15;
+      const double hysteresis = 0.25;
       const double max_elem_error = 5.0e-3;
       refiner = new ThresholdRefiner(*estimator);
       refiner->SetTotalErrorFraction(0.0); // use purely local threshold
@@ -264,6 +280,9 @@ Operator::Operator(ParFiniteElementSpace &pfes,
       //derefiner->SetOp(2); // 0:min, 1:sum, 2:max
       derefiner->SetThreshold(hysteresis * max_elem_error);
       derefiner->SetNCLimit(opt.nc_limit);
+
+      refiner->Reset();
+      derefiner->Reset();
    }
 }
 
@@ -483,6 +502,7 @@ void Operator::Update(AdvectionOperator &adv,
          break;
       }
       case amr::estimator::zz:
+      case amr::estimator::l2zz:
       case amr::estimator::kelly:
       {
          AMRUpdateEstimatorZZKelly(mesh_update);
