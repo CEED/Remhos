@@ -399,7 +399,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-         maxvals(x_max.GetData(), x_max.Size());
+                 maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -657,13 +657,13 @@ void DofInfo::FillSubcell2CellDof()
    }
 }
 
-Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &inlom,
+Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &_lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
    : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
-     VolumeTerms(NULL), lom(inlom),
+     VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     subcell_mesh(submesh), dofs(_dofs)
+     subcell_mesh(submesh), dofs(_dofs), lom(_lom)
 {
    Mesh *mesh = fes->GetMesh();
    int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
@@ -684,7 +684,7 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &inlom,
    }
 
    // Initialization for transport mode.
-   //if (exec_mode == 0)
+   if (exec_mode == 0)
    {
       for (k = 0; k < ne; k++)
       {
@@ -779,7 +779,6 @@ void Assembly::ComputeFluxTerms(const int e_id, const int BdrID,
          }
       }
    }
-
 }
 
 void Assembly::ComputeSubcellWeights(const int k, const int m)
@@ -806,56 +805,34 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    double xNeighbor;
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
-   //printf("e_id %d BdrID %d \n",k, BdrID);
+
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
       const int nbr_dof_id = dofs.NbrDof(k, BdrID, j);
       // Note that if the boundary is outflow, we have bdrInt = 0 by definition,
       // s.t. this value will not matter.
-      if (nbr_dof_id < 0)
-      {
-         xNeighbor = inflow_gf(dofInd);
-      }
+      if (nbr_dof_id < 0) { xNeighbor = inflow_gf(dofInd); }
       else
       {
          xNeighbor = (nbr_dof_id < size_x) ? x(nbr_dof_id)
                      : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
-      //printf(" %g \n",xDiff(j));
    }
 
-   /*
-   for(int i=0; i<dofs.numFaceDofs; ++i){
-     for(int j=0; j<dofs.numFaceDofs;++j){
-       printf("%f ",bdrInt(k, BdrID, i*dofs.numFaceDofs + j));
-     }
-     printf("\n");
-   }
-   */
-
-
-   //printf("---\n");
    for (i = 0; i < dofs.numFaceDofs; i++)
    {
       dofInd = k*nd+dofs.BdrDofs(i,BdrID);
-      double val=0.0;
       for (j = 0; j < dofs.numFaceDofs; j++)
       {
          // alpha=0 is the low order solution, alpha=1, the Galerkin solution.
          // 0 < alpha < 1 can be used for limiting within the low order method.
-         val += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
-                (xDiff(i) + (xDiff(j)-xDiff(i)) *
-                 alpha(dofs.BdrDofs(i,BdrID)) *
-                 alpha(dofs.BdrDofs(j,BdrID)) );
-
          y(dofInd) += bdrInt(k, BdrID, i*dofs.numFaceDofs + j) *
                       (xDiff(i) + (xDiff(j)-xDiff(i)) *
                        alpha(dofs.BdrDofs(i,BdrID)) *
-                       alpha(dofs.BdrDofs(j,BdrID)) );
+                       alpha(dofs.BdrDofs(j,BdrID)));
       }
-      //printf("%.10f \n",val);
    }
 }
 
