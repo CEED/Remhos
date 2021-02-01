@@ -85,10 +85,25 @@ protected:
    const bool subcell_scheme;
    const bool time_dep;
 
+   //For PA
+   //Data at quadrature points
+   mutable int quad1D, dofs1D, face_dofs; //should not be mutable!
+   mutable Array<double> D_int, D_bdry;
+   mutable Array<double> IntVelocity, BdryVelocity;
+   void SetupPA2D(FaceType) const;
+   void SetupPA3D(FaceType) const;
+   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
+   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
+
 public:
    MFResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
                           Assembly &asmbly, const Vector &Mlump,
                           bool subcell, bool timedep);
+
+   void SampleVelocity(FaceType type) const;
+
+  void SetupPA(FaceType type) const;
+  void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };

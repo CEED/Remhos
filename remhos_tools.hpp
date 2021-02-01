@@ -158,11 +158,13 @@ private:
    Array<double> BdryVelocity;
 
 public:
-   Assembly(DofInfo &_dofs, LowOrderMethod &lom, const GridFunction &inflow,
+   Assembly(DofInfo &_dofs, LowOrderMethod &inlom, const GridFunction &inflow,
             ParFiniteElementSpace &pfes, ParMesh *submesh, int mode);
 
    // Auxiliary member variables that need to be accessed during time-stepping.
    DofInfo &dofs;
+
+   LowOrderMethod &lom;
 
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
@@ -205,6 +207,10 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
+
+  const FiniteElementSpace * GetFes() {return fes;}
+
+  const int GetExecMode() { return exec_mode;}
 };
 
 // Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped

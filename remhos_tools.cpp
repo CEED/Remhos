@@ -657,11 +657,11 @@ void DofInfo::FillSubcell2CellDof()
    }
 }
 
-Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
+Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &inlom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
    : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
-     VolumeTerms(NULL),
+     VolumeTerms(NULL), lom(inlom),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
      subcell_mesh(submesh), dofs(_dofs)
 {
@@ -907,10 +907,10 @@ void Assembly::DeviceComputeFluxTerms2D(LowOrderMethod &lom, FaceType type)
    const int quad1D = maps->nqpt;
    const int dofs1D = maps->ndof;
 
-   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
-   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
+   auto n = mfem::Reshape(geom->normal.Read(), quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.Read(), quad1D, nf);
    const double *w = lom.irF->GetWeights().Read();
-   auto B = mfem::Reshape(maps->B.HostRead(), quad1D, dofs1D);
+   auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
 
    const double *vel_ptr;
    if (type == FaceType::Interior) { vel_ptr = IntVelocity.Read(); }
