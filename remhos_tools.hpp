@@ -160,7 +160,6 @@ public:
    DofInfo &dofs;
 
    LowOrderMethod &lom;
-
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
    // bdrInt - eq (32).
@@ -177,7 +176,6 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
-
    void NonlinFluxLumping(const int k, const int nd,
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
