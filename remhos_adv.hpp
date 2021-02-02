@@ -71,7 +71,9 @@ public:
 
    virtual ~AdvectionOperator() { }
 
-   void AMRUpdate(const Vector &S);
+   void AMRUpdate(const Vector &S,
+                  ParGridFunction &u,
+                  const double mass0_u);
 };
 
 } // namespace mfem

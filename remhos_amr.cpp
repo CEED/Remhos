@@ -229,7 +229,9 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    opt( {order, mesh_order, est, ref_t, jjt_t, deref_t, max_level, nc_limit})
 {
    dbg("AMR Setup");
-   amr_vis.precision(8);
+   amr_vis[0].precision(8);
+   amr_vis[1].precision(8);
+   amr_vis[2].precision(8);
 
    if (myid == 0)
    {
@@ -268,7 +270,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
 
    if (estimator)
    {
-      const double hysteresis = 0.25;
+      const double hysteresis = 0.01;
       const double max_elem_error = 5.0e-3;
       refiner = new ThresholdRefiner(*estimator);
       refiner->SetTotalErrorFraction(0.0); // use purely local threshold
@@ -277,7 +279,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
       refiner->SetNCLimit(opt.nc_limit);
 
       derefiner = new ThresholdDerefiner(*estimator);
-      //derefiner->SetOp(2); // 0:min, 1:sum, 2:max
+      derefiner->SetOp(1); // 0:min, 1:sum, 2:max
       derefiner->SetThreshold(hysteresis * max_elem_error);
       derefiner->SetNCLimit(opt.nc_limit);
 
@@ -335,6 +337,7 @@ void Operator::AMRUpdateEstimatorCustom(Array<Refinement> &refs,
 void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
 {
    dbg("JJt");
+   const bool vis = true;
    const int horder = opt.order;
    // The refinement factor, an integer > 1
    const int ref_factor = 2;
@@ -342,6 +345,7 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    const int ref_type = BasisType::GaussLobatto;
    const int lorder = 1; // LOR space order
    dbg("order:%d, ref_factor:%d, lorder:%d", horder, ref_factor, lorder);
+   //dbg("pmesh.GetNE:%d", pmesh.GetNE());
 
    // Create the low-order refined mesh
    ParMesh mesh_lor(&pmesh, ref_factor, ref_type);
@@ -360,8 +364,11 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
 
    // this is what we need: the 'solution' coming back is of size 'NE'
    assert(rho_rf.Size() == pmesh.GetNE());
+   //dbg("pmesh.GetNE:%d, u:%d, rho_ho:%d", pmesh.GetNE(), u.Size(), rho_ho.Size());
 
    rho_ho.ProjectGridFunction(u);
+   if (vis) VisualizeField(amr_vis[0], host, port, rho_ho, "rho_ho",
+                              Wx, Wy, Ww, Wh, keys);
 
    L2ProjectionGridTransfer forward(fes_ho, fes_lo);
    L2ProjectionGridTransfer backward(fes_rf, fes_lo);
@@ -369,7 +376,8 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    const mfem::Operator &P = backward.BackwardOperator();
 
    R.Mult(rho_ho, rho_lo);
-   //VisualizeField(amr_vis, host, port, rho_lo, "rho_lo", Wx, Wy, Ww, Wh, keys);
+   if (vis) VisualizeField(amr_vis[1], host, port, rho_lo, "rho_lo",
+                              Wx+Ww, Wy, Ww, Wh, keys);
 
    // now work on LOR mesh
    Array<int> dofs;
@@ -441,19 +449,20 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    }
 
    P.Mult(rho_lo, rho_rf);
-   VisualizeField(amr_vis,host,port,rho_rf,"AMR rho",Wx,Wy,Ww,Wh,keys);
+   if (vis) VisualizeField(amr_vis[2], host, port, rho_rf, "rho_rf",
+                              Wx + 2*Ww, Wy, Ww, Wh, keys);
 
    for (int e = 0; e < pmesh.GetNE(); e++)
    {
       const int depth = pmesh.pncmesh->GetElementDepth(e);
       const double rho = rho_rf(e);
-      //dbg("#%d %.8e @ %d/%d",e, rho, depth, opt.max_level);
+      dbg("#%d %.15e @ %d/%d",e, rho, depth, opt.max_level);
       if ((rho < opt.jjt_threshold) && depth < opt.max_level )
       {
          dbg("\033[32mRefining #%d",e);
          refs.Append(Refinement(e));
       }
-      if (rho >= 1.0 && depth > 0 )
+      if (rho >= 0.99999999999 && depth > 0 )
       {
          dbg("\033[31mDeRefinement #%d",e);
          derefs(e) = 1.0;
@@ -479,7 +488,9 @@ void Operator::Update(AdvectionOperator &adv,
                       ParMesh *subcell_mesh,
                       ParFiniteElementSpace *pfes_sub,
                       ParGridFunction *xsub,
-                      ParGridFunction &v_sub_gf)
+                      ParGridFunction &v_sub_gf,
+                      Vector &lumpedM,
+                      const double mass0_u)
 {
    dbg();
    Array<Refinement> refs;
@@ -539,12 +550,37 @@ void Operator::Update(AdvectionOperator &adv,
          {
             std::cout << "DE-Refining " << nderef << " elements." << std::endl;
          }
-         const int op = 1; // maximum value of fine elements
-         mesh_update = pmesh.DerefineByError(derefs, 1.0, opt.nc_limit, op);
+
+         const int op = 0; // 0:min, 1:sum, 2:max
+
+         // Derefine by setting 0 error on the fine elements in coarse elements
+         Table coarse_to_fine_;
+         Table ref_type_to_matrix;
+         Array<int> coarse_to_ref_type;
+         Array<Geometry::Type> ref_type_to_geom;
+         const CoarseFineTransformations &rtrans = pmesh.GetRefinementTransforms();
+         rtrans.GetCoarseToFineMap(pmesh, coarse_to_fine_, coarse_to_ref_type,
+                                   ref_type_to_matrix, ref_type_to_geom);
+         Array<int> tabrow;
+
+         Vector local_err(pmesh.GetNE());
+         const double threshold = 1.0;
+         local_err = 2*threshold;
+
+         for (int e = 0; e < nderef; e++)
+         {
+            coarse_to_fine_.GetRow(e, tabrow);
+            for (int j = 0; j < tabrow.Size(); j++)
+            {
+               local_err(tabrow[j]) = 0.0;
+            }
+         }
+         mesh_update = pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
          MFEM_VERIFY(mesh_update,"");
       }
    }
    else if ((opt.estimator == amr::estimator::zz ||
+             opt.estimator == amr::estimator::l2zz ||
              opt.estimator == amr::estimator::kelly) && !mesh_update)
    {
       MFEM_VERIFY(derefiner,"");
@@ -563,8 +599,11 @@ void Operator::Update(AdvectionOperator &adv,
    {
       dbg();
       AMRUpdate(S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
+
       //pmesh.Rebalance();
-      adv.AMRUpdate(S);
+
+      adv.AMRUpdate(S, u, mass0_u);
+
       ode_solver->Init(adv);
    }
 }
@@ -577,7 +616,6 @@ void Operator::AMRUpdate(BlockVector &S,
                          ParGridFunction *xsub,
                          ParGridFunction &v_sub_gf)
 {
-   dbg();
    pfes.Update();
 
    const int vsize = pfes.GetVSize();
@@ -593,6 +631,7 @@ void Operator::AMRUpdate(BlockVector &S,
 
    u.MakeRef(&pfes, S, offset[0]);
    u.SyncAliasMemory(S);
+
    MFEM_VERIFY(u.Size() == vsize,"");
 
    if (xsub)

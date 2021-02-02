@@ -550,18 +550,6 @@ int main(int argc, char *argv[])
 
       // Zero it out on boundaries (not moving boundaries).
       ZeroItOutOnBoundaries(subcell_mesh, xsub, v_sub_gf, v_sub_coef);
-      /*Array<int> ess_bdr, ess_vdofs;
-      if (subcell_mesh->bdr_attributes.Size() > 0)
-      {
-         ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
-      }
-      ess_bdr = 1;
-      xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-      for (int i = 0; i < ess_vdofs.Size(); i++)
-      {
-         if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
-      }
-      v_sub_coef.SetGridFunction(&v_sub_gf);*/
 
       // Store initial submesh positions.
       x0_sub = *xsub;
@@ -619,6 +607,8 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
+   dbg("pmesh.GetNE: %d", pmesh.GetNE());
+   dbg("u.Size: %d",u.Size());
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -857,12 +847,39 @@ int main(int argc, char *argv[])
          }
       }
 
+      /// CHECK mass before AMR ///
+      /*if (myid == 0)
+      {
+         ml.SpMat().GetDiag(lumpedM);
+         masses = lumpedM;
+         double mass_u, mass_u_loc = masses * u;
+         MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+         std::cout << setprecision(10)
+                   << "Before AMR, u size:" << u.Size() << std::endl
+                   << "Current mass u: " << mass_u << std::endl
+                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      }*/
+
       /// AMR UPDATE ///
       if (amr)
       {
          AMR->Update(adv, ode_solver, S, offset,
-                     lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
+                     lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
+                     lumpedM, mass0_u);
       }
+
+      /// CHECK mass after AMR ///
+      /*if (myid == 0)
+      {
+         ml.SpMat().GetDiag(lumpedM);
+         masses = lumpedM;
+         double mass_u, mass_u_loc = masses * u;
+         MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+         std::cout << setprecision(10)
+                   << "After AMR, u size:" << u.Size() << std::endl
+                   << "Current mass u: " << mass_u << std::endl
+                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      }*/
 
       if (exec_mode == 1)
       {

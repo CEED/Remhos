@@ -91,12 +91,12 @@ class Operator
    ThresholdDerefiner *derefiner = nullptr;
    amr::EstimatorIntegrator *integ = nullptr;
 
-   socketstream amr_vis;
+   socketstream amr_vis[3];
    const char *host = "localhost";
    const int port = 19916;
    int Wx = 400, Wy = 400;
-   const int Ww = 400, Wh = 400;
-   const char *keys = "gAm";
+   const int Ww = 640, Wh = 640;
+   const char *keys = "gAmRj";
 
    const struct Options
    {
@@ -131,7 +131,9 @@ public:
                ParMesh *subcell_mesh,
                ParFiniteElementSpace *pfes_sub,
                ParGridFunction *xsub,
-               ParGridFunction &v_sub_gf);
+               ParGridFunction &v_sub_gf,
+               Vector &lumpedM,
+               const double mass0_u);
 
 private:
    void AMRUpdateEstimatorCustom(Array<Refinement>&, Vector&);

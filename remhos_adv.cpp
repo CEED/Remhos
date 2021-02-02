@@ -200,7 +200,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 }
 
-void AdvectionOperator::AMRUpdate(const Vector &S)
+void AdvectionOperator::AMRUpdate(const Vector &S,
+                                  ParGridFunction &u,
+                                  const double mass0_u)
 {
    int skip_zeros = 0;
 
@@ -218,6 +220,16 @@ void AdvectionOperator::AMRUpdate(const Vector &S)
    ml.Assemble();
    ml.Finalize();
    ml.SpMat().GetDiag(lumpedM);
+
+   MPI_Comm comm = u.ParFESpace()->GetParMesh()->GetComm();
+   Vector masses(lumpedM);
+   double mass_u, mass_u_loc = masses * u;
+   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+   std::cout << setprecision(10)
+             << "AdvectionOperator, u size:" << u.Size() << std::endl
+             << "Current mass u: " << mass_u << std::endl
+             << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+   MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-4, "Error in mass!");
 
    dbg("K");
    Kbf.ParFESpace()->Update();
@@ -243,7 +255,7 @@ void AdvectionOperator::AMRUpdate(const Vector &S)
 
    //dbg("x_gf");
    //x_gf.FESpace()->Update();
-   //x_gf.Update();
+   x_gf.Update();
 
    //double dt;
    //Assembly &asmbl;
