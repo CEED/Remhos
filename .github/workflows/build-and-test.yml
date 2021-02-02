@@ -104,6 +104,5 @@ jobs:
         cd remhos && make -j
     - name: test Remhos
       run: |
-        cd remhos && cd autotest;
-        ./test.sh 2;
-        diff --report-identical-files out_test.dat out_baseline.dat;
+        cd/autotest && ./test.sh 2
+        diff --report-identical-files out_test.dat out_baseline.dat
