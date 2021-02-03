@@ -7,6 +7,7 @@
                   High-order Remap Miniapp
 
 [![Build Status](https://travis-ci.org/CEED/Remhos.svg?branch=master)](https://travis-ci.org/CEED/Remhos)
+[![Build and Test (GH Actions)](https://github.com/CEED/Remhos/workflows/build-and-test-remhos/badge.svg?branch=master)](https://github.com/CEED/Remhos/actions?query=workflow%3Abuild-and-test-remhos)
 
 ## Purpose
 
