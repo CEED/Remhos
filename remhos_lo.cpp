@@ -246,6 +246,7 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
      K(Kbf), assembly(asmbly),
      M_lumped(Mlump), subcell_scheme(subcell), time_dep(timedep)
 {
+   MFEM_VERIFY(subcell == false, "Subcell scheme not supported with PA");
    const FiniteElementSpace *fes = assembly.GetFes();
    const FiniteElement &el_trace =
       *fes->GetTraceElement(0, fes->GetMesh()->GetFaceBaseGeometry(0));
@@ -910,13 +911,6 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    u.HostRead();
    du.HostReadWrite();
    M_lumped.HostRead();
-
-   {//Move to Advection::Mult
-     SampleVelocity(FaceType::Interior);
-     SampleVelocity(FaceType::Boundary);
-     SetupPA(FaceType::Interior);
-     SetupPA(FaceType::Boundary);
-   }
 
    ApplyFaceTerms(u, du, FaceType::Interior);
    ApplyFaceTerms(u, du, FaceType::Boundary);
