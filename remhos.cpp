@@ -121,19 +121,14 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   //const char *mesh_file = "data/periodic-hexagon.mesh";
-   //const char *mesh_file = "data/inline-quad.mesh";
-   //const char *mesh_file = "data/periodic-cube.mesh";
-   const char *mesh_file = "data/inline-hex.mesh";
-   int rs_levels = 0;
+   const char *mesh_file = "data/periodic-square.mesh";
+   int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   //HOSolverType ho_type           = HOSolverType::CG;
-   HOSolverType ho_type           = HOSolverType::None;
-   LOSolverType lo_type           = LOSolverType::ResDist;
-   //FCTSolverType fct_type         = FCTSolverType::ClipScale;
+   HOSolverType ho_type           = HOSolverType::LocalInverse;
+   LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
@@ -382,7 +377,6 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
-   //k is the low order convection solution only
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
@@ -615,15 +609,9 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::ResDist)
    {
-      printf("Running LOSolverType::ResDist \n");
       const bool subcell_scheme = false;
-#if 1
-      lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
-                                             subcell_scheme, time_dep);
-#else
       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
                                            subcell_scheme, time_dep);
-#endif
    }
    else if (lo_type == LOSolverType::ResDistSubcell)
    {
@@ -1109,10 +1097,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          lom.pk->Assemble();
       }
 
+      // Face contributions.
+      asmbl.bdrInt = 0.;
       Mesh *mesh = M_HO.FESpace()->GetMesh();
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
+
       for (int k = 0; k < ne; k++)
       {
          if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
@@ -1124,7 +1115,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
             Trans = mesh->GetFaceElementTransformations(bdrs[i]);
             asmbl.ComputeFluxTerms(k, i, Trans, lom);
          }
-
       }
    }
 
