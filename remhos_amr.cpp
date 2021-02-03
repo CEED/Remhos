@@ -17,6 +17,8 @@
 #define MFEM_DEBUG_COLOR 51
 #include "debug.hpp"
 
+#include <unistd.h>
+
 #include "remhos.hpp"
 
 using namespace std;
@@ -209,13 +211,17 @@ Operator::Operator(ParFiniteElementSpace &pfes,
                    ParGridFunction &u,
                    int order, int mesh_order,
                    int est,
-                   double ref_t, double jjt_t, double deref_t,
-                   int max_level, int nc_limit):
+                   double ref_t,
+                   double deref_t,
+                   double jjt_ref_t,
+                   double jjt_deref_t,
+                   int max_level,
+                   int nc_limit):
 
    pmesh(pmesh),
    u(u),
    pfes(pfes),
-   mesh_pfes(mesh_pfes),
+   //mesh_pfes(mesh_pfes),
    myid(pmesh.GetMyRank()),
    dim(pmesh.Dimension()),
    sdim(pmesh.SpaceDimension()),
@@ -226,12 +232,15 @@ Operator::Operator(ParFiniteElementSpace &pfes,
             static_cast<FiniteElementCollection*>(&flux_fec) :
             static_cast<FiniteElementCollection*>(&fec),
             sdim),
-   opt( {order, mesh_order, est, ref_t, jjt_t, deref_t, max_level, nc_limit})
+   opt(
+{
+   order, mesh_order, est,
+          ref_t, deref_t,
+          jjt_ref_t, jjt_deref_t,
+          max_level, nc_limit
+})
 {
    dbg("AMR Setup");
-   amr_vis[0].precision(8);
-   amr_vis[1].precision(8);
-   amr_vis[2].precision(8);
 
    if (myid == 0)
    {
@@ -245,7 +254,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
       MFEM_VERIFY(false, "Not yet fully implemented!");
       integ = new amr::EstimatorIntegrator(pmesh,
                                            opt.max_level,
-                                           opt.jjt_threshold);
+                                           opt.jjt_ref_threshold);
       estimator = new ZienkiewiczZhuEstimator(*integ, u, &flux_fes);
    }
 
@@ -253,7 +262,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    {
       integ = new amr::EstimatorIntegrator(pmesh,
                                            opt.max_level,
-                                           opt.jjt_threshold);
+                                           opt.jjt_ref_threshold);
       smooth_flux_fec = new RT_FECollection(order-1, dim);
       auto smooth_flux_fes = new ParFiniteElementSpace(&pmesh, smooth_flux_fec);
       estimator = new L2ZienkiewiczZhuEstimator(*integ, u,
@@ -264,13 +273,13 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    {
       integ = new amr::EstimatorIntegrator(pmesh,
                                            opt.max_level,
-                                           opt.jjt_threshold);
+                                           opt.jjt_ref_threshold);
       estimator = new KellyErrorEstimator(*integ, u, flux_fes);
    }
 
    if (estimator)
    {
-      const double hysteresis = 0.01;
+      const double hysteresis = 0.1;
       const double max_elem_error = 5.0e-3;
       refiner = new ThresholdRefiner(*estimator);
       refiner->SetTotalErrorFraction(0.0); // use purely local threshold
@@ -334,15 +343,16 @@ void Operator::AMRUpdateEstimatorCustom(Array<Refinement> &refs,
 }
 
 /// AMR Update for JJt Estimator
-void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
+void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs,
+                                     Vector &deref_tags)
 {
    dbg("JJt");
-   const bool vis = true;
+   const bool vis = false;
    const int horder = opt.order;
    // The refinement factor, an integer > 1
    const int ref_factor = 2;
    // Specify the positions of the new vertices.
-   const int ref_type = BasisType::GaussLobatto;
+   const int ref_type = BasisType::ClosedUniform; // ClosedUniform || GaussLobatto
    const int lorder = 1; // LOR space order
    dbg("order:%d, ref_factor:%d, lorder:%d", horder, ref_factor, lorder);
    //dbg("pmesh.GetNE:%d", pmesh.GetNE());
@@ -364,9 +374,42 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
 
    // this is what we need: the 'solution' coming back is of size 'NE'
    assert(rho_rf.Size() == pmesh.GetNE());
-   //dbg("pmesh.GetNE:%d, u:%d, rho_ho:%d", pmesh.GetNE(), u.Size(), rho_ho.Size());
+   dbg("pmesh.GetNE:%d, u:%d, rho_ho:%d", pmesh.GetNE(), u.Size(), rho_ho.Size());
 
-   rho_ho.ProjectGridFunction(u);
+   const bool L2projection = true;
+
+   const IntegrationRule &ir_ho = IntRules.Get(Geometry::SQUARE, horder + 1);
+   const IntegrationRule &ir_lo = IntRules.Get(Geometry::SQUARE, lorder + 1);
+
+   if (L2projection)
+   {
+      dbg("L2 projection");
+      rho_ho = 0.0;
+      ParBilinearForm a(&fes_ho);
+      a.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      a.AddDomainIntegrator(new MassIntegrator(&ir_ho));
+      a.Assemble();
+
+      ParLinearForm b(&fes_ho);
+      GridFunctionCoefficient gf_coeff(&u);
+      b.AddDomainIntegrator(new DomainLFIntegrator(gf_coeff, &ir_ho));
+      b.Assemble();
+
+      Vector B, X;
+      OperatorPtr A;
+      Array<int> ess_tdof_list;
+      a.FormLinearSystem(ess_tdof_list, rho_ho, b, A, X, B);
+      OperatorJacobiSmoother M(a, ess_tdof_list);
+      const int print_iter = 0;
+      const int max_num_iter = 200;
+      const double RTOL = 1e-18, ATOL = 0.0;
+      PCG(*A, M, B, X, print_iter, max_num_iter, RTOL, ATOL);
+      a.RecoverFEMSolution(X, b, rho_ho);
+   }
+   else
+   {
+      rho_ho.ProjectGridFunction(u);
+   }
    if (vis) VisualizeField(amr_vis[0], host, port, rho_ho, "rho_ho",
                               Wx, Wy, Ww, Wh, keys);
 
@@ -382,31 +425,23 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    // now work on LOR mesh
    Array<int> dofs;
    Vector vals, elemvect, coords;
-   const int geom = fes_lo.GetFE(0)->GetGeomType();
-   const IntegrationRule &ir = IntRules.Get(geom, lorder+1);
    GridFunction &nodes_lor = *mesh_lor.GetNodes();
-   const int nip = ir.GetNPoints();
+   const int nip = ir_lo.GetNPoints();
    assert(nip == 4);
 
    constexpr int DIM = 2;
    constexpr int SDIM = 3;
-   constexpr int VDIM = 3;
    constexpr bool discont = false;
+   DenseMatrix Jadjt, Jadj(DIM, SDIM);
    Mesh quad(1, 1, Element::QUADRILATERAL);
    constexpr int ordering = Ordering::byVDIM;
    quad.SetCurvature(lorder, discont, SDIM, ordering);
-   FiniteElementSpace *qfes =
-      const_cast<FiniteElementSpace*>(quad.GetNodalFESpace());
-   assert(quad.GetNE() == 1);
-   assert(qfes->GetVDim() == VDIM);
-   assert(quad.SpaceDimension() == SDIM);
    GridFunction &q_nodes = *quad.GetNodes();
-   DenseMatrix Jadjt, Jadj(DIM, SDIM);
    constexpr double NL_DMAX = std::numeric_limits<double>::max();
 
    for (int e = 0; e < mesh_lor.GetNE(); e++)
    {
-      rho_lo.GetValues(e,ir,vals);
+      rho_lo.GetValues(e, ir_lo, vals);
       fes_lo.GetElementVDofs(e, dofs);
       elemvect.SetSize(dofs.Size());
       assert(elemvect.Size() == 4);
@@ -414,14 +449,15 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
 
       for (int q = 0; q < nip; q++)
       {
-         const IntegrationPoint &ip = ir.IntPoint(q);
+         const IntegrationPoint &ip = ir_lo.IntPoint(q);
          ElementTransformation *eTr = mesh_lor.GetElementTransformation(e);
          eTr->SetIntPoint(&ip);
          nodes_lor.GetVectorValue(e, ip, coords);
+         const double z = rho_lo.GetValue(e, ip);
          assert(coords.Size() == 2);
-         q_nodes(3*q+0) = coords[0];
-         q_nodes(3*q+1) = coords[1];
-         q_nodes(3*q+2) = rho_lo.GetValue(e, ip);
+         q_nodes(3*q + 0) = coords[0];
+         q_nodes(3*q + 1) = coords[1];
+         q_nodes(3*q + 2) = z;
       }
 
       // Focus now on the quad mesh
@@ -431,7 +467,7 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
       ElementTransformation *eTr = quad.GetElementTransformation(qe);
       for (int q = 0; q < nip; q++) // nip == 4
       {
-         eTr->SetIntPoint(&ir.IntPoint(q));
+         eTr->SetIntPoint(&ir_lo.IntPoint(q));
          const DenseMatrix &J = eTr->Jacobian();
          CalcAdjugate(J, Jadj);
          Jadjt = Jadj;
@@ -439,13 +475,39 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
          const double w = Jadjt.Weight();
          minW = std::fmin(minW, w);
          maxW = std::fmax(maxW, w);
+         //elemvect[q] = w;
       }
       assert(std::fabs(maxW) > 0.0);
       const double rho = minW / maxW;
       //dbg("#%d rho:%f", e, rho);
-      assert(rho>0.0 && rho <= 1.0);
+      assert(rho > 0.0 && rho <= 1.0);
+      /*for (int q = 0; q < nip; q++) // nip == 4
+      {
+         const double w = elemvect[q];
+         elemvect[q] = 1.0 - w / rho;
+      }*/
       elemvect = rho;
       rho_lo.SetSubVector(dofs, elemvect);
+      /*if (vis && e == 0)
+      {
+         static bool newly_opened = false;
+         if (myid == 0)
+         {
+            if (!amr_vis[3].is_open() || !amr_vis[3])
+            {
+               amr_vis[3].open(host, port);
+               amr_vis[3].precision(8);
+            }
+         }
+         newly_opened = true;
+         amr_vis[3] << "mesh\n";
+         amr_vis[3] << quad;
+         //amr_vis[3] << "keys gmA\n";
+         amr_vis[3] << std::endl;
+
+         const unsigned int microseconds = 1000000;
+         usleep(microseconds);
+      }*/
    }
 
    P.Mult(rho_lo, rho_rf);
@@ -456,16 +518,17 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs, Vector &derefs)
    {
       const int depth = pmesh.pncmesh->GetElementDepth(e);
       const double rho = rho_rf(e);
-      dbg("#%d %.15e @ %d/%d",e, rho, depth, opt.max_level);
-      if ((rho < opt.jjt_threshold) && depth < opt.max_level )
+      dbg("#%d %.4e @ %d/%d",e, rho, depth, opt.max_level);
+
+      if ((rho < opt.jjt_ref_threshold) && depth < opt.max_level )
       {
          dbg("\033[32mRefining #%d",e);
          refs.Append(Refinement(e));
       }
-      if (rho >= 0.99999999999 && depth > 0 )
+      if ((rho >= opt.jjt_deref_threshold) && depth > 0 )
       {
-         dbg("\033[31mDeRefinement #%d",e);
-         derefs(e) = 1.0;
+         dbg("\033[31mTag for de-refinement #%d",e);
+         deref_tags(e) = rho;
       }
    }
 }
@@ -490,33 +553,36 @@ void Operator::Update(AdvectionOperator &adv,
                       ParGridFunction *xsub,
                       ParGridFunction &v_sub_gf,
                       Vector &lumpedM,
-                      const double mass0_u)
+                      const double mass0_u,
+                      ParGridFunction &inflow_gf,
+                      FunctionCoefficient &inflow)
 {
    dbg();
    Array<Refinement> refs;
-   bool mesh_update = false;
+   bool mesh_refine = false;
+   bool mesh_derefine = false;
    const int NE = pfes.GetNE();
-   Vector derefs(NE), one(NE);
-   derefs = 0.0;
-   one = 1.0;
+   Vector deref_tags(NE);
+   deref_tags = 0.0; // tie to 0.0 to trig the bool tests below
 
    switch (opt.estimator)
    {
       case amr::estimator::custom:
       {
-         AMRUpdateEstimatorCustom(refs, derefs);
+         AMRUpdateEstimatorCustom(refs, deref_tags);
          break;
       }
       case amr::estimator::jjt:
       {
-         AMRUpdateEstimatorJJt(refs, derefs);
+         AMRUpdateEstimatorJJt(refs, deref_tags);
          break;
       }
       case amr::estimator::zz:
       case amr::estimator::l2zz:
       case amr::estimator::kelly:
       {
-         AMRUpdateEstimatorZZKelly(mesh_update);
+         AMRUpdateEstimatorZZKelly(mesh_refine);
+         mesh_derefine = mesh_refine;
          break;
       }
       default: MFEM_ABORT("Unknown AMR estimator!");
@@ -525,81 +591,119 @@ void Operator::Update(AdvectionOperator &adv,
    // custom uses refs, ZZ and Kelly will set mesh_refined
    const int nref = pmesh.ReduceInt(refs.Size());
 
-   if (nref > 0 && !mesh_update)
+   if (nref > 0 && !mesh_refine)
    {
       dbg("GeneralRefinement");
       constexpr int non_conforming = 1;
       pmesh.GetNodes()->HostReadWrite();
       pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
-      mesh_update = true;
+      mesh_refine = true;
       if (myid == 0)
       {
-         std::cout << "Refined " << nref << " elements." << std::endl;
+         std::cout << "\033[32mRefined " << nref
+                   << " elements.\033[m" << std::endl;
       }
    }
    /// deref only for custom for now
    //else if (opt.estimator == amr::estimator::custom &&
    //         opt.deref_threshold >= 0.0 && !mesh_refined)
    /// JJt deref
-   else if (opt.estimator == amr::estimator::jjt && !mesh_update)
+   else if (opt.estimator == amr::estimator::jjt
+            && !mesh_refine
+            && pmesh.GetLastOperation() == Mesh::REFINE)
    {
-      const int nderef = derefs * one;
-      if (nderef > 0)
+      const bool deref_tagged = deref_tags.Max() > 0.0;
+
+      if (deref_tagged)
       {
-         if (myid == 0)
-         {
-            std::cout << "DE-Refining " << nderef << " elements." << std::endl;
-         }
+         dbg("Got at least one (%f), NE:%d!", deref_tags.Max(), pmesh.GetNE());
 
-         const int op = 0; // 0:min, 1:sum, 2:max
-
-         // Derefine by setting 0 error on the fine elements in coarse elements
-         Table coarse_to_fine_;
+         Table coarse_to_fine;
          Table ref_type_to_matrix;
          Array<int> coarse_to_ref_type;
          Array<Geometry::Type> ref_type_to_geom;
-         const CoarseFineTransformations &rtrans = pmesh.GetRefinementTransforms();
-         rtrans.GetCoarseToFineMap(pmesh, coarse_to_fine_, coarse_to_ref_type,
-                                   ref_type_to_matrix, ref_type_to_geom);
+         const CoarseFineTransformations &rtrans =
+            pmesh.GetRefinementTransforms();
+         rtrans.GetCoarseToFineMap(pmesh,
+                                   coarse_to_fine,
+                                   coarse_to_ref_type,
+                                   ref_type_to_matrix,
+                                   ref_type_to_geom);
          Array<int> tabrow;
+         const double threshold = 1.0;
 
          Vector local_err(pmesh.GetNE());
-         const double threshold = 1.0;
-         local_err = 2*threshold;
+         local_err = 2.0 * threshold; // 8.0 in aggregated error
 
-         for (int e = 0; e < nderef; e++)
+         const int op = 1; // 0:min, 1:sum, 2:max
+         int n_derefs = 0;
+
+         assert(deref_tags.Size() == pmesh.GetNE());
+         assert(local_err.Size() == pmesh.GetNE());
+
+         dbg("coarse_to_fine:%d",coarse_to_fine.Size());
+
+         for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
          {
-            coarse_to_fine_.GetRow(e, tabrow);
+            coarse_to_fine.GetRow(coarse_e, tabrow);
+            const int tabsz = tabrow.Size();
+            dbg("Scanning element #%d (%d)", coarse_e, tabsz);
+            //dbg("tabrow:"); tabrow.Print();
+            if (tabsz != 4) { continue; }
+            bool all_four = true;
             for (int j = 0; j < tabrow.Size(); j++)
             {
-               local_err(tabrow[j]) = 0.0;
+               const int fine_e = tabrow[j];
+               const double rho = deref_tags(fine_e);
+               dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
+               all_four &= rho > opt.jjt_deref_threshold;
             }
+
+            if (!all_four) { continue; }
+            dbg("\033[31mDERFINE #%d",coarse_e);
+            for (int j = 0; j < tabrow.Size(); j++)
+            {
+               const int fine_e = tabrow[j];
+               local_err(fine_e) = 0.0;
+            }
+            n_derefs += 1;
          }
-         mesh_update = pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
-         MFEM_VERIFY(mesh_update,"");
+         mesh_derefine =
+            pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
+
+         if (myid == 0 && n_derefs > 0)
+         {
+            std::cout << "\033[31m DE-Refined " << n_derefs
+                      << " elements.\033[m" << std::endl;
+            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefine,""); }
+         }
       }
    }
    else if ((opt.estimator == amr::estimator::zz ||
              opt.estimator == amr::estimator::l2zz ||
-             opt.estimator == amr::estimator::kelly) && !mesh_update)
+             opt.estimator == amr::estimator::kelly) && !mesh_refine)
    {
       MFEM_VERIFY(derefiner,"");
       if (derefiner->Apply(pmesh))
       {
-         mesh_update = true;
+         mesh_refine = true;
          if (myid == 0)
          {
-            std::cout << "\nDerefined elements." << std::endl;
+            std::cout << "\n\033[31mDerefined elements.\033[m" << std::endl;
          }
       }
    }
    else { /* nothing to do */ }
 
-   if (mesh_update)
+   if (mesh_refine || mesh_derefine)
    {
-      dbg();
-      AMRUpdate(S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
-
+      dbg("mesh_refine:%s, mesh_derefine:%s",
+          mesh_refine?"yes":"no",
+          mesh_derefine?"yes":"no");
+      AMRUpdate(mesh_derefine,
+                S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
+      inflow_gf.Update();
+      inflow_gf.ProjectCoefficient(inflow);
       //pmesh.Rebalance();
 
       adv.AMRUpdate(S, u, mass0_u);
@@ -608,7 +712,8 @@ void Operator::Update(AdvectionOperator &adv,
    }
 }
 
-void Operator::AMRUpdate(BlockVector &S,
+void Operator::AMRUpdate(const bool derefine,
+                         BlockVector &S,
                          Array<int> &offset,
                          LowOrderMethod &lom,
                          ParMesh *subcell_mesh,
@@ -616,28 +721,76 @@ void Operator::AMRUpdate(BlockVector &S,
                          ParGridFunction *xsub,
                          ParGridFunction &v_sub_gf)
 {
+   dbg("AMR Operator Update");
+
+   ParGridFunction U = u;
    pfes.Update();
+   assert(!derefine);
+   U.Update();
 
    const int vsize = pfes.GetVSize();
    MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
    offset[0] = 0;
    offset[1] = vsize;
 
-   BlockVector S_bkp(S);
+   //BlockVector S_bkp(S);
    S.Update(offset, Device::GetMemoryType());
-   const mfem::Operator *update_op = pfes.GetUpdateOperator();
-   MFEM_VERIFY(update_op,"");
-   update_op->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
+   //const mfem::Operator *update_op = pfes.GetUpdateOperator();
+   //MFEM_VERIFY(update_op,"");
+   //update_op->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
 
    u.MakeRef(&pfes, S, offset[0]);
-   u.SyncAliasMemory(S);
+   u.SyncMemory(S);
+   u = U;
 
    MFEM_VERIFY(u.Size() == vsize,"");
 
    if (xsub)
    {
+      dbg("\033[31mXSUB!!");
       xsub->ParFESpace()->Update();
       xsub->Update();
+   }
+}
+
+Mass::Mass(FiniteElementSpace &fes_, bool pa)
+   : mfem::Operator(fes_.GetVSize()), fes(fes_),
+     m(&fes)
+{
+   m.AddDomainIntegrator(new MassIntegrator);
+   if (pa) { m.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
+   m.Assemble();
+   if (!pa) { m.Finalize(); }
+   m.FormSystemMatrix(empty, M);
+
+   if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
+   else
+   {
+      if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
+      {
+         prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
+      }
+      else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
+      {
+         prec.reset(new DSmoother(*M.As<SparseMatrix>()));
+      }
+   }
+}
+
+void Mass::Mult(const Vector &x, Vector &y) const
+{
+   const SparseMatrix *R = fes.GetRestrictionMatrix();
+   if (!R)
+   {
+      M->Mult(x, y);
+   }
+   else
+   {
+      z1.SetSize(R->Height());
+      z2.SetSize(R->Height());
+      R->Mult(x, z1);
+      M->Mult(z1, z2);
+      R->MultTranspose(z2, y);
    }
 }
 

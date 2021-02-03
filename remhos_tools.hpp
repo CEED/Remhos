@@ -100,8 +100,8 @@ private:
 
    // The min and max bounds are represented as CG functions of the same order
    // as the solution, thus having 1:1 dof correspondence inside each element.
-   H1_FECollection fec_bounds;
-   ParFiniteElementSpace pfes_bounds;
+   H1_FECollection *fec_bounds;
+   ParFiniteElementSpace *pfes_bounds;
    ParGridFunction x_min, x_max;
 
    // For each DOF on an element boundary, the global index of the DOF on the
@@ -139,12 +139,15 @@ public:
                               Vector &u_min, Vector &u_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
+
+   void Update();
 };
 
 class Assembly
 {
 private:
    const int exec_mode;
+   LowOrderMethod &lom;
    const GridFunction &inflow_gf;
    mutable ParGridFunction x_gf;
    BilinearFormIntegrator *VolumeTerms;
@@ -178,6 +181,7 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
+   void Update();
 };
 
 // Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped

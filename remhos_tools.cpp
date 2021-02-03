@@ -355,10 +355,27 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
 
 DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
    : pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
-     fec_bounds(pfes.GetOrder(0), pmesh->Dimension(), BasisType::GaussLobatto),
-     pfes_bounds(pmesh, &fec_bounds),
-     x_min(&pfes_bounds), x_max(&pfes_bounds)
+     fec_bounds(nullptr),
+     pfes_bounds(nullptr),
+     x_min(), x_max()
 {
+   dbg();
+   Update();
+}
+
+void DofInfo::Update()
+{
+   dbg();
+   delete fec_bounds;
+   fec_bounds = new H1_FECollection(pfes.GetOrder(0),
+                                    pmesh->Dimension(),
+                                    BasisType::GaussLobatto);
+   delete pfes_bounds;
+   pfes_bounds = new ParFiniteElementSpace(pmesh, fec_bounds);
+
+   x_min.SetSpace(pfes_bounds);
+   x_max.SetSpace(pfes_bounds);
+
    int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
 
@@ -374,13 +391,14 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
 
    FillNeighborDofs();    // Fill NbrDof.
    FillSubcell2CellDof(); // Fill Sub2Ind.
+   dbg("done");
 }
 
 void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
                             Vector &dof_min, Vector &dof_max,
                             Array<bool> *active_el)
 {
-   GroupCommunicator &gcomm = pfes_bounds.GroupComm();
+   GroupCommunicator &gcomm = pfes_bounds->GroupComm();
    Array<int> dofsCG;
    const int NE = pfes.GetNE();
 
@@ -394,7 +412,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
 
       x_min.HostReadWrite();
       x_max.HostReadWrite();
-      pfes_bounds.GetElementDofs(i, dofsCG);
+      pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
          x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), el_min(i));
@@ -410,12 +428,12 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
 
    // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
-      dynamic_cast<const TensorBasisElement *>(pfes_bounds.GetFE(0));
+      dynamic_cast<const TensorBasisElement *>(pfes_bounds->GetFE(0));
    const Array<int> &dof_map = fe_cg->GetDofMap();
    const int ndofs = dof_map.Size();
    for (int i = 0; i < NE; i++)
    {
-      pfes_bounds.GetElementDofs(i, dofsCG);
+      pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
          dof_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
@@ -663,11 +681,18 @@ void DofInfo::FillSubcell2CellDof()
 Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
-   : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
+   : exec_mode(mode), lom(lom), inflow_gf(inflow), x_gf(&pfes),
      VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
      subcell_mesh(submesh), dofs(_dofs)
 {
+   dbg();
+   Update();
+}
+
+void Assembly::Update()
+{
+   dbg();
    Mesh *mesh = fes->GetMesh();
    int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
 
@@ -679,6 +704,7 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
 
    if (lom.subcell_scheme)
    {
+      assert(false);
       VolumeTerms = lom.VolumeTerms;
       SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
 
@@ -703,6 +729,7 @@ Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
 
          if (lom.subcell_scheme)
          {
+            assert(false);
             for (m = 0; m < dofs.numSubcells; m++)
             {
                ComputeSubcellWeights(k, m);

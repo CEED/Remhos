@@ -25,15 +25,23 @@ using namespace mfem;
 namespace mfem
 {
 
-AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
-                                     BilinearForm &_ml, Vector &_lumpedM,
+AdvectionOperator::AdvectionOperator(int size,
+                                     BilinearForm &Mbf_,
+                                     BilinearForm &_ml,
+                                     Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                                     GridFunction &pos, GridFunction *sub_pos,
-                                     GridFunction &vel, GridFunction &sub_vel,
+                                     ParBilinearForm &M_HO_,
+                                     ParBilinearForm &K_HO_,
+                                     GridFunction &pos,
+                                     GridFunction *sub_pos,
+                                     GridFunction &vel,
+                                     GridFunction &sub_vel,
                                      Assembly &_asmbl,
-                                     LowOrderMethod &_lom, DofInfo &_dofs,
-                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                                     LowOrderMethod &_lom,
+                                     DofInfo &_dofs,
+                                     HOSolver *hos,
+                                     LOSolver *los,
+                                     FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
@@ -43,13 +51,20 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    mesh_vel(vel), submesh_vel(sub_vel),
    x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { dbg(); }
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos)
+{
+   dbg();
+   assert(!lo_solver);
+   assert(!fct_solver);
+   assert(!mono_solver);
+}
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
    dbg();
    if (exec_mode == 1)
    {
+      assert(false);
       // Move the mesh positions.
       const double t = GetTime();
       add(start_mesh_pos, t, mesh_vel, mesh_pos);
@@ -118,9 +133,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    x_gf = u;
    x_gf.ExchangeFaceNbrData();
 
-   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
+   if (mono_solver)
+   {
+      assert(false);
+      mono_solver->CalcSolution(u, d_u);
+   }
    else if (fct_solver)
    {
+      assert(false);
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
       lo_solver->CalcLOSolution(u, du_LO);
@@ -131,7 +151,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (lo_solver) { assert(false); lo_solver->CalcLOSolution(u, d_u); }
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
@@ -204,34 +224,39 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
                                   ParGridFunction &u,
                                   const double mass0_u)
 {
-   int skip_zeros = 0;
+   dbg("AdvectionOperator Update");
+   const int skip_zeros = 0;
 
+   // TimeDependentOperator
    width = height = S.Size();
 
-   dbg("M");
+   dbg("Mbf");
    Mbf.FESpace()->Update();
    Mbf.Update();
    Mbf.Assemble();
    Mbf.Finalize();
 
-   dbg("m");
+   dbg("ml");
    ml.FESpace()->Update();
    ml.Update();
    ml.Assemble();
    ml.Finalize();
+
+   dbg("lumpedM");
    ml.SpMat().GetDiag(lumpedM);
+   {
+      MPI_Comm comm = u.ParFESpace()->GetParMesh()->GetComm();
+      Vector masses(lumpedM);
+      double mass_u, mass_u_loc = masses * u;
+      MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+      std::cout << setprecision(10)
+                << "AdvectionOperator, u size:" << u.Size() << std::endl
+                << "Current mass u: " << mass_u << std::endl
+                << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-4, "Error in mass!");
+   }
 
-   MPI_Comm comm = u.ParFESpace()->GetParMesh()->GetComm();
-   Vector masses(lumpedM);
-   double mass_u, mass_u_loc = masses * u;
-   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   std::cout << setprecision(10)
-             << "AdvectionOperator, u size:" << u.Size() << std::endl
-             << "Current mass u: " << mass_u << std::endl
-             << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
-   MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-4, "Error in mass!");
-
-   dbg("K");
+   dbg("Kbf");
    Kbf.ParFESpace()->Update();
    Kbf.Update();
    Kbf.Assemble(skip_zeros);
@@ -246,29 +271,48 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
    dbg("K_HO");
    K_HO.ParFESpace()->Update();
    K_HO.Update();
+   K_HO.KeepNbrBlock(true);
    K_HO.Assemble(skip_zeros);
    K_HO.Finalize(skip_zeros);
 
-   //Vector lumpedM;
-   //Vector start_mesh_pos, start_submesh_pos;
-   //GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
+   // order 1: subcell_mesh = &pmesh;
+   if (lom.subcell_scheme)
+   {
+      dbg("subcell_scheme");
+      mesh_pos.Update();
+      if (submesh_pos) { submesh_pos->Update(); }
+      mesh_vel.Update();
+      submesh_vel.Update();
+   }
+   else { dbg("!subcell_scheme"); }
 
-   //dbg("x_gf");
-   //x_gf.FESpace()->Update();
-   x_gf.Update();
+   dbg("x_gf");
+   //x_gf.Update(); // x_gf = u in adv.Mult
 
-   //double dt;
-   //Assembly &asmbl;
+   dbg("asmbl");
+   asmbl.Update();
 
-   //LowOrderMethod &lom;
-   //DofInfo &dofs;
+   dbg("lom?");
+   if (lom.SubFes0) { lom.SubFes0->Update(); }
+   if (lom.SubFes1) { lom.SubFes1->Update(); }
 
-   //HOSolver *ho_solver;
-   //ho_solver->Update();
-   //LOSolver *lo_solver;
-   //FCTSolver *fct_solver;
-   //MonolithicSolver *mono_solver;
-   dbg("done");
+   dbg("dofs?");
+   dofs.Update();
+
+   dbg("ho_solver");
+   assert(ho_solver);
+   if (ho_solver) { ho_solver->Update(); }
+
+   //dbg("lo_solver?");
+   assert(!lo_solver);
+   //lo_solver update ?
+
+   //dbg("fct_solver?");
+   assert(!fct_solver);
+   //if (fct_solver) fct_solver->UpdateTimeStep(dt);
+
+   //dbg("mono_solver?");
+   assert(!mono_solver);
 }
 
 } // namespace mfem

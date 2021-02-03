@@ -118,7 +118,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 void LocalInverseHOSolver::Update()
 {
    dbg();
-   pfes.Update();
+   /*pfes.Update();
 
    M.Update();
    M.Assemble();
@@ -126,7 +126,7 @@ void LocalInverseHOSolver::Update()
 
    K.Update();
    K.Assemble(0);
-   K.Finalize(0);
+   K.Finalize(0);*/
 }
 
 NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,

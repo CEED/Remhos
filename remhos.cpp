@@ -58,6 +58,7 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+// Boundary Conditions
 void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
                            const ParGridFunction *xsub,
                            ParGridFunction &v_sub_gf,
@@ -77,6 +78,7 @@ void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
    v_sub_coef.SetGridFunction(&v_sub_gf);
 }
 
+/// Main ///
 int main(int argc, char *argv[])
 {
    // Initialize MPI.
@@ -107,10 +109,11 @@ int main(int argc, char *argv[])
    bool amr = false;
    int amr_estimator = amr::estimator::l2zz;
    double amr_ref_threshold = 0.2;
-   double amr_jjt_threshold = 0.5;
+   double amr_jjt_ref_threshold = 0.95;
+   double amr_jjt_deref_threshold = 0.999;
    double amr_deref_threshold = 1e-8;
-   int amr_max_level = rs_levels + rp_levels + 1;
-   const int amr_nc_limit = 1; // maximum level of hanging nodes
+   int amr_max_level = 1;
+   const int amr_nc_limit = 0; // maximum level of hanging nodes
 
    int precision = 8;
    cout.precision(precision);
@@ -186,12 +189,15 @@ int main(int argc, char *argv[])
                   "AMR estimator: 0:Custom, 1:Rho, 2:ZZ, 3:Kelly");
    args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
                   "AMR refinement threshold.");
-   args.AddOption(&amr_jjt_threshold, "-aj", "--amr-jjt-threshold",
+   args.AddOption(&amr_jjt_ref_threshold, "-arj", "--amr-jjt-ref-threshold",
+                  "AMR JJt (rho) refinement threshold.");
+   args.AddOption(&amr_jjt_deref_threshold, "-adj", "--amr-jjt-deref-threshold",
                   "AMR JJt (rho) refinement threshold.");
    args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
                   "AMR refinement threshold.");
    args.AddOption(&amr_max_level, "-am", "--amr-max-level",
-                  "AMR max refined level (default to 'rs_levels + rp_levels')");
+                  "AMR max refined level "
+                  "(after the initial serial and parallel refinements)");
 
    args.Parse();
    if (!args.Good())
@@ -216,14 +222,17 @@ int main(int argc, char *argv[])
    if (amr)
    {
       MFEM_VERIFY(exec_mode == 0, "Only standard transport is supported.")
-      amr_max_level = std::max(amr_max_level, rs_levels + rp_levels + 1);
    }
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
    Mesh *mesh = new Mesh(mesh_file, 1, 1);
    const int dim = mesh->Dimension();
-   if (amr) { mesh->EnsureNCMesh(); }
+   if (amr)
+   {
+      mesh->EnsureNCMesh();
+      amr_max_level += rs_levels + rp_levels;
+   }
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
@@ -266,7 +275,8 @@ int main(int argc, char *argv[])
    }
    else
    {
-      mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
+      assert(false);
+      //mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
    }
    // Current mesh positions.
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
@@ -291,6 +301,7 @@ int main(int argc, char *argv[])
    // a deformation that is obtained by a Lagrangian simulation.
    if (exec_mode == 1)
    {
+      assert(false);/*
       ParGridFunction v(&mesh_pfes);
       VectorFunctionCoefficient vcoeff(dim, velocity_function);
       v.ProjectCoefficient(vcoeff);
@@ -309,7 +320,7 @@ int main(int argc, char *argv[])
       add(x, -1.0, x0, v_gf);
 
       // Return the mesh to the initial configuration.
-      x = x0;
+      x = x0;*/
    }
 
    // Define the discontinuous DG finite element space of the given
@@ -323,7 +334,7 @@ int main(int argc, char *argv[])
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
    {
-      assert(false);
+      assert(false);/*
       MFEM_VERIFY(btype == 2,
                   "Monotonicity treatment requires Bernstein basis.");
 
@@ -335,7 +346,7 @@ int main(int argc, char *argv[])
          lo_type = LOSolverType::None;
          fct_type = FCTSolverType::None;
          mono_type = MonolithicSolverType::None;
-      }
+      }*/
    }
 
    const bool use_subcell_RD =
@@ -353,33 +364,35 @@ int main(int argc, char *argv[])
    ParGridFunction inflow_gf(&pfes);
    if (problem_num == 7) // Convergence test: use high order projection.
    {
+      assert(false);/*
       L2_FECollection l2_fec(order, dim);
       ParFiniteElementSpace l2_fes(&pmesh, &l2_fec);
       ParGridFunction l2_inflow(&l2_fes);
       l2_inflow.ProjectCoefficient(inflow);
-      inflow_gf.ProjectGridFunction(l2_inflow);
+      inflow_gf.ProjectGridFunction(l2_inflow);*/
    }
    else { inflow_gf.ProjectCoefficient(inflow); }
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
-   ParBilinearForm m(&pfes);
-   m.AddDomainIntegrator(new MassIntegrator);
+   ParBilinearForm Mbf(&pfes);
+   Mbf.AddDomainIntegrator(new MassIntegrator);
 
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
-   ParBilinearForm k(&pfes);
+   ParBilinearForm Kbf(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      Kbf.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      assert(false);
+      //Kbf.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      //K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -395,10 +408,11 @@ int main(int argc, char *argv[])
       }
       else if (exec_mode == 1)
       {
+         assert(false);/*
          DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
          DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));*/
       }
 
       K_HO.KeepNbrBlock(true);
@@ -406,8 +420,9 @@ int main(int argc, char *argv[])
 
    if (pa)
    {
+      assert(false);/*
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
-      K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);*/
    }
 
    M_HO.Assemble();
@@ -427,11 +442,11 @@ int main(int argc, char *argv[])
    ml.Finalize();
    ml.SpMat().GetDiag(lumpedM);
 
-   m.Assemble();
-   m.Finalize();
+   Mbf.Assemble();
+   Mbf.Finalize();
    int skip_zeros = 0;
-   k.Assemble(skip_zeros);
-   k.Finalize(skip_zeros);
+   Kbf.Assemble(skip_zeros);
+   Kbf.Finalize(skip_zeros);
 
    // Store topological dof data.
    DofInfo dofs(pfes);
@@ -445,16 +460,18 @@ int main(int argc, char *argv[])
    lom.pk = nullptr;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lom.smap = SparseMatrix_Build_smap(k.SpMat());
-      lom.D = k.SpMat();
+      assert(false);
+      lom.smap = SparseMatrix_Build_smap(Kbf.SpMat());
+      lom.D = Kbf.SpMat();
 
       if (exec_mode == 0)
       {
-         ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
+         ComputeDiscreteUpwindingMatrix(Kbf.SpMat(), lom.smap, lom.D);
       }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
+      assert(false);
       lom.pk = new ParBilinearForm(&pfes);
       if (exec_mode == 0)
       {
@@ -477,8 +494,15 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_coef; }
-   else                { lom.coef = &velocity; }
+   if (exec_mode == 1)
+   {
+      assert(false);
+      lom.coef = &v_coef;
+   }
+   else
+   {
+      lom.coef = &velocity;
+   }
 
    // Face integration rule.
    const FaceElementTransformations *ft =
@@ -568,32 +592,36 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
-   LOSolver *lo_solver = NULL;
-   Array<int> lo_smap;
-   const bool time_dep = (exec_mode == 0) ? false : true;
+   LOSolver *lo_solver = nullptr;
+   //Array<int> lo_smap;
+   //const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(k.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+      assert(false);
+      /*lo_smap = SparseMatrix_Build_smap(Kbf.SpMat());
+      lo_solver = new DiscreteUpwind(pfes, Kbf.SpMat(), lo_smap,
+                                     lumpedM, asmbl, time_dep);*/
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
+      assert(false);
+      /*lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
       lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+                                     lumpedM, asmbl, time_dep);*/
    }
    else if (lo_type == LOSolverType::ResDist)
    {
-      const bool subcell_scheme = false;
-      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell_scheme, time_dep);
+      assert(false);
+      /*const bool subcell_scheme = false;
+      lo_solver = new ResidualDistribution(pfes, Kbf, asmbl, lumpedM,
+                                           subcell_scheme, time_dep);*/
    }
    else if (lo_type == LOSolverType::ResDistSubcell)
    {
-      const bool subcell_scheme = true;
-      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell_scheme, time_dep);
+      assert(false);
+      /*const bool subcell_scheme = true;
+      lo_solver = new ResidualDistribution(pfes, Kbf, asmbl, lumpedM,
+                                           subcell_scheme, time_dep);*/
    }
 
    // Setup the initial conditions.
@@ -601,19 +629,21 @@ int main(int argc, char *argv[])
    Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
+
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
    u.MakeRef(&pfes, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
-   dbg("pmesh.GetNE: %d", pmesh.GetNE());
-   dbg("u.Size: %d",u.Size());
+   dbg("pmesh.GetNE: %d, u.Size: %d", pmesh.GetNE(), u.Size());
+
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
    if (product_sync)
    {
+      assert(false);/*
       s.SetSpace(&pfes);
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
@@ -625,26 +655,29 @@ int main(int argc, char *argv[])
       s.HostRead();
       // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
-      us.SyncAliasMemory(S);
+      us.SyncAliasMemory(S);*/
    }
 
    // Smoothness indicator.
-   SmoothnessIndicator *smth_indicator = NULL;
+   SmoothnessIndicator *smth_indicator = nullptr;
    if (smth_ind_type)
    {
+      assert(false);/*
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
+                                               pfes, u, dofs);*/
    }
 
    // Setup of the high-order solver (if any).
-   HOSolver *ho_solver = NULL;
+   HOSolver *ho_solver = nullptr;
    if (ho_type == HOSolverType::Neumann)
    {
-      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
+      assert(false);
+      //ho_solver = new NeumannHOSolver(pfes, Mbf, Kbf, lumpedM, asmbl);
    }
    else if (ho_type == HOSolverType::CG)
    {
-      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
+      assert(false);
+      //ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
    }
    else if (ho_type == HOSolverType::LocalInverse)
    {
@@ -652,27 +685,27 @@ int main(int argc, char *argv[])
    }
 
    // Setup of the monolithic solver (if any).
-   MonolithicSolver *mono_solver = NULL;
-   bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
+   MonolithicSolver *mono_solver = nullptr;
+   //bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
    if (mono_type == MonolithicSolverType::ResDistMono)
    {
-      assert(false);
+      assert(false);/*
       const bool subcell_scheme = false;
-      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+      mono_solver = new MonoRDSolver(pfes, Kbf.SpMat(), Mbf.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
-                                     subcell_scheme, time_dep, mass_lim);
+                                     subcell_scheme, time_dep, mass_lim);*/
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
-      assert(false);
+      assert(false);/*
       const bool subcell_scheme = true;
-      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+      mono_solver = new MonoRDSolver(pfes, Kbf.SpMat(), Mbf.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
-                                     subcell_scheme, time_dep, mass_lim);
+                                     subcell_scheme, time_dep, mass_lim);*/
    }
 
    // Print the starting meshes and initial condition.
-   ofstream meshHO("meshHO_init.mesh");
+   /*ofstream meshHO("meshHO_init.mesh");
    meshHO.precision(precision);
    pmesh.PrintAsOne(meshHO);
    if (subcell_mesh)
@@ -683,11 +716,11 @@ int main(int argc, char *argv[])
    }
    ofstream sltn("sltn_init.gf");
    sltn.precision(precision);
-   u.SaveAsOne(sltn);
+   u.SaveAsOne(sltn);*/
 
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
-   DataCollection *dc = NULL;
+   /*DataCollection *dc = NULL;
    if (visit)
    {
       dc = new VisItDataCollection("Remhos", &pmesh);
@@ -696,7 +729,7 @@ int main(int argc, char *argv[])
       dc->SetCycle(0);
       dc->SetTime(0.0);
       dc->Save();
-   }
+   }*/
 
    socketstream sout, vis_s, vis_us;
    char vishost[] = "localhost";
@@ -729,36 +762,49 @@ int main(int argc, char *argv[])
    MPI_Comm comm = pmesh.GetComm();
    Vector masses(lumpedM);
    const double mass0_u_loc = lumpedM * u;
-   double mass0_u, mass0_us;
+   double mass0_u;//, mass0_us;
    MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    if (product_sync)
    {
-      const double mass0_us_loc = lumpedM * us;
-      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+      assert(false);
+      /*const double mass0_us_loc = lumpedM * us;
+      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);*/
+   }
+
+   if (myid == 0)
+   {
+      double mass_u, mass_u_loc = masses * u;
+      MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+      std::cout << setprecision(10)
+                << "Initial mass u: " << mass_u << std::endl
+                << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
    }
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
-   FCTSolver *fct_solver = NULL;
+   FCTSolver *fct_solver = nullptr;
    if (fct_type == FCTSolverType::FluxBased)
    {
+      assert(false);/*
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
 
       K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
       const int fct_iterations = 1;
       fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                    K_HO_smap, M_HO.SpMat(), fct_iterations);
+                                    K_HO_smap, M_HO.SpMat(), fct_iterations);*/
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      assert(false);/*
+      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);*/
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
-      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      assert(false);/*
+      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);*/
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(S.Size(), Mbf, ml, lumpedM, Kbf, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -771,10 +817,11 @@ int main(int argc, char *argv[])
 
    if (exec_mode == 1)
    {
+      assert(false);/*
       adv.SetRemapStartPos(x0, x0_sub);
 
       // For remap, the pseudo-time always evolves from 0 to 1.
-      t_final = 1.0;
+      t_final = 1.0;*/
    }
 
    ParGridFunction res = u;
@@ -793,8 +840,9 @@ int main(int argc, char *argv[])
                               mesh_order,
                               amr_estimator,
                               amr_ref_threshold,
-                              amr_jjt_threshold,
                               amr_deref_threshold,
+                              amr_jjt_ref_threshold,
+                              amr_jjt_deref_threshold,
                               amr_max_level,
                               amr_nc_limit);
    }
@@ -815,7 +863,7 @@ int main(int argc, char *argv[])
       ti++;
 
       //S has been modified, update the alias
-      u.SyncAliasMemory(S);
+      u.SyncMemory(S);
       if (product_sync) { us.SyncMemory(S); }
 
       // Monotonicity check for debug purposes mainly.
@@ -865,7 +913,7 @@ int main(int argc, char *argv[])
       {
          AMR->Update(adv, ode_solver, S, offset,
                      lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
-                     lumpedM, mass0_u);
+                     lumpedM, mass0_u, inflow_gf, inflow);
       }
 
       /// CHECK mass after AMR ///
@@ -883,8 +931,9 @@ int main(int argc, char *argv[])
 
       if (exec_mode == 1)
       {
+         assert(false);/*
          add(x0, t, v_gf, x);
-         add(x0_sub, t, v_sub_gf, *xsub);
+         add(x0_sub, t, v_sub_gf, *xsub);*/
       }
 
       const bool steady_state_problem =
@@ -897,6 +946,7 @@ int main(int argc, char *argv[])
       }
       else
       {
+         assert(false);/*
          dbg("Steady state problems");
          // Steady state problems - stop at convergence.
          double res_loc = 0.;
@@ -909,7 +959,7 @@ int main(int argc, char *argv[])
 
          residual = sqrt(residual);
          if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
-         else { res = u; }
+         else { res = u; }*/
       }
 
       if (ti == max_tsteps) { dbg("max_tsteps reached!"); done = true; }
@@ -943,12 +993,12 @@ int main(int argc, char *argv[])
             }
          }
 
-         if (visit)
+         /*if (visit)
          {
             dc->SetCycle(ti);
             dc->SetTime(t);
             dc->Save();
-         }
+         }*/
       }
    }
 
@@ -1005,10 +1055,11 @@ int main(int argc, char *argv[])
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
       if (product_sync)
       {
-         cout << setprecision(10)
-              << "Final mass us: " << mass_us << endl
-              << "Max value s:   " << s_max << endl << setprecision(6)
-              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+         /*
+           cout << setprecision(10)
+                << "Final mass us: " << mass_us << endl
+                << "Max value s:   " << s_max << endl << setprecision(6)
+                << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;*/
       }
    }
 
@@ -1067,7 +1118,7 @@ int main(int argc, char *argv[])
    delete ode_solver;
    delete mesh_fec;
    delete lom.pk;
-   delete dc;
+   //delete dc;
 
    if (order > 1)
    {

@@ -77,7 +77,7 @@ class Operator
 {
    ParMesh &pmesh;
    ParGridFunction &u;
-   ParFiniteElementSpace &pfes, &mesh_pfes;
+   ParFiniteElementSpace &pfes;//, &mesh_pfes;
 
    const int myid, dim, sdim;
 
@@ -91,7 +91,7 @@ class Operator
    ThresholdDerefiner *derefiner = nullptr;
    amr::EstimatorIntegrator *integ = nullptr;
 
-   socketstream amr_vis[3];
+   socketstream amr_vis[4];
    const char *host = "localhost";
    const int port = 19916;
    int Wx = 400, Wy = 400;
@@ -103,8 +103,9 @@ class Operator
       int order, mesh_order;
       int estimator;
       double ref_threshold;
-      double jjt_threshold;
       double deref_threshold;
+      double jjt_ref_threshold;
+      double jjt_deref_threshold;
       int max_level;
       int nc_limit;
    } opt;
@@ -116,8 +117,12 @@ public:
             ParGridFunction &sol,
             int order, int mesh_order,
             int estimator,
-            double ref_t, double jac_t, double deref_t,
-            int max_level, int nc_limit);
+            double ref_t,
+            double deref_t,
+            double jac_ref_t,
+            double jac_deref_t,
+            int max_level,
+            int nc_limit);
 
    ~Operator();
 
@@ -133,20 +138,41 @@ public:
                ParGridFunction *xsub,
                ParGridFunction &v_sub_gf,
                Vector &lumpedM,
-               const double mass0_u);
+               const double mass0_u,
+               ParGridFunction &inflow_gf,
+               FunctionCoefficient &inflow);
 
 private:
    void AMRUpdateEstimatorCustom(Array<Refinement>&, Vector&);
    void AMRUpdateEstimatorJJt(Array<Refinement>&, Vector &);
    void AMRUpdateEstimatorZZKelly(bool &mesh_refined);
 
-   void AMRUpdate(BlockVector &S,
+   void AMRUpdate(const bool derefine,
+                  BlockVector &S,
                   Array<int> &offset,
                   LowOrderMethod &lom,
                   ParMesh *subcell_mesh,
                   ParFiniteElementSpace *pfes_sub,
                   ParGridFunction *xsub,
                   ParGridFunction &v_sub_gf);
+};
+
+struct Mass : mfem::Operator
+{
+   FiniteElementSpace &fes;
+   BilinearForm m;
+   OperatorHandle M;
+   std::unique_ptr<Solver> prec;
+   CGSolver cg;
+   Array<int> empty;
+
+   mutable Vector z1, z2;
+
+   Mass(FiniteElementSpace &fes_, bool pa=true);
+
+   virtual void Mult(const Vector &u, Vector &Mu) const override;
+
+   void Solve(const Vector &Mu, Vector &u) const;
 };
 
 } // namespace amr
