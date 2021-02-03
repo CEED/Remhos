@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "remhos.hpp"
+#include "linalg/sparsemat.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -712,6 +713,17 @@ void Operator::Update(AdvectionOperator &adv,
    }
 }
 
+SparseMatrix *IdentityMatrix(int n)
+{
+   SparseMatrix *I = new SparseMatrix(n);
+   for (int i=0; i<n; ++i)
+   {
+      I->Set(i, i, 1.0);
+   }
+   I->Finalize();
+   return I;
+}
+
 void Operator::AMRUpdate(const bool derefine,
                          BlockVector &S,
                          Array<int> &offset,
@@ -722,28 +734,148 @@ void Operator::AMRUpdate(const bool derefine,
                          ParGridFunction &v_sub_gf)
 {
    dbg("AMR Operator Update");
+   dbg("refined pfes:%d", pfes.GetVSize());
 
-   ParGridFunction U = u;
-   pfes.Update();
-   assert(!derefine);
-   U.Update();
 
-   const int vsize = pfes.GetVSize();
-   MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
-   offset[0] = 0;
-   offset[1] = vsize;
+   if (!derefine)
+   {
+      Vector tmp;
+      u.GetTrueDofs(tmp);
+      u.SetFromTrueDofs(tmp);
 
-   //BlockVector S_bkp(S);
-   S.Update(offset, Device::GetMemoryType());
-   //const mfem::Operator *update_op = pfes.GetUpdateOperator();
-   //MFEM_VERIFY(update_op,"");
-   //update_op->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
+      dbg("pfes.Update");
+      pfes.Update();
+      dbg("updated pfes:%d", pfes.GetVSize());
 
-   u.MakeRef(&pfes, S, offset[0]);
-   u.SyncMemory(S);
-   u = U;
+      const int vsize = pfes.GetVSize();
+      MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
+      offset[0] = 0;
+      offset[1] = vsize;
 
-   MFEM_VERIFY(u.Size() == vsize,"");
+      dbg("S_bkp");
+      BlockVector S_bkp(S);
+      S.Update(offset, Device::GetMemoryType());
+
+      dbg("GetUpdateOperator");
+      const mfem::Operator *R = pfes.GetUpdateOperator();
+      dbg("R: %dx%d", R->Width(), R->Height());
+
+      dbg("R->Mult");
+      R->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
+
+      u.MakeRef(&pfes, S, offset[0]);
+      MFEM_VERIFY(u.Size() == vsize,"");
+      u.SyncMemory(S);
+   }
+   else
+   {
+      dbg("DEREFINE");
+      Vector tmp;
+      u.GetTrueDofs(tmp);
+      u.SetFromTrueDofs(tmp);
+      ParGridFunction U = u;
+
+      //pfes.SetUpdateOperatorType(mfem::Operator::Type::Hypre_ParCSR);
+
+      //Mass M_orig(pfes, false);
+      GridFunction R_one(&pfes);
+      GridFunction R_gf(&pfes);
+      GridFunction M_R_gf(&pfes);
+
+      Mass M_refine(pfes);
+
+      dbg("pfes:%d", pfes.GetVSize());
+      dbg("Update");
+      pfes.Update();
+      dbg("updated pfes:%d", pfes.GetVSize());
+
+      Mass M_coarse(pfes);
+
+      const int vsize = pfes.GetVSize();
+      MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
+      offset[0] = 0;
+      offset[1] = vsize;
+
+      dbg("S:%d",S.Size());
+      BlockVector S_bkp(S);
+      dbg("S_bkp:%d",S_bkp.Size());
+
+      S.Update(offset, Device::GetMemoryType());
+
+
+      const mfem::Operator *R = pfes.GetUpdateOperator();
+      assert(R);
+      dbg(" R: %dx%d", R->Width(), R->Height());
+      //R->PrintMatlab(std::cout);
+
+      SparseMatrix Rt(R->Width(), R->Height());
+      dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
+      {
+         const int n = R->Width();
+         const int m = R->Height();
+         Vector x(n), y(m);
+         x = 0.0;
+
+         //std::out << setiosflags(ios::scientific | ios::showpos);
+         for (int i = 0; i < n; i++)
+         {
+            x(i) = 1.0;
+            R->Mult(x, y);
+            for (int j = 0; j < m; j++)
+            {
+               if (y(j))
+               {
+                  //dbg("[%d,%d] %f",j,i,y(j));
+                  Rt.Set(i,j,y(j));
+               }
+            }
+            x(i) = 0.0;
+         }
+      }
+      dbg("Finalize");
+      Rt.Finalize();
+      dbg("PrintMatlab");
+      //Rt.PrintMatlab(std::cout);
+      //assert(false);
+
+      //OperatorHandle Th;
+      //pfes.GetUpdateOperator(Th);
+      //HypreParMatrix *Rth = Th.As<HypreParMatrix>();
+      //assert(Rth);
+      //dbg("Rth: %dx%d", Rth->Width(), Rth->Height());
+      //HypreParMatrix *Rtt = Rth->Transpose();
+      //assert(Rtt);
+      //Rtt->Print("Rtt");
+      //fflush(0);
+      //assert(false);
+      //dbg("Rtt: %dx%d", Rtt->Width(), Rtt->Height());
+      //assert(false);
+
+      dbg("U size:%d", U.Size());
+      dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
+      dbg("S_bkp.GetBlock(0) size:%d", S_bkp.GetBlock(0).Size());
+
+      dbg("R->Mult");
+      R->Mult(U, S.GetBlock(0));
+
+      dbg("u.MakeRef");
+      u.MakeRef(&pfes, S, offset[0]);
+      MFEM_VERIFY(u.Size() == vsize,"");
+      u.SyncMemory(S);
+      //u.GetTrueDofs(tmp);
+      //u.SetFromTrueDofs(tmp);
+
+      dbg("AMR_P");
+      dbg(" R: %dx%d", R->Width(), R->Height());
+      dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
+      AMR_P P(M_refine,
+              M_coarse,
+              *R, Rt);
+      dbg("u = 0.0;");
+      u = 0.0;
+      dbg("refined_gf:%d, coarse_gf:%d", U.Size(),  u.Size());
+      P.Mult(U, u);
+   }
 
    if (xsub)
    {
@@ -753,45 +885,96 @@ void Operator::AMRUpdate(const bool derefine,
    }
 }
 
-Mass::Mass(FiniteElementSpace &fes_, bool pa)
-   : mfem::Operator(fes_.GetVSize()), fes(fes_),
-     m(&fes)
+Mass::Mass(ParFiniteElementSpace &fes_, bool pa)
+   : mfem::Operator(fes_.GetTrueVSize()),
+     fes(fes_),
+     m(&fes),
+     cg(MPI_COMM_WORLD)
 {
+   dbg("fes_.GetVSize():%d",fes_.GetVSize());
    m.AddDomainIntegrator(new MassIntegrator);
-   if (pa) { m.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
+   //if (pa) { m.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
    m.Assemble();
    if (!pa) { m.Finalize(); }
    m.FormSystemMatrix(empty, M);
-
-   if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
-   else
-   {
-      if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
+   /*
+      if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
+      else
       {
-         prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
-      }
-      else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
-      {
-         prec.reset(new DSmoother(*M.As<SparseMatrix>()));
-      }
-   }
+         if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
+         {
+            prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
+         }
+         else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
+         {
+            prec.reset(new DSmoother(*M.As<SparseMatrix>()));
+         }
+      }*/
 }
 
 void Mass::Mult(const Vector &x, Vector &y) const
 {
-   const SparseMatrix *R = fes.GetRestrictionMatrix();
-   if (!R)
+   dbg("[Mass]");
+   //const SparseMatrix *R = fes.GetRestrictionMatrix();
+   //const Operator *P = fes.GetProlongationMatrix();
+   //if (!R)
    {
+      dbg("!R");
       M->Mult(x, y);
    }
-   else
+   /*else
    {
+      assert(P);
+      dbg("[Mass] R");
       z1.SetSize(R->Height());
       z2.SetSize(R->Height());
-      R->Mult(x, z1);
+
+      dbg("[Mass] R->Mult");
+      P->MultTranspose(x, z1);
+      dbg("[Mass] M->Mult");
       M->Mult(z1, z2);
+      dbg("[Mass] R->MultTranspose");
       R->MultTranspose(z2, y);
-   }
+      dbg("[Mass] done");
+   }*/
+}
+
+
+AMR_P::AMR_P(Mass &M_refine,
+             Mass &M_coarse,
+             const mfem::Operator &R,
+             const mfem::Operator &Rt)
+   : M_refine(M_refine),
+     M_coarse(M_coarse),
+     R(R),
+     Rt(Rt),
+     rap(Rt, M_refine, Rt),
+     cg(MPI_COMM_WORLD)
+{
+   cg.SetRelTol(1e-14);
+   cg.SetAbsTol(0.0);
+   cg.SetMaxIter(1000);
+   cg.SetPrintLevel(1);
+   cg.SetOperator(rap);
+   //cg.SetPreconditioner(*M_coarse.prec);
+}
+
+void AMR_P::Mult(const Vector &x, Vector &y) const
+{
+   dbg("[AMR_P::Mult]");
+   z1.SetSize(x.Size());
+   z2.SetSize(Rt.Width());
+
+   dbg("[AMR_P::Mult] M_refine.Mult");
+   M_refine.Mult(x, z1);
+
+   dbg("[AMR_P::Mult] R->MultTranspose");
+   Rt.MultTranspose(z1, z2);
+
+   dbg("[AMR_P::Mult] cg.Mult");
+   cg.Mult(z2, y);
+
+   dbg("AMR_P::Mult done");
 }
 
 } // namespace amr

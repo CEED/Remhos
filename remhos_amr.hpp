@@ -159,20 +159,37 @@ private:
 
 struct Mass : mfem::Operator
 {
-   FiniteElementSpace &fes;
-   BilinearForm m;
+   ParFiniteElementSpace &fes;
+   ParBilinearForm m;
    OperatorHandle M;
-   std::unique_ptr<Solver> prec;
+   //std::unique_ptr<Solver> prec;
    CGSolver cg;
    Array<int> empty;
 
    mutable Vector z1, z2;
 
-   Mass(FiniteElementSpace &fes_, bool pa=true);
+   Mass(ParFiniteElementSpace &fes_, bool pa=true);
 
    virtual void Mult(const Vector &u, Vector &Mu) const override;
 
    void Solve(const Vector &Mu, Vector &u) const;
+};
+
+struct AMR_P : mfem::Operator
+{
+   Mass &M_refine, &M_coarse;
+   const mfem::Operator &R;
+   const mfem::Operator &Rt;
+   RAPOperator rap;
+   CGSolver cg;
+
+   mutable Vector z1, z2;
+
+   AMR_P(Mass &M_refine, Mass &M_coarse,
+         const mfem::Operator &R,
+         const mfem::Operator &Rt);
+
+   void Mult(const Vector &x, Vector &y) const override;
 };
 
 } // namespace amr
