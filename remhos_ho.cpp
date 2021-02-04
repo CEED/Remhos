@@ -59,7 +59,7 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    M_solver.SetPreconditioner(*M_prec);
    M_solver.SetRelTol(1e-8);
    M_solver.SetAbsTol(0.0);
-   M_solver.SetMaxIter(50);
+   M_solver.SetMaxIter(500);
    M_solver.SetPrintLevel(0);
 
    M_solver.Mult(rhs, du);
