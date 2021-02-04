@@ -159,7 +159,10 @@ private:
 
 struct Mass : mfem::Operator
 {
-   ParFiniteElementSpace &fes;
+   //ParFiniteElementSpace fes;
+   const int vsize;
+   const SparseMatrix *R_ptr;
+   DenseMatrix *R;
    ParBilinearForm m;
    OperatorHandle M;
    //std::unique_ptr<Solver> prec;
@@ -168,7 +171,7 @@ struct Mass : mfem::Operator
 
    mutable Vector z1, z2;
 
-   Mass(ParFiniteElementSpace &fes_, bool pa=true);
+   Mass(ParFiniteElementSpace &fes_, bool pa=false);
 
    virtual void Mult(const Vector &u, Vector &Mu) const override;
 

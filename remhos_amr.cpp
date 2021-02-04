@@ -398,9 +398,9 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs,
 
       Vector B, X;
       OperatorPtr A;
-      Array<int> ess_tdof_list;
-      a.FormLinearSystem(ess_tdof_list, rho_ho, b, A, X, B);
-      OperatorJacobiSmoother M(a, ess_tdof_list);
+      Array<int> no_bc;
+      a.FormLinearSystem(no_bc, rho_ho, b, A, X, B);
+      OperatorJacobiSmoother M(a, no_bc);
       const int print_iter = 0;
       const int max_num_iter = 200;
       const double RTOL = 1e-18, ATOL = 0.0;
@@ -482,33 +482,8 @@ void Operator::AMRUpdateEstimatorJJt(Array<Refinement> &refs,
       const double rho = minW / maxW;
       //dbg("#%d rho:%f", e, rho);
       assert(rho > 0.0 && rho <= 1.0);
-      /*for (int q = 0; q < nip; q++) // nip == 4
-      {
-         const double w = elemvect[q];
-         elemvect[q] = 1.0 - w / rho;
-      }*/
       elemvect = rho;
       rho_lo.SetSubVector(dofs, elemvect);
-      /*if (vis && e == 0)
-      {
-         static bool newly_opened = false;
-         if (myid == 0)
-         {
-            if (!amr_vis[3].is_open() || !amr_vis[3])
-            {
-               amr_vis[3].open(host, port);
-               amr_vis[3].precision(8);
-            }
-         }
-         newly_opened = true;
-         amr_vis[3] << "mesh\n";
-         amr_vis[3] << quad;
-         //amr_vis[3] << "keys gmA\n";
-         amr_vis[3] << std::endl;
-
-         const unsigned int microseconds = 1000000;
-         usleep(microseconds);
-      }*/
    }
 
    P.Mult(rho_lo, rho_rf);
@@ -773,42 +748,42 @@ void Operator::AMRUpdate(const bool derefine,
       Vector tmp;
       u.GetTrueDofs(tmp);
       u.SetFromTrueDofs(tmp);
+
       ParGridFunction U = u;
 
-      //pfes.SetUpdateOperatorType(mfem::Operator::Type::Hypre_ParCSR);
+      //Mass M_refine(pfes);
 
-      //Mass M_orig(pfes, false);
-      GridFunction R_one(&pfes);
-      GridFunction R_gf(&pfes);
-      GridFunction M_R_gf(&pfes);
-
-      Mass M_refine(pfes);
-
+      //pfes.SetUpdateOperatorType(mfem::Operator::Type::MFEM_SPARSEMAT);
       dbg("pfes:%d", pfes.GetVSize());
       dbg("Update");
       pfes.Update();
       dbg("updated pfes:%d", pfes.GetVSize());
 
-      Mass M_coarse(pfes);
+      //Mass M_coarse(pfes);
 
       const int vsize = pfes.GetVSize();
       MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
       offset[0] = 0;
       offset[1] = vsize;
 
-      dbg("S:%d",S.Size());
-      BlockVector S_bkp(S);
-      dbg("S_bkp:%d",S_bkp.Size());
+      dbg("S:%d", S.Size());
 
       S.Update(offset, Device::GetMemoryType());
-
 
       const mfem::Operator *R = pfes.GetUpdateOperator();
       assert(R);
       dbg(" R: %dx%d", R->Width(), R->Height());
+      assert(R->GetType() == mfem::Operator::ANY_TYPE);
       //R->PrintMatlab(std::cout);
 
-      SparseMatrix Rt(R->Width(), R->Height());
+      /*OperatorHandle Th;
+      pfes.GetUpdateOperator(Th);
+      SparseMatrix *Rth = Th.As<SparseMatrix>();
+      assert(Rth);
+      dbg("\033[31mRth: %dx%d, type:%d", Rth->Width(), Rth->Height(), Rth->GetType());
+      assert(Rth->GetType() == mfem::Operator::MFEM_SPARSEMAT);*/
+
+      /*SparseMatrix Rt(R->Width(), R->Height());
       dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
       {
          const int n = R->Width();
@@ -837,23 +812,11 @@ void Operator::AMRUpdate(const bool derefine,
       dbg("PrintMatlab");
       //Rt.PrintMatlab(std::cout);
       //assert(false);
+      */
 
-      //OperatorHandle Th;
-      //pfes.GetUpdateOperator(Th);
-      //HypreParMatrix *Rth = Th.As<HypreParMatrix>();
-      //assert(Rth);
-      //dbg("Rth: %dx%d", Rth->Width(), Rth->Height());
-      //HypreParMatrix *Rtt = Rth->Transpose();
-      //assert(Rtt);
-      //Rtt->Print("Rtt");
-      //fflush(0);
-      //assert(false);
-      //dbg("Rtt: %dx%d", Rtt->Width(), Rtt->Height());
-      //assert(false);
-
-      dbg("U size:%d", U.Size());
-      dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
-      dbg("S_bkp.GetBlock(0) size:%d", S_bkp.GetBlock(0).Size());
+      //dbg("U size:%d", U.Size());
+      //dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
+      //dbg("S_bkp.GetBlock(0) size:%d", S_bkp.GetBlock(0).Size());
 
       dbg("R->Mult");
       R->Mult(U, S.GetBlock(0));
@@ -862,19 +825,20 @@ void Operator::AMRUpdate(const bool derefine,
       u.MakeRef(&pfes, S, offset[0]);
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
-      //u.GetTrueDofs(tmp);
-      //u.SetFromTrueDofs(tmp);
 
-      dbg("AMR_P");
-      dbg(" R: %dx%d", R->Width(), R->Height());
-      dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
-      AMR_P P(M_refine,
-              M_coarse,
-              *R, Rt);
-      dbg("u = 0.0;");
-      u = 0.0;
-      dbg("refined_gf:%d, coarse_gf:%d", U.Size(),  u.Size());
-      P.Mult(U, u);
+      /*{
+         dbg("AMR_P");
+         dbg(" R: %dx%d", R->Width(), R->Height());
+         dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
+         AMR_P P(M_refine, M_coarse, *R, Rt);
+         dbg("u = 0.0;");
+         u = 0.0;
+         dbg("refined_gf:%d, coarse_gf:%d", U.Size(),  u.Size());
+         P.Mult(U, u);
+      }*/
+
+      u.GetTrueDofs(tmp);
+      u.SetFromTrueDofs(tmp);
    }
 
    if (xsub)
@@ -885,17 +849,22 @@ void Operator::AMRUpdate(const bool derefine,
    }
 }
 
-Mass::Mass(ParFiniteElementSpace &fes_, bool pa)
-   : mfem::Operator(fes_.GetTrueVSize()),
-     fes(fes_),
+Mass::Mass(ParFiniteElementSpace &fes, bool pa)
+   : mfem::Operator(fes.GetVSize()),
+     //fes(fes_),
+     vsize(fes.GetVSize()),
+     R_ptr(fes.GetRestrictionMatrix()),
+     R((assert(R_ptr),R_ptr->ToDenseMatrix())),
      m(&fes),
      cg(MPI_COMM_WORLD)
 {
-   dbg("fes_.GetVSize():%d",fes_.GetVSize());
+   dbg("[MASS] VSize:%d",vsize);
+
    m.AddDomainIntegrator(new MassIntegrator);
-   //if (pa) { m.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
    m.Assemble();
+
    if (!pa) { m.Finalize(); }
+
    m.FormSystemMatrix(empty, M);
    /*
       if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
@@ -914,29 +883,30 @@ Mass::Mass(ParFiniteElementSpace &fes_, bool pa)
 
 void Mass::Mult(const Vector &x, Vector &y) const
 {
-   dbg("[Mass]");
-   //const SparseMatrix *R = fes.GetRestrictionMatrix();
-   //const Operator *P = fes.GetProlongationMatrix();
-   //if (!R)
+   dbg("[Mass] vsize:%d", vsize);
+   assert(R);
+   if (!R)
    {
       dbg("!R");
       M->Mult(x, y);
    }
-   /*else
+   else
    {
-      assert(P);
       dbg("[Mass] R");
       z1.SetSize(R->Height());
       z2.SetSize(R->Height());
 
+      dbg("R:%dx%d", R->Height(), R->Width());
+      dbg("x:%d, z1:%d, y:%d", x.Size(), z1.Size(), y.Size());
       dbg("[Mass] R->Mult");
-      P->MultTranspose(x, z1);
+      R->Mult(x, z1);
+
       dbg("[Mass] M->Mult");
       M->Mult(z1, z2);
       dbg("[Mass] R->MultTranspose");
       R->MultTranspose(z2, y);
       dbg("[Mass] done");
-   }*/
+   }
 }
 
 
@@ -951,6 +921,8 @@ AMR_P::AMR_P(Mass &M_refine,
      rap(Rt, M_refine, Rt),
      cg(MPI_COMM_WORLD)
 {
+   dbg("%d %d", M_refine.vsize, M_coarse.vsize);
+   assert(M_refine.vsize > M_coarse.vsize);
    cg.SetRelTol(1e-14);
    cg.SetAbsTol(0.0);
    cg.SetMaxIter(1000);
