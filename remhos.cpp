@@ -37,6 +37,9 @@
 using namespace std;
 using namespace mfem;
 
+const int Wx = 800, Wy = 300; // window position
+const int Ww = 640, Wh = 640; // window size
+
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
 int problem_num = 0;
@@ -113,7 +116,8 @@ int main(int argc, char *argv[])
    double amr_jjt_deref_threshold = 0.999;
    double amr_deref_threshold = 1e-8;
    int amr_max_level = 1;
-   const int amr_nc_limit = 4; // maximum level of hanging nodes
+   // maximum level of hanging nodes, 0 means unlimited
+   const int amr_nc_limit = 0;
 
    int precision = 8;
    cout.precision(precision);
@@ -267,6 +271,7 @@ int main(int argc, char *argv[])
                          dynamic_cast<const L2_FECollection *>
                          (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh.SetCurvature(mesh_order, periodic);
+   //pmesh.EnsureNCMesh();
 
    FiniteElementCollection *mesh_fec;
    if (periodic)
@@ -744,11 +749,11 @@ int main(int argc, char *argv[])
       vis_s.precision(8);
       vis_us.precision(8);
 
-      int Wx = 0, Wy = 0; // window position
-      const int Ww = 400, Wh = 400; // window size
       u.HostRead();
       s.HostRead();
-      VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      VisualizeField(sout, vishost, visport,
+                     u, "Solution u",
+                     Wx, Wy, Ww, Wh, "gAmRj");
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -771,13 +776,15 @@ int main(int argc, char *argv[])
       MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);*/
    }
 
-   if (myid == 0)
    {
       double mass_u, mass_u_loc = masses * u;
       MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-      std::cout << setprecision(10)
-                << "Initial mass u: " << mass_u << std::endl
-                << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      if (myid == 0)
+      {
+         std::cout << setprecision(10)
+                   << "Initial mass u: " << mass_u << std::endl
+                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      }
    }
 
    // Setup of the FCT solver (if any).
@@ -849,7 +856,7 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   int depth = GetMeshDepth(pmesh);
+   int depth = amr ? GetMeshDepth(pmesh) : 0;
    for (int ti = 0; !done;)
    {
       dbg("\033[31m###########################");
@@ -869,10 +876,11 @@ int main(int argc, char *argv[])
          dbg("\t\033[33m######## AMR LOOP ########");
          for (int ref_it = 1; ; ref_it++)
          {
-            const int new_depth = GetMeshDepth(pmesh);
-            if (new_depth > depth)
+            const int new_depth = mfem::GetMeshDepth(pmesh);
+            if (new_depth > depth) { dt /= 2.0; }
+            if (new_depth < depth) { dt *= 2.0; }
+            if (new_depth != depth)
             {
-               dt /= 2.0;
                double dt_real = min(dt, t_final - t);
                adv.SetDt(dt_real);
                depth = new_depth;
@@ -889,17 +897,25 @@ int main(int argc, char *argv[])
             AMR->Update(adv, ode_solver, S, offset,
                         lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
                         lumpedM, mass0_u, inflow_gf, inflow);
-
             /*if (visualization)
             {
                MPI_Barrier(pmesh.GetComm());
                u.HostRead();
-               int Wx = 0, Wy = 0; // window position
-               int Ww = 400, Wh = 400; // window size
                VisualizeField(sout, vishost, visport, u, "Solution",
                               Wx, Wy, Ww, Wh);
             }*/
          }
+         /*if (myid == 0)
+         {
+            ml.SpMat().GetDiag(lumpedM);
+            masses = lumpedM;
+            double mass_u, mass_u_loc = masses * u;
+            MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+            std::cout << setprecision(10)
+                      << "Before DEREFINMENT, u size:" << u.Size() << std::endl
+                      << "Current mass u: " << mass_u << std::endl
+                      << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+         }*/
          assert (!AMR->Refined());
          if (AMR->DeRefined())
          {
@@ -911,8 +927,6 @@ int main(int argc, char *argv[])
             {
                MPI_Barrier(pmesh.GetComm());
                u.HostRead();
-               int Wx = 0, Wy = 0; // window position
-               int Ww = 400, Wh = 400; // window size
                VisualizeField(sout, vishost, visport, u, "Solution",
                               Wx, Wy, Ww, Wh);
             }*/
@@ -1039,8 +1053,6 @@ int main(int argc, char *argv[])
             MPI_Barrier(pmesh.GetComm());
             u.HostRead();
 
-            int Wx = 0, Wy = 0; // window position
-            int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution",
                            Wx, Wy, Ww, Wh);
             if (product_sync)

@@ -130,7 +130,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u.MakeRef(Y, 0, size);
    Vector du_HO(u.Size()), du_LO(u.Size());
 
+   dbg("x_gf");
    x_gf = u;
+   dbg("ExchangeFaceNbrData");
    x_gf.ExchangeFaceNbrData();
 
    if (mono_solver)
@@ -152,7 +154,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
    else if (lo_solver) { assert(false); lo_solver->CalcLOSolution(u, d_u); }
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+   else if (ho_solver)
+   {
+      dbg("CalcHOSolution");
+      ho_solver->CalcHOSolution(u, d_u);
+   }
    else { MFEM_ABORT("No solver was chosen."); }
 
    d_u.SyncAliasMemory(Y);
@@ -253,7 +259,7 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
                 << "AdvectionOperator, u size:" << u.Size() << std::endl
                 << "Current mass u: " << mass_u << std::endl
                 << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
-      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-3, "Error in mass!");
+      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-4, "Error in mass!");
    }
 
    dbg("Kbf");

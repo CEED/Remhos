@@ -158,8 +158,7 @@ private:
    void AMRUpdateEstimatorJJt();
    void AMRUpdateEstimatorZZKelly();
 
-   void AMRUpdate(const bool derefine,
-                  BlockVector &S,
+   void AMRUpdate(BlockVector &S,
                   Array<int> &offset,
                   LowOrderMethod &lom,
                   ParMesh *subcell_mesh,
@@ -192,16 +191,14 @@ struct Mass : mfem::Operator
 struct AMR_P : mfem::Operator
 {
    Mass &M_refine, &M_coarse;
-   const mfem::Operator &R;
-   const mfem::Operator &Rt;
+   const mfem::Operator &P;
    RAPOperator rap;
    CGSolver cg;
 
    mutable Vector z1, z2;
 
    AMR_P(Mass &M_refine, Mass &M_coarse,
-         const mfem::Operator &R,
-         const mfem::Operator &Rt);
+         const mfem::Operator &P);
 
    void Mult(const Vector &x, Vector &y) const override;
 };

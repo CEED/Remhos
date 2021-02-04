@@ -301,8 +301,8 @@ Operator::Operator(ParFiniteElementSpace &pfes,
 
    if (estimator)
    {
-      const double hysteresis = 0.015;
-      const double max_elem_error = 1.0e-3;
+      const double hysteresis = 0.01;
+      const double max_elem_error = 1.e-3;
       refiner = new ThresholdRefiner(*estimator);
       refiner->SetTotalErrorFraction(0.0); // use purely local threshold
       refiner->SetLocalErrorGoal(max_elem_error);
@@ -346,13 +346,27 @@ void Operator::Apply()
 
    switch (opt.estimator)
    {
-      case amr::estimator::custom: { AMRUpdateEstimatorCustom(); break; }
-      case amr::estimator::jjt:    { AMRUpdateEstimatorJJt(); break; }
-      case amr::estimator::zz:
-      case amr::estimator::l2zz:
-      case amr::estimator::kelly:  { AMRUpdateEstimatorZZKelly(); break; }
+      case estimator::custom: { AMRUpdateEstimatorCustom(); break; }
+      case estimator::jjt:    { AMRUpdateEstimatorJJt(); break; }
+      case estimator::zz:
+      case estimator::l2zz:
+      case estimator::kelly:  { AMRUpdateEstimatorZZKelly(); break; }
       default: MFEM_ABORT("Unknown AMR estimator!");
    }
+
+   const bool JJt = opt.estimator == estimator::jjt;
+   if (!JJt) { dbg("mesh_refined/derefined set by ZZ/Kelly"); return; }
+
+   const int nref = pmesh.ReduceInt(refs.Size());
+   mesh_refined = nref > 0;
+   dbg("mesh_refined: %s", mesh_refined ? "yes" : "no");
+
+   mesh_derefined = !mesh_refined &&
+                    pmesh.GetLastOperation() == Mesh::REFINE &&
+                    derefs.Max() > 0.0;
+   dbg("JJt: %s, derefs.Max():%f", JJt ? "yes" : "no", derefs.Max());
+   dbg("mesh_derefined: %s", mesh_derefined ? "yes" : "no");
+   //assert(false);
 }
 
 /// Refined
@@ -390,9 +404,9 @@ void Operator::Update(AdvectionOperator &adv,
    const int nref = pmesh.ReduceInt(refs.Size());
    dbg("nref:%d",nref);
 
-   if (nref > 0 && !mesh_refined)
+   if (nref > 0 && mesh_refined)
    {
-      dbg("!ZZ/Kelly GeneralRefinement");
+      dbg("JJt GeneralRefinement");
       constexpr int non_conforming = 1;
       pmesh.GetNodes()->HostReadWrite();
       pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
@@ -407,89 +421,87 @@ void Operator::Update(AdvectionOperator &adv,
    //else if (opt.estimator == amr::estimator::custom &&
    //         opt.deref_threshold >= 0.0 && !mesh_refined)
    /// JJt deref
-   else if (opt.estimator == amr::estimator::jjt
-            && !mesh_refined
-            && pmesh.GetLastOperation() == Mesh::REFINE)
+   else if (mesh_derefined && derefs.Max() > 0.0)
    {
-      const bool deref_tagged = derefs.Max() > 0.0;
+      dbg("Got at least one (%f), NE:%d!", derefs.Max(), pmesh.GetNE());
 
-      if (deref_tagged)
+      Table coarse_to_fine;
+      Table ref_type_to_matrix;
+      Array<int> coarse_to_ref_type;
+      Array<Geometry::Type> ref_type_to_geom;
+      const CoarseFineTransformations &rtrans =
+         pmesh.GetRefinementTransforms();
+      rtrans.GetCoarseToFineMap(pmesh,
+                                coarse_to_fine,
+                                coarse_to_ref_type,
+                                ref_type_to_matrix,
+                                ref_type_to_geom);
+      Array<int> tabrow;
+      const double threshold = 1.0;
+
+      Vector local_err(pmesh.GetNE());
+      local_err = 2.0 * threshold; // 8.0 in aggregated error
+
+      const int op = 1; // 0:min, 1:sum, 2:max
+      int n_derefs = 0;
+
+      assert(derefs.Size() == pmesh.GetNE());
+      assert(local_err.Size() == pmesh.GetNE());
+
+      dbg("coarse_to_fine:%d",coarse_to_fine.Size());
+
+      for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
       {
-         dbg("Got at least one (%f), NE:%d!", derefs.Max(), pmesh.GetNE());
-
-         Table coarse_to_fine;
-         Table ref_type_to_matrix;
-         Array<int> coarse_to_ref_type;
-         Array<Geometry::Type> ref_type_to_geom;
-         const CoarseFineTransformations &rtrans =
-            pmesh.GetRefinementTransforms();
-         rtrans.GetCoarseToFineMap(pmesh,
-                                   coarse_to_fine,
-                                   coarse_to_ref_type,
-                                   ref_type_to_matrix,
-                                   ref_type_to_geom);
-         Array<int> tabrow;
-         const double threshold = 1.0;
-
-         Vector local_err(pmesh.GetNE());
-         local_err = 2.0 * threshold; // 8.0 in aggregated error
-
-         const int op = 1; // 0:min, 1:sum, 2:max
-         int n_derefs = 0;
-
-         assert(derefs.Size() == pmesh.GetNE());
-         assert(local_err.Size() == pmesh.GetNE());
-
-         dbg("coarse_to_fine:%d",coarse_to_fine.Size());
-
-         for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
+         coarse_to_fine.GetRow(coarse_e, tabrow);
+         const int tabsz = tabrow.Size();
+         dbg("Scanning element #%d (%d)", coarse_e, tabsz);
+         //dbg("tabrow:"); tabrow.Print();
+         if (tabsz != 4) { continue; }
+         bool all_four = true;
+         for (int j = 0; j < tabrow.Size(); j++)
          {
-            coarse_to_fine.GetRow(coarse_e, tabrow);
-            const int tabsz = tabrow.Size();
-            dbg("Scanning element #%d (%d)", coarse_e, tabsz);
-            //dbg("tabrow:"); tabrow.Print();
-            if (tabsz != 4) { continue; }
-            bool all_four = true;
-            for (int j = 0; j < tabrow.Size(); j++)
-            {
-               const int fine_e = tabrow[j];
-               const double rho = derefs(fine_e);
-               dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
-               all_four &= rho > opt.jjt_deref_threshold;
-            }
-
-            if (!all_four) { continue; }
-            dbg("\033[31mDERFINE #%d",coarse_e);
-            for (int j = 0; j < tabrow.Size(); j++)
-            {
-               const int fine_e = tabrow[j];
-               local_err(fine_e) = 0.0;
-            }
-            n_derefs += 1;
+            const int fine_e = tabrow[j];
+            const double rho = derefs(fine_e);
+            dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
+            all_four &= rho > opt.jjt_deref_threshold;
          }
-         mesh_derefined =
-            pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
 
-         if (myid == 0 && n_derefs > 0)
+         if (!all_four) { continue; }
+         dbg("\033[31mDERFINE #%d",coarse_e);
+         for (int j = 0; j < tabrow.Size(); j++)
          {
-            std::cout << "\033[31m DE-Refined " << n_derefs
-                      << " elements.\033[m" << std::endl;
-            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
+            const int fine_e = tabrow[j];
+            local_err(fine_e) = 0.0;
          }
+         n_derefs += 1;
+      }
+      mesh_derefined =
+         pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
+
+      if (myid == 0 && n_derefs > 0)
+      {
+         std::cout << "\033[31m DE-Refined " << n_derefs
+                   << " elements.\033[m" << std::endl;
+         if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
       }
    }
    else if ((opt.estimator == amr::estimator::zz ||
              opt.estimator == amr::estimator::l2zz ||
-             opt.estimator == amr::estimator::kelly) && !mesh_refined)
+             opt.estimator == amr::estimator::kelly) && mesh_derefined)
    {
       dbg("ZZ/Kelly derefinement");
    }
    else { dbg("Nothing done before real Update"); }
 
-   assert (mesh_refined || mesh_derefined);
+   AMRUpdate(S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
 
-   AMRUpdate(mesh_derefined,
-             S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
+   if (opt.estimator==estimator::jjt &&
+       ((derefs.Max() > 0.0) && !mesh_derefined && !mesh_refined))
+   {
+      dbg("Updates aborted!");
+      derefs = 0.0;
+      return;
+   }
 
    inflow_gf.Update();
    inflow_gf.ProjectCoefficient(inflow);
@@ -504,8 +516,7 @@ void Operator::Update(AdvectionOperator &adv,
 }
 
 /// Internall AMR update
-void Operator::AMRUpdate(const bool derefine,
-                         BlockVector &S,
+void Operator::AMRUpdate(BlockVector &S,
                          Array<int> &offset,
                          LowOrderMethod &lom,
                          ParMesh *subcell_mesh,
@@ -514,13 +525,13 @@ void Operator::AMRUpdate(const bool derefine,
                          ParGridFunction &v_sub_gf)
 {
    dbg("AMR Operator Update");
-   dbg("refined pfes:%d", pfes.GetVSize());
+   dbg("pfes VSize:%d", pfes.GetVSize());
 
    Vector tmp;
    u.GetTrueDofs(tmp);
    u.SetFromTrueDofs(tmp);
 
-   if (!derefine)
+   if (mesh_refined)
    {
       dbg("\033[32mREFINE");
       pfes.Update();
@@ -542,8 +553,14 @@ void Operator::AMRUpdate(const bool derefine,
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
    }
-   else
+   else if (derefs.Max() > 0.0 || mesh_derefined)
    {
+      if (!mesh_derefined && opt.estimator==estimator::jjt)
+      {
+         dbg("Derefinement aborted!");
+         return;
+      }
+
       dbg("DEREFINE");
 
       ParGridFunction U = u;
@@ -566,75 +583,41 @@ void Operator::AMRUpdate(const bool derefine,
       dbg("S:%d", S.Size());
 
       S.Update(offset, Device::GetMemoryType());
+      dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
 
       const mfem::Operator *R = pfes.GetUpdateOperator();
       assert(R);
-      dbg(" R: %dx%d", R->Width(), R->Height());
+      dbg("Rop: %dx%d", R->Width(), R->Height());
       assert(R->GetType() == mfem::Operator::ANY_TYPE);
-      //R->PrintMatlab(std::cout);
 
-      /*OperatorHandle Th;
+      OperatorHandle Th;
       pfes.GetUpdateOperator(Th);
-      SparseMatrix *Rth = Th.As<SparseMatrix>();
-      assert(Rth);
-      dbg("\033[31mRth: %dx%d, type:%d", Rth->Width(), Rth->Height(), Rth->GetType());
-      assert(Rth->GetType() == mfem::Operator::MFEM_SPARSEMAT);*/
-
-      /*SparseMatrix Rt(R->Width(), R->Height());
-      dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
-      {
-         const int n = R->Width();
-         const int m = R->Height();
-         Vector x(n), y(m);
-         x = 0.0;
-
-         //std::out << setiosflags(ios::scientific | ios::showpos);
-         for (int i = 0; i < n; i++)
-         {
-            x(i) = 1.0;
-            R->Mult(x, y);
-            for (int j = 0; j < m; j++)
-            {
-               if (y(j))
-               {
-                  //dbg("[%d,%d] %f",j,i,y(j));
-                  Rt.Set(i,j,y(j));
-               }
-            }
-            x(i) = 0.0;
-         }
-      }
-      dbg("Finalize");
-      Rt.Finalize();
-      dbg("PrintMatlab");
-      //Rt.PrintMatlab(std::cout);
-      //assert(false);
-      */
-
-      //dbg("U size:%d", U.Size());
-      //dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
-      //dbg("S_bkp.GetBlock(0) size:%d", S_bkp.GetBlock(0).Size());
-
-      dbg("R->Mult");
-      R->Mult(U, S.GetBlock(0));
+      SparseMatrix *Pop = Th.As<SparseMatrix>();
+      assert(Pop);
+      dbg("\033[31mPop: %dx%d, type:%d", Pop->Width(), Pop->Height(), Pop->GetType());
+      assert(Pop->GetType() == mfem::Operator::MFEM_SPARSEMAT);
 
       dbg("u.MakeRef");
       u.MakeRef(&pfes, S, offset[0]);
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
 
-      /*{
-         dbg("AMR_P");
-         dbg(" R: %dx%d", R->Width(), R->Height());
-         dbg("Rt: %dx%d", Rt.Width(), Rt.Height());
-         AMR_P P(M_refine, M_coarse, *R, Rt);
-         dbg("u = 0.0;");
-         u = 0.0;
-         dbg("refined_gf:%d, coarse_gf:%d", U.Size(),  u.Size());
-         P.Mult(U, u);
-      }*/
+#if 1
+      dbg("R->Mult");
+      R->Mult(U, u);
+#else
+      dbg("AMR_P");
+      dbg("Pop: %dx%d", Pop->Width(), Pop->Height());
+      AMR_P P(M_refine, M_coarse, *Pop);
+      u = 0.0;
+      dbg("U:%d, u:%d", U.Size(),  u.Size());
+      P.Mult(U, u);
+
+      dbg("AMR_P done");
+#endif
 
    }
+   else { assert(false); }
 
    u.GetTrueDofs(tmp);
    u.SetFromTrueDofs(tmp);
@@ -644,6 +627,120 @@ void Operator::AMRUpdate(const bool derefine,
       dbg("\033[31mXSUB!!");
       xsub->ParFESpace()->Update();
       xsub->Update();
+   }
+   dbg("done");
+}
+
+/// AMR_P
+AMR_P::AMR_P(Mass &M_refine,
+             Mass &M_coarse,
+             const mfem::Operator &P)
+   : M_refine(M_refine),
+     M_coarse(M_coarse),
+     P(P),
+     rap(P, M_coarse, P),
+     cg(MPI_COMM_WORLD)
+{
+   dbg("M_refine:%d, M_coarse: %d", M_refine.vsize, M_coarse.vsize);
+   assert(M_refine.vsize > M_coarse.vsize);
+   cg.SetRelTol(1e-14);
+   cg.SetAbsTol(0.0);
+   cg.SetMaxIter(1000);
+   cg.SetPrintLevel(1);
+   cg.SetOperator(rap);
+   //cg.SetPreconditioner(*M_coarse.prec);
+}
+
+/// AMR_P Mult
+void AMR_P::Mult(const Vector &x, Vector &y) const
+{
+   dbg("\033[33m[AMR_P::Mult]");
+#if 0
+   z1.SetSize(x.Size());
+   z2.SetSize(x.Size());
+
+   dbg("\033[33m[AMR_P::Mult] M_refine.Mult: %d => %d", x.Size(), z1.Size());
+   M_refine.Mult(x, z1);
+
+   dbg("\033[33m[AMR_P::Mult] cg.Mult: %d => %d", z1.Size(), z2.Size());
+   cg.Mult(z1, z2);
+
+   dbg("\033[33m[AMR_P::Mult] P->Mult: %d => %d", z1.Size(), z2.Size());
+   P.Mult(z2, y);
+#else
+   z1.SetSize(x.Size());
+   z2.SetSize(y.Size());
+
+   dbg("\033[33m[AMR_P::Mult] M_refine.Mult: %d => %d", x.Size(), z1.Size());
+   M_refine.Mult(x, z1);
+
+   dbg("\033[33m[AMR_P::Mult] P->Mult: %d => %d", z1.Size(), z2.Size());
+   P.Mult(z1, z2);
+
+   dbg("\033[33m[AMR_P::Mult] M_coarse.Mult: %d => %d", z2.Size(), y.Size());
+   M_coarse.Mult(z2, y);
+#endif
+   dbg("\033[33mAMR_P::Mult done");
+}
+
+/// Mass
+Mass::Mass(ParFiniteElementSpace &fes, bool pa)
+   : mfem::Operator(fes.GetVSize()),
+     vsize(fes.GetVSize()),
+     R_ptr(fes.GetRestrictionMatrix()),
+     R((assert(R_ptr),R_ptr->ToDenseMatrix())),
+     m(&fes),
+     cg(MPI_COMM_WORLD)
+{
+   dbg("[MASS] VSize:%d",vsize);
+
+   m.AddDomainIntegrator(new MassIntegrator);
+   m.Assemble();
+
+   if (!pa) { m.Finalize(); }
+
+   m.FormSystemMatrix(empty, M);
+   /*
+      if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
+      else
+      {
+         if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
+         {
+            prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
+         }
+         else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
+         {
+            prec.reset(new DSmoother(*M.As<SparseMatrix>()));
+         }
+      }*/
+}
+
+/// Mass MULT
+void Mass::Mult(const Vector &x, Vector &y) const
+{
+   dbg("[Mass] vsize:%d", vsize);
+   assert(R);
+   if (!R)
+   {
+      dbg("!R");
+      M->Mult(x, y);
+   }
+   else
+   {
+      dbg("[Mass] R");
+      z1.SetSize(R->Height());
+      z2.SetSize(R->Height());
+
+      dbg("[Mass] R:%dx%d", R->Height(), R->Width());
+      dbg("[Mass] x:%d, z1:%d, y:%d", x.Size(), z1.Size(), y.Size());
+      dbg("[Mass] R->Mult");
+      R->Mult(x, z1);
+
+      dbg("[Mass] M->Mult");
+      M->Mult(z1, z2);
+      dbg("[Mass] R->MultTranspose");
+      R->MultTranspose(z2, y);
+      dbg("[Mass] done");
    }
 }
 
@@ -838,112 +935,12 @@ void Operator::AMRUpdateEstimatorJJt()
          dbg("\033[32mRefining #%d",e);
          refs.Append(Refinement(e));
       }
-      if ((rho >= opt.jjt_deref_threshold) && depth > 0 )
+      if ((rho > opt.jjt_deref_threshold) && depth > 0 )
       {
          dbg("\033[31mTag for de-refinement #%d",e);
          derefs(e) = rho;
       }
    }
-}
-
-Mass::Mass(ParFiniteElementSpace &fes, bool pa)
-   : mfem::Operator(fes.GetVSize()),
-     //fes(fes_),
-     vsize(fes.GetVSize()),
-     R_ptr(fes.GetRestrictionMatrix()),
-     R((assert(R_ptr),R_ptr->ToDenseMatrix())),
-     m(&fes),
-     cg(MPI_COMM_WORLD)
-{
-   dbg("[MASS] VSize:%d",vsize);
-
-   m.AddDomainIntegrator(new MassIntegrator);
-   m.Assemble();
-
-   if (!pa) { m.Finalize(); }
-
-   m.FormSystemMatrix(empty, M);
-   /*
-      if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
-      else
-      {
-         if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
-         {
-            prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
-         }
-         else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
-         {
-            prec.reset(new DSmoother(*M.As<SparseMatrix>()));
-         }
-      }*/
-}
-
-void Mass::Mult(const Vector &x, Vector &y) const
-{
-   dbg("[Mass] vsize:%d", vsize);
-   assert(R);
-   if (!R)
-   {
-      dbg("!R");
-      M->Mult(x, y);
-   }
-   else
-   {
-      dbg("[Mass] R");
-      z1.SetSize(R->Height());
-      z2.SetSize(R->Height());
-
-      dbg("R:%dx%d", R->Height(), R->Width());
-      dbg("x:%d, z1:%d, y:%d", x.Size(), z1.Size(), y.Size());
-      dbg("[Mass] R->Mult");
-      R->Mult(x, z1);
-
-      dbg("[Mass] M->Mult");
-      M->Mult(z1, z2);
-      dbg("[Mass] R->MultTranspose");
-      R->MultTranspose(z2, y);
-      dbg("[Mass] done");
-   }
-}
-
-
-AMR_P::AMR_P(Mass &M_refine,
-             Mass &M_coarse,
-             const mfem::Operator &R,
-             const mfem::Operator &Rt)
-   : M_refine(M_refine),
-     M_coarse(M_coarse),
-     R(R),
-     Rt(Rt),
-     rap(Rt, M_refine, Rt),
-     cg(MPI_COMM_WORLD)
-{
-   dbg("%d %d", M_refine.vsize, M_coarse.vsize);
-   assert(M_refine.vsize > M_coarse.vsize);
-   cg.SetRelTol(1e-14);
-   cg.SetAbsTol(0.0);
-   cg.SetMaxIter(1000);
-   cg.SetPrintLevel(1);
-   cg.SetOperator(rap);
-   //cg.SetPreconditioner(*M_coarse.prec);
-}
-
-void AMR_P::Mult(const Vector &x, Vector &y) const
-{
-   dbg("[AMR_P::Mult]");
-   z1.SetSize(x.Size());
-   z2.SetSize(Rt.Width());
-
-   dbg("[AMR_P::Mult] M_refine.Mult");
-   M_refine.Mult(x, z1);
-
-   dbg("[AMR_P::Mult] R->MultTranspose");
-   Rt.MultTranspose(z1, z2);
-
-   dbg("[AMR_P::Mult] cg.Mult");
-   cg.Mult(z2, y);
-
-   dbg("AMR_P::Mult done");
 }
 
 } // namespace amr
