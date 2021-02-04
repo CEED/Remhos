@@ -183,7 +183,7 @@ public:
 
    const FiniteElementSpace * GetFes() {return fes;}
 
-   const int GetExecMode() { return exec_mode;}
+   int GetExecMode() const { return exec_mode;}
 };
 
 // Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped

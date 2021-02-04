@@ -279,13 +279,13 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
    if (type == FaceType::Interior)
    {
       IntVelocity.SetSize(dim * nq * nf);
-      vel_ptr = IntVelocity.Write();
+      vel_ptr = IntVelocity.HostWrite();
    }
 
    if (type == FaceType::Boundary)
    {
       BdryVelocity.SetSize(dim * nq * nf);
-      vel_ptr = BdryVelocity.Write();
+      vel_ptr = BdryVelocity.HostWrite();
    }
 
    auto C = mfem::Reshape(vel_ptr, dim, nq, nf);
@@ -351,8 +351,8 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
                                     FaceGeometricFactors::DETERMINANTS |
                                     FaceGeometricFactors::NORMALS, type);
 
-   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, dim, nf);
-   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, nf);
+   auto n = mfem::Reshape(geom->normal.Read(), quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.Read(), quad1D, nf);
    const double *w = ir->GetWeights().Read();
 
    const double *vel_ptr;
@@ -383,16 +383,15 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
 
                if (execMode == 0)
                {
-                  vvalnor = std::min(0., vvalnor); //advection
+                  vvalnor = fmin(0., vvalnor); //advection
                }
                else
                {
-                  vvalnor = -std::max(0., vvalnor);
+                  vvalnor = -fmax(0., vvalnor);
                }
 
                double t_vn = vvalnor* w[k1] * detJ(k1, f);
                D(k1, f_side, f) = - t_vn;
-               //val -= B(k1, i1) * B(k1,j1) * t_vn;
             }
 
          }//f_side
@@ -416,11 +415,11 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
 
             if (execMode == 0)
             {
-               vvalnor = std::min(0., vvalnor);
+               vvalnor = fmin(0., vvalnor);
             }
             else
             {
-               vvalnor = -std::max(0., vvalnor);
+               vvalnor = -fmax(0., vvalnor);
             }
 
             double t_vn = vvalnor* w[k1] * detJ(k1, f);
@@ -444,8 +443,8 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
                                     FaceGeometricFactors::DETERMINANTS |
                                     FaceGeometricFactors::NORMALS, type);
 
-   auto n = mfem::Reshape(geom->normal.HostRead(), quad1D, quad1D, dim, nf);
-   auto detJ = mfem::Reshape(geom->detJ.HostRead(), quad1D, quad1D, nf);
+   auto n = mfem::Reshape(geom->normal.Read(), quad1D, quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.Read(), quad1D, quad1D, nf);
    const double *w = ir->GetWeights().Read();
 
    const double *vel_ptr;
@@ -480,11 +479,11 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 
                   if (execMode == 0)
                   {
-                     vvalnor = std::min(0., vvalnor); //advection
+                     vvalnor = fmin(0., vvalnor); //advection
                   }
                   else
                   {
-                     vvalnor = -std::max(0., vvalnor);
+                     vvalnor = -fmax(0., vvalnor);
                   }
 
                   double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
@@ -515,16 +514,15 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 
                if (execMode == 0)
                {
-                  vvalnor = std::min(0., vvalnor); //advection
+                  vvalnor = fmin(0., vvalnor); //advection
                }
                else
                {
-                  vvalnor = -std::max(0., vvalnor);
+                  vvalnor = -fmax(0., vvalnor);
                }
 
                double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
                D(k1, k2, f) = -t_vn;
-               //val -= B(k1, i1) * B(k1,j1) * t_vn * B(k2, i2) * B(k2,j2);
             }//k2
          }//k1
       });
@@ -570,7 +568,6 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
-      //Apply face integrator restriction
       face_restrict_lex->Mult(x, x_loc);
       y_loc = 0.0;
 
@@ -637,7 +634,6 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
-      //Apply face integrator restriction
       face_restrict_lex->Mult(x, x_loc);
       y_loc = 0.0;
 
@@ -710,7 +706,6 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
-      //Apply face integrator restriction
       face_restrict_lex->Mult(x, x_loc);
       y_loc = 0.0;
 
@@ -810,7 +805,6 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
-      //Apply face integrator restriction
       face_restrict_lex->Mult(x, x_loc);
       y_loc = 0.0;
 
@@ -906,11 +900,6 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    ParGridFunction u_gf(&pfes);
    u_gf = u;
    u_gf.ExchangeFaceNbrData();
-
-   z.HostReadWrite();
-   u.HostRead();
-   du.HostReadWrite();
-   M_lumped.HostRead();
 
    ApplyFaceTerms(u, du, FaceType::Interior);
    ApplyFaceTerms(u, du, FaceType::Boundary);
