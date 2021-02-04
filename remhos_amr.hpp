@@ -25,26 +25,31 @@ namespace mfem
 namespace amr
 {
 
-enum estimator: int { custom = 0, jjt, zz, l2zz, kelly};
+enum Estimator: int { Custom = 0, JJt, ZZ, L2ZZ, Kelly};
+
+struct Options
+{
+   const int estimator;
+   const int order, mesh_order;
+   const int max_level, nc_limit;
+   const double ref_threshold, deref_threshold;
+};
 
 class EstimatorIntegrator: public DiffusionIntegrator
 {
 public:
-   enum class mode { diffusion, one, two };
+   enum class FluxMode { diffusion, one, two };
 
 private:
    int NE, e2;
    ParMesh &pmesh;
-   const mode flux_mode;
-   const int max_level;
-   const double jjt_threshold;
+   const FluxMode mode;
+   const Options &opt;
    ConstantCoefficient one {1.0};
 
 public:
-   EstimatorIntegrator(ParMesh &pmesh,
-                       const int max_level,
-                       const double jjt_threshold,
-                       const mode flux_mode = mode::diffusion);
+   EstimatorIntegrator(ParMesh&, const Options&,
+                       const FluxMode = FluxMode::diffusion);
 
    void Reset();
 
@@ -75,11 +80,12 @@ private:
 // AMR operator
 class Operator
 {
+
    ParMesh &pmesh;
    ParGridFunction &u;
    ParFiniteElementSpace &pfes;
-
    const int myid, dim, sdim;
+   const Options &opt;
 
    H1_FECollection fec;
    L2_FECollection flux_fec;
@@ -94,41 +100,20 @@ class Operator
    socketstream amr_vis[4];
    const char *host = "localhost";
    const int port = 19916;
-   int Wx = 400, Wy = 400;
+   const int Wx = 400, Wy = 400;
    const int Ww = 640, Wh = 640;
    const char *keys = "gAmRj";
 
-   const struct Options
-   {
-      int order, mesh_order;
-      int estimator;
-      double ref_threshold;
-      double deref_threshold;
-      double jjt_ref_threshold;
-      double jjt_deref_threshold;
-      int max_level;
-      int nc_limit;
-   } opt;
-
-   bool mesh_refined;
-   bool mesh_derefined;
-
+   bool mesh_refined = false;
+   bool mesh_derefined = false;
    Array<Refinement> refs;
    Vector derefs;
 
 public:
    Operator(ParFiniteElementSpace &pfes,
-            ParFiniteElementSpace &mesh_pfes,
             ParMesh &pmesh,
             ParGridFunction &sol,
-            int order, int mesh_order,
-            int estimator,
-            double ref_t,
-            double deref_t,
-            double jac_ref_t,
-            double jac_deref_t,
-            int max_level,
-            int nc_limit);
+            const Options &opt);
 
    ~Operator();
 

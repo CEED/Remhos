@@ -110,11 +110,9 @@ int main(int argc, char *argv[])
    int vis_steps = 100;
    const char *device_config = "cpu";
    bool amr = false;
-   int amr_estimator = amr::estimator::l2zz;
-   double amr_ref_threshold = 0.2;
-   double amr_jjt_ref_threshold = 0.95;
-   double amr_jjt_deref_threshold = 0.999;
-   double amr_deref_threshold = 1e-8;
+   int amr_estimator = amr::Estimator::L2ZZ;
+   double amr_ref_threshold = 1e-3;
+   double amr_deref_threshold = 1e-5;
    int amr_max_level = 1;
    // maximum level of hanging nodes, 0 means unlimited
    const int amr_nc_limit = 0;
@@ -193,10 +191,6 @@ int main(int argc, char *argv[])
                   "AMR estimator: 0:Custom, 1:Rho, 2:ZZ, 3:Kelly");
    args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
                   "AMR refinement threshold.");
-   args.AddOption(&amr_jjt_ref_threshold, "-arj", "--amr-jjt-ref-threshold",
-                  "AMR JJt (rho) refinement threshold.");
-   args.AddOption(&amr_jjt_deref_threshold, "-adj", "--amr-jjt-deref-threshold",
-                  "AMR JJt (rho) refinement threshold.");
    args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
                   "AMR refinement threshold.");
    args.AddOption(&amr_max_level, "-am", "--amr-max-level",
@@ -237,6 +231,13 @@ int main(int argc, char *argv[])
       mesh->EnsureNCMesh();
       amr_max_level += rs_levels + rp_levels;
    }
+
+   const amr::Options amr_options = { amr_estimator,
+                                      order, mesh_order,
+                                      amr_max_level, amr_nc_limit,
+                                      amr_ref_threshold, amr_deref_threshold
+                                    };
+
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
@@ -836,23 +837,7 @@ int main(int argc, char *argv[])
 
    // AMR operator
    amr::Operator *AMR = nullptr;
-   if (amr)
-   {
-      MFEM_VERIFY(pmesh.GetNodes(),"");
-      AMR = new amr::Operator(pfes,
-                              mesh_pfes,
-                              pmesh,
-                              u,
-                              order,
-                              mesh_order,
-                              amr_estimator,
-                              amr_ref_threshold,
-                              amr_deref_threshold,
-                              amr_jjt_ref_threshold,
-                              amr_jjt_deref_threshold,
-                              amr_max_level,
-                              amr_nc_limit);
-   }
+   if (amr) { AMR = new amr::Operator(pfes, pmesh, u, amr_options); }
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -866,25 +851,29 @@ int main(int argc, char *argv[])
 
       adv.SetDt(dt_real);
 
-      if (amr) { AMR->Reset(); }
-
       // 13. The inner refinement loop. At the end we want to have the current
       //     time step resolved to the prescribed tolerance in each element.
       if (amr)
       {
+         AMR->Reset();
          dbg("\t\033[33m##########################");
          dbg("\t\033[33m######## AMR LOOP ########");
          for (int ref_it = 1; ; ref_it++)
          {
             const int new_depth = mfem::GetMeshDepth(pmesh);
-            if (new_depth > depth) { dt /= 2.0; }
-            if (new_depth < depth) { dt *= 2.0; }
+            const double factor = 2.0; // problem 2 needs at least this
+            if (new_depth > depth) { dt /= factor; }
+            if (new_depth < depth) { dt *= factor; }
             if (new_depth != depth)
             {
                double dt_real = min(dt, t_final - t);
                adv.SetDt(dt_real);
                depth = new_depth;
-               dbg("!!!!!!! new_depth: %d !!!!!!!", new_depth);
+               if (myid == 0)
+               {
+                  std::cout << "time step: " << ti << ", time: " << t << ", dt: " << dt;
+                  std::cout << endl;
+               }
             }
             //pmesh.pncmesh->PrintStats(std::cout);
 

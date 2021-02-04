@@ -34,29 +34,27 @@ namespace amr
 /// ESTIMATOR ///
 static const char *EstimatorName(const int est)
 {
-   switch (static_cast<amr::estimator>(est))
+   switch (static_cast<amr::Estimator>(est))
    {
-      case amr::estimator::custom: return "Custom";
-      case amr::estimator::jjt: return "JJt";
-      case amr::estimator::zz: return "ZZ";
-      case amr::estimator::l2zz: return "L2ZZ";
-      case amr::estimator::kelly: return "Kelly";
+      case amr::Estimator::Custom: return "Custom";
+      case amr::Estimator::JJt: return "JJt";
+      case amr::Estimator::ZZ: return "ZZ";
+      case amr::Estimator::L2ZZ: return "L2ZZ";
+      case amr::Estimator::Kelly: return "Kelly";
       default: MFEM_ABORT("Unknown estimator!");
    }
    return nullptr;
 }
 
 EstimatorIntegrator::EstimatorIntegrator(ParMesh &pmesh,
-                                         const int max_level,
-                                         const double jjt_threshold,
-                                         const mode flux_mode):
+                                         const Options &opt,
+                                         const FluxMode mode):
    DiffusionIntegrator(one),
    NE(pmesh.GetNE()),
    e2(0),
    pmesh(pmesh),
-   flux_mode(flux_mode),
-   max_level(max_level),
-   jjt_threshold(jjt_threshold) { dbg(); }
+   mode(mode),
+   opt(opt) { dbg(); }
 
 void EstimatorIntegrator::Reset() { e2 = 0; NE = pmesh.GetNE(); }
 
@@ -64,7 +62,7 @@ double EstimatorIntegrator::ComputeFluxEnergy(const FiniteElement &el,
                                               ElementTransformation &Tr,
                                               Vector &flux, Vector *d_energy)
 {
-   if (flux_mode == mode::diffusion)
+   if (mode == FluxMode::diffusion)
    {
       return DiffusionIntegrator::ComputeFluxEnergy(el, Tr, flux, d_energy);
    }
@@ -146,8 +144,8 @@ void EstimatorIntegrator::ComputeElementFlux2(const int e,
       {
          const int iq = NQ*d + q;
          flux(iq) = 1.0 - rho;
-         if (rho > jjt_threshold) { continue; }
-         if (depth > max_level) { continue; }
+         if (rho > opt.ref_threshold) { continue; }
+         if (depth > opt.max_level) { continue; }
          flux(iq) = rho;
       }
    }
@@ -160,23 +158,23 @@ void EstimatorIntegrator::ComputeElementFlux(const FiniteElement &el,
                                              Vector &flux,
                                              bool with_coef)
 {
-   //MFEM_VERIFY(NE == pmesh.GetNE(), "");
    // ZZ comes with with_coef set to true, not Kelly
-   switch (flux_mode)
+   switch (mode)
    {
-      case mode::diffusion:
+      case FluxMode::diffusion:
       {
          DiffusionIntegrator::ComputeElementFlux(el, Trans, u,
                                                  fluxelem, flux, with_coef);
          break;
       }
-      case mode::one:
+      case FluxMode::one:
       {
          ComputeElementFlux1(el, Trans, u, fluxelem, flux);
          break;
       }
-      case mode::two:
+      case FluxMode::two:
       {
+         MFEM_VERIFY(NE == pmesh.GetNE(), "");
          ComputeElementFlux2(e2++, el, Trans, fluxelem, flux);
          break;
       }
@@ -228,39 +226,23 @@ static void GetPerElementMinMax(const ParGridFunction &gf,
 
 /// AMR OPERATOR
 Operator::Operator(ParFiniteElementSpace &pfes,
-                   ParFiniteElementSpace &mesh_pfes,
                    ParMesh &pmesh,
                    ParGridFunction &u,
-                   int order, int mesh_order,
-                   int est,
-                   double ref_t,
-                   double deref_t,
-                   double jjt_ref_t,
-                   double jjt_deref_t,
-                   int max_level,
-                   int nc_limit):
-
+                   const Options &opt):
    pmesh(pmesh),
    u(u),
    pfes(pfes),
-   //mesh_pfes(mesh_pfes),
    myid(pmesh.GetMyRank()),
    dim(pmesh.Dimension()),
    sdim(pmesh.SpaceDimension()),
-   fec(order, dim),
-   flux_fec(order, dim),
+   opt(opt),
+   fec(opt.order, dim),
+   flux_fec(opt.order, dim),
    flux_fes(&pmesh,
-            est == amr::estimator::kelly ?
+            opt.estimator == amr::Estimator::Kelly ?
             static_cast<FiniteElementCollection*>(&flux_fec) :
             static_cast<FiniteElementCollection*>(&fec),
-            sdim),
-   opt(
-{
-   order, mesh_order, est,
-          ref_t, deref_t,
-          jjt_ref_t, jjt_deref_t,
-          max_level, nc_limit
-})
+            sdim)
 {
    dbg("AMR Setup");
 
@@ -271,47 +253,39 @@ Operator::Operator(ParFiniteElementSpace &pfes,
                 << std::endl;
    }
 
-   if (opt.estimator == amr::estimator::zz)
+   if (opt.estimator == amr::Estimator::ZZ)
    {
       MFEM_VERIFY(false, "Not yet fully implemented!");
-      integ = new amr::EstimatorIntegrator(pmesh,
-                                           opt.max_level,
-                                           opt.jjt_ref_threshold);
+      integ = new amr::EstimatorIntegrator(pmesh, opt);
       estimator = new ZienkiewiczZhuEstimator(*integ, u, &flux_fes);
    }
 
-   if (opt.estimator == amr::estimator::l2zz)
+   if (opt.estimator == amr::Estimator::L2ZZ)
    {
-      integ = new amr::EstimatorIntegrator(pmesh,
-                                           opt.max_level,
-                                           opt.jjt_ref_threshold);
-      smooth_flux_fec = new RT_FECollection(order-1, dim);
+      integ = new amr::EstimatorIntegrator(pmesh, opt);
+      smooth_flux_fec = new RT_FECollection(opt.order-1, dim);
       auto smooth_flux_fes = new ParFiniteElementSpace(&pmesh, smooth_flux_fec);
       estimator = new L2ZienkiewiczZhuEstimator(*integ, u,
-                                                &flux_fes,smooth_flux_fes);
+                                                &flux_fes, smooth_flux_fes);
    }
 
-   if (opt.estimator == amr::estimator::kelly)
+   if (opt.estimator == amr::Estimator::Kelly)
    {
-      integ = new amr::EstimatorIntegrator(pmesh,
-                                           opt.max_level,
-                                           opt.jjt_ref_threshold);
+      integ = new amr::EstimatorIntegrator(pmesh, opt);
       estimator = new KellyErrorEstimator(*integ, u, flux_fes);
    }
 
    if (estimator)
    {
-      const double hysteresis = 0.01;
-      const double max_elem_error = 1.e-3;
       refiner = new ThresholdRefiner(*estimator);
       refiner->SetTotalErrorFraction(0.0); // use purely local threshold
-      refiner->SetLocalErrorGoal(max_elem_error);
+      refiner->SetLocalErrorGoal(opt.ref_threshold);
       refiner->PreferConformingRefinement();
       refiner->SetNCLimit(opt.nc_limit);
 
       derefiner = new ThresholdDerefiner(*estimator);
-      derefiner->SetOp(1); // 0:min, 1:sum, 2:max
-      derefiner->SetThreshold(hysteresis * max_elem_error);
+      derefiner->SetOp(2); // 0:min, 1:sum, 2:max
+      derefiner->SetThreshold(opt.deref_threshold);
       derefiner->SetNCLimit(opt.nc_limit);
 
       refiner->Reset();
@@ -346,15 +320,15 @@ void Operator::Apply()
 
    switch (opt.estimator)
    {
-      case estimator::custom: { AMRUpdateEstimatorCustom(); break; }
-      case estimator::jjt:    { AMRUpdateEstimatorJJt(); break; }
-      case estimator::zz:
-      case estimator::l2zz:
-      case estimator::kelly:  { AMRUpdateEstimatorZZKelly(); break; }
+      case Estimator::Custom: { AMRUpdateEstimatorCustom(); break; }
+      case Estimator::JJt:    { AMRUpdateEstimatorJJt(); break; }
+      case Estimator::ZZ:
+      case Estimator::L2ZZ:
+      case Estimator::Kelly:  { AMRUpdateEstimatorZZKelly(); break; }
       default: MFEM_ABORT("Unknown AMR estimator!");
    }
 
-   const bool JJt = opt.estimator == estimator::jjt;
+   const bool JJt = opt.estimator == Estimator::JJt;
    if (!JJt) { dbg("mesh_refined/derefined set by ZZ/Kelly"); return; }
 
    const int nref = pmesh.ReduceInt(refs.Size());
@@ -463,7 +437,7 @@ void Operator::Update(AdvectionOperator &adv,
             const int fine_e = tabrow[j];
             const double rho = derefs(fine_e);
             dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
-            all_four &= rho > opt.jjt_deref_threshold;
+            all_four &= rho > opt.deref_threshold;
          }
 
          if (!all_four) { continue; }
@@ -485,9 +459,9 @@ void Operator::Update(AdvectionOperator &adv,
          if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
       }
    }
-   else if ((opt.estimator == amr::estimator::zz ||
-             opt.estimator == amr::estimator::l2zz ||
-             opt.estimator == amr::estimator::kelly) && mesh_derefined)
+   else if ((opt.estimator == amr::Estimator::ZZ ||
+             opt.estimator == amr::Estimator::L2ZZ ||
+             opt.estimator == amr::Estimator::Kelly) && mesh_derefined)
    {
       dbg("ZZ/Kelly derefinement");
    }
@@ -495,7 +469,7 @@ void Operator::Update(AdvectionOperator &adv,
 
    AMRUpdate(S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
 
-   if (opt.estimator==estimator::jjt &&
+   if (opt.estimator == Estimator::JJt &&
        ((derefs.Max() > 0.0) && !mesh_derefined && !mesh_refined))
    {
       dbg("Updates aborted!");
@@ -555,7 +529,7 @@ void Operator::AMRUpdate(BlockVector &S,
    }
    else if (derefs.Max() > 0.0 || mesh_derefined)
    {
-      if (!mesh_derefined && opt.estimator==estimator::jjt)
+      if (!mesh_derefined && opt.estimator == Estimator::JJt)
       {
          dbg("Derefinement aborted!");
          return;
@@ -930,12 +904,12 @@ void Operator::AMRUpdateEstimatorJJt()
       const double rho = rho_rf(e);
       dbg("#%d %.4e @ %d/%d",e, rho, depth, opt.max_level);
 
-      if ((rho < opt.jjt_ref_threshold) && depth < opt.max_level )
+      if ((rho < opt.ref_threshold) && depth < opt.max_level )
       {
          dbg("\033[32mRefining #%d",e);
          refs.Append(Refinement(e));
       }
-      if ((rho > opt.jjt_deref_threshold) && depth > 0 )
+      if ((rho > opt.deref_threshold) && depth > 0 )
       {
          dbg("\033[31mTag for de-refinement #%d",e);
          derefs(e) = rho;
