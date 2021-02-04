@@ -612,7 +612,6 @@ int main(int argc, char *argv[])
      const bool subcell_scheme = false;
      if(pa)
      {
-       printf("using LOSolverType::ResDist\n");
        lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
        if(exec_mode == 0)
