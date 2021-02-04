@@ -131,7 +131,7 @@ int main(int argc, char *argv[])
    LOSolverType lo_type           = LOSolverType::ResDist;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
-   bool pa = true;
+   bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
    double t_final = 4.0;

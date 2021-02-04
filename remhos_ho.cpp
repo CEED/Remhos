@@ -81,7 +81,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    HypreParMatrix *K_mat = NULL;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      K.Mult(u, rhs);
+      MFEM_ABORT("PA for DG is not supported for Local Inverse.");
    }
    else
    {
