@@ -452,8 +452,9 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    }
 
    u.HostRead();
+   m.HostRead();
    du.HostReadWrite();
-   du_lo.Read(); du_ho.Read();
+   du_lo.HostRead(); du_ho.HostRead();
    for (int k = 0; k < NE; k++)
    {
       sumPos = sumNeg = 0.0;
@@ -520,6 +521,11 @@ void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
    Vector du_ho_star(size);
 
    double umin, umax;
+
+   u.HostRead();  m.HostRead();
+   du_ho.HostRead(); du_lo.HostRead();
+   u_min.HostRead(); u_max.HostRead();
+   du.HostReadWrite();
 
    // Smoothness indicator.
    ParGridFunction si_val;

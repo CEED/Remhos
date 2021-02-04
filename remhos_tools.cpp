@@ -428,6 +428,7 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
+   u.HostRead(); u_min.HostReadWrite(); u_max.HostReadWrite();
    for (int k = 0; k < NE; k++)
    {
       u_min(k) = numeric_limits<double>::infinity();

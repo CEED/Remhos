@@ -893,6 +893,7 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    const double infinity = numeric_limits<double>::infinity();
 
    // Discretization terms
+   du.UseDevice(true);
    du = 0.;
 
    //z = Conv * u
