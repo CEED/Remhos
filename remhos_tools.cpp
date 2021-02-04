@@ -24,6 +24,17 @@ using namespace std;
 namespace mfem
 {
 
+int GetMeshDepth(ParMesh &pmesh)
+{
+   int max_depth = 0;
+   for (int e = 0; e < pmesh.GetNE(); e++)
+   {
+      const int depth = pmesh.pncmesh->GetElementDepth(e);
+      max_depth = std::max(max_depth, depth);
+   }
+   return max_depth;
+}
+
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,

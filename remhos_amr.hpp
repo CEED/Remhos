@@ -77,7 +77,7 @@ class Operator
 {
    ParMesh &pmesh;
    ParGridFunction &u;
-   ParFiniteElementSpace &pfes;//, &mesh_pfes;
+   ParFiniteElementSpace &pfes;
 
    const int myid, dim, sdim;
 
@@ -110,6 +110,12 @@ class Operator
       int nc_limit;
    } opt;
 
+   bool mesh_refined;
+   bool mesh_derefined;
+
+   Array<Refinement> refs;
+   Vector derefs;
+
 public:
    Operator(ParFiniteElementSpace &pfes,
             ParFiniteElementSpace &mesh_pfes,
@@ -128,6 +134,11 @@ public:
 
    void Reset();
 
+   void Apply();
+
+   bool Refined();
+   bool DeRefined();
+
    void Update(AdvectionOperator&,
                ODESolver *ode_solver,
                BlockVector &S,
@@ -143,9 +154,9 @@ public:
                FunctionCoefficient &inflow);
 
 private:
-   void AMRUpdateEstimatorCustom(Array<Refinement>&, Vector&);
-   void AMRUpdateEstimatorJJt(Array<Refinement>&, Vector &);
-   void AMRUpdateEstimatorZZKelly(bool &mesh_refined);
+   void AMRUpdateEstimatorCustom();
+   void AMRUpdateEstimatorJJt();
+   void AMRUpdateEstimatorZZKelly();
 
    void AMRUpdate(const bool derefine,
                   BlockVector &S,

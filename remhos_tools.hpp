@@ -22,6 +22,8 @@
 namespace mfem
 {
 
+int GetMeshDepth(ParMesh &pmesh);
+
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 

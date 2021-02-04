@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
    double amr_jjt_deref_threshold = 0.999;
    double amr_deref_threshold = 1e-8;
    int amr_max_level = 1;
-   const int amr_nc_limit = 0; // maximum level of hanging nodes
+   const int amr_nc_limit = 4; // maximum level of hanging nodes
 
    int precision = 8;
    cout.precision(precision);
@@ -849,15 +849,76 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
+   int depth = GetMeshDepth(pmesh);
    for (int ti = 0; !done;)
    {
-      dbg("\033[31m######################");
-      dbg("\033[31m######## LOOP ########");
+      dbg("\033[31m###########################");
+      dbg("\033[31m######## TIME LOOP ########");
+      dbg("\033[31m######## dt:%f ########\033[m",dt);
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
 
       if (amr) { AMR->Reset(); }
+
+      // 13. The inner refinement loop. At the end we want to have the current
+      //     time step resolved to the prescribed tolerance in each element.
+      if (amr)
+      {
+         dbg("\t\033[33m##########################");
+         dbg("\t\033[33m######## AMR LOOP ########");
+         for (int ref_it = 1; ; ref_it++)
+         {
+            const int new_depth = GetMeshDepth(pmesh);
+            if (new_depth > depth)
+            {
+               dt /= 2.0;
+               double dt_real = min(dt, t_final - t);
+               adv.SetDt(dt_real);
+               depth = new_depth;
+               dbg("!!!!!!! new_depth: %d !!!!!!!", new_depth);
+            }
+            //pmesh.pncmesh->PrintStats(std::cout);
+
+            dbg("AMR->Apply");
+            AMR->Apply();
+
+            if (!AMR->Refined()) { dbg("Refines STOP!");  break; }
+
+            dbg("AMR->Update");
+            AMR->Update(adv, ode_solver, S, offset,
+                        lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
+                        lumpedM, mass0_u, inflow_gf, inflow);
+
+            /*if (visualization)
+            {
+               MPI_Barrier(pmesh.GetComm());
+               u.HostRead();
+               int Wx = 0, Wy = 0; // window position
+               int Ww = 400, Wh = 400; // window size
+               VisualizeField(sout, vishost, visport, u, "Solution",
+                              Wx, Wy, Ww, Wh);
+            }*/
+         }
+         assert (!AMR->Refined());
+         if (AMR->DeRefined())
+         {
+            dbg("DEREFINE, AMR->Update");
+            AMR->Update(adv, ode_solver, S, offset,
+                        lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
+                        lumpedM, mass0_u, inflow_gf, inflow);
+            /*if (visualization)
+            {
+               MPI_Barrier(pmesh.GetComm());
+               u.HostRead();
+               int Wx = 0, Wy = 0; // window position
+               int Ww = 400, Wh = 400; // window size
+               VisualizeField(sout, vishost, visport, u, "Solution",
+                              Wx, Wy, Ww, Wh);
+            }*/
+            //assert(false);
+         }
+      }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -909,12 +970,12 @@ int main(int argc, char *argv[])
       }*/
 
       /// AMR UPDATE ///
-      if (amr)
+      /*if (amr)
       {
          AMR->Update(adv, ode_solver, S, offset,
                      lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
                      lumpedM, mass0_u, inflow_gf, inflow);
-      }
+      }*/
 
       /// CHECK mass after AMR ///
       /*if (myid == 0)
@@ -968,7 +1029,7 @@ int main(int argc, char *argv[])
       {
          if (myid == 0)
          {
-            cout << "time step: " << ti << ", time: " << t ;
+            cout << "time step: " << ti << ", time: " << t << ", dt: " << dt;
             if (steady_state_problem) { cout << ", residual: " << residual ; }
             cout << endl;
          }
