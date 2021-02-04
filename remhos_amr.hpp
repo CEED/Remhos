@@ -25,7 +25,7 @@ namespace mfem
 namespace amr
 {
 
-enum Estimator: int { Custom = 0, JJt, ZZ, L2ZZ, Kelly};
+enum Estimator: int { ZZ = 0, L2ZZ, JJt, Custom };
 
 struct Options
 {
@@ -35,9 +35,78 @@ struct Options
    const double ref_threshold, deref_threshold;
 };
 
+class EstimatorIntegrator;
+
+class Operator
+{
+   ParFiniteElementSpace &pfes;
+   ParMesh &pmesh;
+   ParGridFunction &u;
+   const int myid, dim, sdim;
+   const Options &opt;
+
+   FiniteElementCollection *h1_fec = nullptr;
+   FiniteElementCollection *l2_fec = nullptr;
+   FiniteElementCollection *flux_fec = nullptr;
+   ParFiniteElementSpace *flux_fes = nullptr;
+
+   RT_FECollection *smooth_flux_fec = nullptr;
+   ErrorEstimator *estimator = nullptr;
+   ThresholdRefiner *refiner = nullptr;
+   ThresholdDerefiner *derefiner = nullptr;
+   EstimatorIntegrator *integ = nullptr;
+
+   socketstream amr_vis[4];
+   const char *host = "localhost";
+   const int port = 19916;
+   const int Wx = 400, Wy = 400;
+   const int Ww = 640, Wh = 640;
+   const char *keys = "gAmRj";
+
+   bool mesh_refined = false;
+   bool mesh_derefined = false;
+   Array<Refinement> refs;
+   Vector derefs;
+
+public:
+   Operator(ParFiniteElementSpace&, ParMesh&, ParGridFunction&, const Options&);
+
+   ~Operator();
+
+   void Reset();
+   void Apply();
+   bool Refined();
+   bool DeRefined();
+
+   void Update(AdvectionOperator&,
+               ODESolver *ode_solver,
+               BlockVector &S,
+               Array<int> &offset,
+               LowOrderMethod &lom,
+               ParMesh *subcell_mesh,
+               ParFiniteElementSpace *pfes_sub,
+               ParGridFunction *xsub,
+               ParGridFunction &v_sub_gf,
+               Vector &lumpedM,
+               const double mass0_u,
+               ParGridFunction &inflow_gf,
+               FunctionCoefficient &inflow);
+
+private:
+   void ApplyZZ();
+   void ApplyJJt();
+   void ApplyCustom();
+   void UpdateAndRebalance(BlockVector &S,
+                           Array<int> &offset,
+                           LowOrderMethod &lom,
+                           ParMesh *subcell_mesh,
+                           ParFiniteElementSpace *pfes_sub,
+                           ParGridFunction *xsub,
+                           ParGridFunction &v_sub_gf);
+};
+
 class EstimatorIntegrator: public DiffusionIntegrator
 {
-public:
    enum class FluxMode { diffusion, one, two };
 
 private:
@@ -75,81 +144,6 @@ private:
                             ElementTransformation &Trans,
                             const FiniteElement &fluxelem,
                             Vector &flux);
-};
-
-// AMR operator
-class Operator
-{
-
-   ParMesh &pmesh;
-   ParGridFunction &u;
-   ParFiniteElementSpace &pfes;
-   const int myid, dim, sdim;
-   const Options &opt;
-
-   H1_FECollection fec;
-   L2_FECollection flux_fec;
-   ParFiniteElementSpace flux_fes;
-
-   RT_FECollection *smooth_flux_fec = nullptr;
-   ErrorEstimator *estimator = nullptr;
-   ThresholdRefiner *refiner = nullptr;
-   ThresholdDerefiner *derefiner = nullptr;
-   amr::EstimatorIntegrator *integ = nullptr;
-
-   socketstream amr_vis[4];
-   const char *host = "localhost";
-   const int port = 19916;
-   const int Wx = 400, Wy = 400;
-   const int Ww = 640, Wh = 640;
-   const char *keys = "gAmRj";
-
-   bool mesh_refined = false;
-   bool mesh_derefined = false;
-   Array<Refinement> refs;
-   Vector derefs;
-
-public:
-   Operator(ParFiniteElementSpace &pfes,
-            ParMesh &pmesh,
-            ParGridFunction &sol,
-            const Options &opt);
-
-   ~Operator();
-
-   void Reset();
-
-   void Apply();
-
-   bool Refined();
-   bool DeRefined();
-
-   void Update(AdvectionOperator&,
-               ODESolver *ode_solver,
-               BlockVector &S,
-               Array<int> &offset,
-               LowOrderMethod &lom,
-               ParMesh *subcell_mesh,
-               ParFiniteElementSpace *pfes_sub,
-               ParGridFunction *xsub,
-               ParGridFunction &v_sub_gf,
-               Vector &lumpedM,
-               const double mass0_u,
-               ParGridFunction &inflow_gf,
-               FunctionCoefficient &inflow);
-
-private:
-   void AMRUpdateEstimatorCustom();
-   void AMRUpdateEstimatorJJt();
-   void AMRUpdateEstimatorZZKelly();
-
-   void AMRUpdate(BlockVector &S,
-                  Array<int> &offset,
-                  LowOrderMethod &lom,
-                  ParMesh *subcell_mesh,
-                  ParFiniteElementSpace *pfes_sub,
-                  ParGridFunction *xsub,
-                  ParGridFunction &v_sub_gf);
 };
 
 struct Mass : mfem::Operator

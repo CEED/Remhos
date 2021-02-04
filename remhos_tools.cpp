@@ -24,6 +24,28 @@ using namespace std;
 namespace mfem
 {
 
+void GetPerElementMinMax(const ParGridFunction &gf,
+                         Vector &elem_min, Vector &elem_max,
+                         int int_order)
+{
+   const FiniteElementSpace *fes = gf.FESpace();
+   const int ne = fes->GetNE();
+   elem_min.SetSize(ne);
+   elem_max.SetSize(ne);
+   Vector vals;
+
+   if (int_order < 0) { int_order = fes->GetOrder(0) + 1; }
+
+   for (int e = 0; e < ne; e++)
+   {
+      const int geom = fes->GetFE(e)->GetGeomType();
+      const IntegrationRule &ir = IntRules.Get(geom, int_order);
+      gf.GetValues(e, ir, vals);
+      elem_min(e) = vals.Min();
+      elem_max(e) = vals.Max();
+   }
+}
+
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,

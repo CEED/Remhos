@@ -245,6 +245,7 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
    dbg("ml");
    ml.FESpace()->Update();
    ml.Update();
+   ml.BilinearForm::operator=(0.0);
    ml.Assemble();
    ml.Finalize();
 

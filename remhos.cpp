@@ -114,8 +114,7 @@ int main(int argc, char *argv[])
    double amr_ref_threshold = 1e-3;
    double amr_deref_threshold = 1e-5;
    int amr_max_level = 1;
-   // maximum level of hanging nodes, 0 means unlimited
-   const int amr_nc_limit = 0;
+   int amr_nc_limit = 0;
 
    int precision = 8;
    cout.precision(precision);
@@ -188,7 +187,7 @@ int main(int argc, char *argv[])
    args.AddOption(&amr, "-amr", "--enable-amr", "-no-amr", "--disable-amr",
                   "Enable adaptive mesh refinement.");
    args.AddOption(&amr_estimator, "-ae", "--amr-estimator",
-                  "AMR estimator: 0:Custom, 1:Rho, 2:ZZ, 3:Kelly");
+                  "AMR estimator: 0:ZZ, 1:L2ZZ, 2:JJt, 3:Custom");
    args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
                   "AMR refinement threshold.");
    args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
@@ -196,6 +195,8 @@ int main(int argc, char *argv[])
    args.AddOption(&amr_max_level, "-am", "--amr-max-level",
                   "AMR max refined level "
                   "(after the initial serial and parallel refinements)");
+   args.AddOption(&amr_nc_limit, "-al", "--amr-nc-limit",
+                  "AMR maximum level of hanging nodes, (0 = unlimited)");
 
    args.Parse();
    if (!args.Good())
@@ -240,6 +241,7 @@ int main(int argc, char *argv[])
 
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+   mesh->Finalize(true);
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
@@ -861,7 +863,8 @@ int main(int argc, char *argv[])
          for (int ref_it = 1; ; ref_it++)
          {
             const int new_depth = mfem::GetMeshDepth(pmesh);
-            const double factor = 2.0; // problem 2 needs at least this
+            // problem 2 needs at least this factor
+            const double factor = 2.0;
             if (new_depth > depth) { dt /= factor; }
             if (new_depth < depth) { dt *= factor; }
             if (new_depth != depth)
@@ -871,7 +874,9 @@ int main(int argc, char *argv[])
                depth = new_depth;
                if (myid == 0)
                {
-                  std::cout << "time step: " << ti << ", time: " << t << ", dt: " << dt;
+                  std::cout << "time step: " << ti
+                            << ", time: " << t
+                            << ", dt: " << dt;
                   std::cout << endl;
                }
             }
@@ -958,40 +963,6 @@ int main(int argc, char *argv[])
             }
          }
       }
-
-      /// CHECK mass before AMR ///
-      /*if (myid == 0)
-      {
-         ml.SpMat().GetDiag(lumpedM);
-         masses = lumpedM;
-         double mass_u, mass_u_loc = masses * u;
-         MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-         std::cout << setprecision(10)
-                   << "Before AMR, u size:" << u.Size() << std::endl
-                   << "Current mass u: " << mass_u << std::endl
-                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
-      }*/
-
-      /// AMR UPDATE ///
-      /*if (amr)
-      {
-         AMR->Update(adv, ode_solver, S, offset,
-                     lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
-                     lumpedM, mass0_u, inflow_gf, inflow);
-      }*/
-
-      /// CHECK mass after AMR ///
-      /*if (myid == 0)
-      {
-         ml.SpMat().GetDiag(lumpedM);
-         masses = lumpedM;
-         double mass_u, mass_u_loc = masses * u;
-         MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-         std::cout << setprecision(10)
-                   << "After AMR, u size:" << u.Size() << std::endl
-                   << "Current mass u: " << mass_u << std::endl
-                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
-      }*/
 
       if (exec_mode == 1)
       {

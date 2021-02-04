@@ -24,6 +24,10 @@ namespace mfem
 
 int GetMeshDepth(ParMesh &pmesh);
 
+void GetPerElementMinMax(const ParGridFunction &gf,
+                         Vector &elem_min, Vector &elem_max,
+                         int int_order = -1);
+
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 
