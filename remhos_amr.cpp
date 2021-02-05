@@ -376,64 +376,94 @@ void Operator::Update(AdvectionOperator &adv,
    {
       dbg("Got at least one (%f), NE:%d!", derefs.Max(), pmesh.GetNE());
 
-      Table coarse_to_fine;
-      Table ref_type_to_matrix;
-      Array<int> coarse_to_ref_type;
-      Array<Geometry::Type> ref_type_to_geom;
-      const CoarseFineTransformations &rtrans =
-         pmesh.GetRefinementTransforms();
-      rtrans.GetCoarseToFineMap(pmesh,
-                                coarse_to_fine,
-                                coarse_to_ref_type,
-                                ref_type_to_matrix,
-                                ref_type_to_geom);
-      Array<int> tabrow;
-      const double threshold = 1.0;
+      ///////////////////////////////////////////////////////////////////////
+      /*{
+         // Only serial ?
+         assert(pmesh.GetNRanks() == 1);
 
-      Vector local_err(pmesh.GetNE());
-      local_err = 2.0 * threshold; // 8.0 in aggregated error
+         Table coarse_to_fine;
+         Table ref_type_to_matrix;
+         Array<int> coarse_to_ref_type;
+         Array<Geometry::Type> ref_type_to_geom;
 
-      const int op = 1; // 0:min, 1:sum, 2:max
-      int n_derefs = 0;
+         const CoarseFineTransformations &rtrans = pmesh.GetRefinementTransforms();
+         rtrans.GetCoarseToFineMap(pmesh,
+                                   coarse_to_fine,
+                                   coarse_to_ref_type,
+                                   ref_type_to_matrix,
+                                   ref_type_to_geom);
+         Array<int> tabrow;
+         const double threshold = 1.0;
 
-      assert(derefs.Size() == pmesh.GetNE());
-      assert(local_err.Size() == pmesh.GetNE());
+         Vector local_err(pmesh.GetNE());
+         local_err = 2.0 * threshold; // 8.0 in aggregated error
 
-      dbg("coarse_to_fine:%d",coarse_to_fine.Size());
+         //const int op = 1; // 0:min, 1:sum, 2:max
+         int n_derefs = 0;
 
-      for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
-      {
-         coarse_to_fine.GetRow(coarse_e, tabrow);
-         const int tabsz = tabrow.Size();
-         dbg("Scanning element #%d (%d)", coarse_e, tabsz);
-         //dbg("tabrow:"); tabrow.Print();
-         if (tabsz != 4) { continue; }
-         bool all_four = true;
-         for (int j = 0; j < tabrow.Size(); j++)
+         assert(derefs.Size() == pmesh.GetNE());
+         assert(local_err.Size() == pmesh.GetNE());
+
+         dbg("coarse_to_fine:%d",coarse_to_fine.Size());
+
+         for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
          {
-            const int fine_e = tabrow[j];
-            const double rho = derefs(fine_e);
-            dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
-            all_four &= rho > opt.deref_threshold;
-         }
+            coarse_to_fine.GetRow(coarse_e, tabrow);
+            const int tabsz = tabrow.Size();
+            dbg("Scanning element #%d (%d)", coarse_e, tabsz);
+            //dbg("tabrow:"); tabrow.Print();
+            if (tabsz != 4) { continue; }
+            bool all_four = true;
+            for (int j = 0; j < tabrow.Size(); j++)
+            {
+               const int fine_e = tabrow[j];
+               const double rho = derefs(fine_e);
+               dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
+               all_four &= rho > opt.deref_threshold;
+            }
 
-         if (!all_four) { continue; }
-         dbg("\033[31mDERFINE #%d",coarse_e);
-         for (int j = 0; j < tabrow.Size(); j++)
+            if (!all_four) { continue; }
+            dbg("\033[31mDERFINE #%d",coarse_e);
+            for (int j = 0; j < tabrow.Size(); j++)
+            {
+               const int fine_e = tabrow[j];
+               local_err(fine_e) = 0.0;
+            }
+            n_derefs += 1;
+         }
+         if (myid == 0 && n_derefs > 0)
          {
-            const int fine_e = tabrow[j];
-            local_err(fine_e) = 0.0;
+            std::cout << "\033[31m DE-Refined " << n_derefs
+                      << " elements.\033[m" << std::endl;
+            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
          }
-         n_derefs += 1;
-      }
-      mesh_derefined =
-         pmesh.DerefineByError(local_err, threshold, opt.nc_limit, op);
-
-      if (myid == 0 && n_derefs > 0)
+      }*/
+      ///////////////////////////////////////////////////////////////////////
       {
-         std::cout << "\033[31m DE-Refined " << n_derefs
-                   << " elements.\033[m" << std::endl;
-         if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
+         const int NE = pmesh.GetNE();
+         const double threshold = opt.deref_threshold;
+
+         Vector local_err(NE);
+         local_err = threshold;
+
+         for (int e = 0; e < NE; e++)
+         {
+            const double rho = derefs(e);
+            dbg("#%d derefs: %f", e, derefs(e));
+            local_err(e) = 1.0 - rho;
+            dbg("#%d local_err: %f", e, local_err(e));
+         }
+         //dbg("local_err: "); local_err.Print();
+         dbg("threshold: %f",threshold);
+         const int op = 2; // 0:min, 1:sum, 2:max
+         mesh_derefined =
+            pmesh.DerefineByError(local_err, threshold, 1, op);
+
+         if (myid == 0 && mesh_derefined)
+         {
+            std::cout << "\033[31m DE-Refined.\033[m" << std::endl;
+            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
+         }
       }
    }
    else if ((opt.estimator == amr::Estimator::ZZ ||

@@ -241,7 +241,7 @@ int main(int argc, char *argv[])
 
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
-   mesh->Finalize(true);
+   //mesh->Finalize(true);
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
@@ -274,7 +274,8 @@ int main(int argc, char *argv[])
                          dynamic_cast<const L2_FECollection *>
                          (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh.SetCurvature(mesh_order, periodic);
-   //pmesh.EnsureNCMesh();
+
+   if (amr) { pmesh.EnsureNCMesh(); }
 
    FiniteElementCollection *mesh_fec;
    if (periodic)
