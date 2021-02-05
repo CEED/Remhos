@@ -457,7 +457,7 @@ void Operator::Update(AdvectionOperator &adv,
          dbg("threshold: %f",threshold);
          const int op = 2; // 0:min, 1:sum, 2:max
          mesh_derefined =
-            pmesh.DerefineByError(local_err, threshold, 1, op);
+            pmesh.DerefineByError(local_err, threshold, 0, op);
 
          if (myid == 0 && mesh_derefined)
          {

@@ -111,10 +111,11 @@ int main(int argc, char *argv[])
    const char *device_config = "cpu";
    bool amr = false;
    int amr_estimator = amr::Estimator::L2ZZ;
-   double amr_ref_threshold = 1e-3;
+   double amr_ref_threshold = 2e-3;
    double amr_deref_threshold = 1e-5;
-   int amr_max_level = 1;
+   int amr_max_level = 2; // only for JJt
    int amr_nc_limit = 0;
+   double dt_factor = 2.0;
 
    int precision = 8;
    cout.precision(precision);
@@ -168,6 +169,8 @@ int main(int argc, char *argv[])
                   "Final time; start time is 0.");
    args.AddOption(&dt, "-dt", "--time-step",
                   "Time step.");
+   args.AddOption(&dt_factor, "-df", "--time-step-factor",
+                  "Time step factor when adding an AMR depth level.");
    args.AddOption(&max_tsteps, "-ms", "--max-steps",
                   "Maximum number of steps (negative means no restriction).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
@@ -645,6 +648,11 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
+   {
+      Vector tmp;
+      u.GetTrueDofs(tmp);
+      u.SetFromTrueDofs(tmp);
+   }
    dbg("pmesh.GetNE: %d, u.Size: %d", pmesh.GetNE(), u.Size());
 
    // For the case of product remap, we also solve for s and u_s.
@@ -864,10 +872,8 @@ int main(int argc, char *argv[])
          for (int ref_it = 1; ; ref_it++)
          {
             const int new_depth = mfem::GetMeshDepth(pmesh);
-            // problem 2 needs at least this factor
-            const double factor = 2.0;
-            if (new_depth > depth) { dt /= factor; }
-            if (new_depth < depth) { dt *= factor; }
+            if (new_depth > depth) { dt /= dt_factor; }
+            if (new_depth < depth) { dt *= dt_factor; }
             if (new_depth != depth)
             {
                double dt_real = min(dt, t_final - t);
@@ -935,6 +941,12 @@ int main(int argc, char *argv[])
       //S has been modified, update the alias
       u.SyncMemory(S);
       if (product_sync) { us.SyncMemory(S); }
+
+      {
+         Vector tmp;
+         u.GetTrueDofs(tmp);
+         u.SetFromTrueDofs(tmp);
+      }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
