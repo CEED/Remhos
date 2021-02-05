@@ -237,6 +237,14 @@ int main(int argc, char *argv[])
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
+   // Only standard assembly in 1D (some mfem functions just abort in 1D).
+   if ((pa || next_gen_full) && dim == 1)
+   {
+      MFEM_WARNING("Disabling PA / FA for 1D.");
+      pa = false;
+      next_gen_full = false;
+   }
+
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
@@ -1121,14 +1129,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      if(const PAResidualDistribution *RD_ptr =
-         dynamic_cast<const PAResidualDistribution*>(lo_solver))
+      if(auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
       {
         RD_ptr->SampleVelocity(FaceType::Interior);
         RD_ptr->SampleVelocity(FaceType::Boundary);
         RD_ptr->SetupPA(FaceType::Interior);
         RD_ptr->SetupPA(FaceType::Boundary);
-      }else
+      }
+      else
       {
         for (int k = 0; k < ne; k++)
         {
