@@ -388,7 +388,7 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
                       SparseMatrix &flux_mat, Vector &du) const
 {
    Vector &a_pos_n = coeff_pos.FaceNbrData(),
-           &a_neg_n = coeff_neg.FaceNbrData();
+          &a_neg_n = coeff_neg.FaceNbrData();
    coeff_pos.ExchangeFaceNbrData();
    coeff_neg.ExchangeFaceNbrData();
 

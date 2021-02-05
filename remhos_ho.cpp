@@ -76,21 +76,16 @@ LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
+   MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+               "PA for DG is not supported for Local Inverse.");
+
    Vector rhs(u.Size());
 
-   HypreParMatrix *K_mat = NULL;
-   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
-   {
-      MFEM_ABORT("PA for DG is not supported for Local Inverse.");
-   }
-   else
-   {
-      K.SpMat().HostReadWriteI();
-      K.SpMat().HostReadWriteJ();
-      K.SpMat().HostReadWriteData();
-      K_mat = K.ParallelAssemble(&K.SpMat());
-      K_mat->Mult(u, rhs);
-   }
+   K.SpMat().HostReadWriteI();
+   K.SpMat().HostReadWriteJ();
+   K.SpMat().HostReadWriteData();
+   HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
+   K_mat->Mult(u, rhs);
 
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
