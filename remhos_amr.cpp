@@ -215,8 +215,14 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    h1_fec(new H1_FECollection(opt.mesh_order, dim)),
    l2_fec(new L2_FECollection(opt.mesh_order, dim)),
    flux_fec(opt.estimator == Estimator::ZZ ? h1_fec : l2_fec),
-   flux_fes(new ParFiniteElementSpace(&pmesh, flux_fec, dim))
+   flux_fes(new ParFiniteElementSpace(&pmesh, flux_fec, dim)),
+   quad_JJt(1, 1, Element::QUADRILATERAL)
 {
+   constexpr int SDIM = 3;
+   constexpr bool discont = false;
+   constexpr int ordering = Ordering::byVDIM;
+   quad_JJt.SetCurvature(lorder_JJt, discont, SDIM, ordering);
+
    dbg("AMR Setup: order:%d, mesh_order:%d", opt.order, opt.mesh_order);
    if (myid == 0)
    {
@@ -313,10 +319,14 @@ void Operator::Apply()
    mesh_refined = nref > 0;
    dbg("mesh_refined: %s", mesh_refined ? "yes" : "no");
 
+   MPI_Comm comm = pmesh.GetComm();
+   double derefs_max_loc = derefs.Max();
+   MPI_Allreduce(&derefs_max_loc, &derefs_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+
    mesh_derefined = !mesh_refined &&
                     pmesh.GetLastOperation() == Mesh::REFINE &&
-                    derefs.Max() > 0.0;
-   dbg("JJt: %s, derefs.Max():%f", JJt ? "yes" : "no", derefs.Max());
+                    derefs_max > 0.0;
+   dbg("JJt: %s, derefs.Max():%f", JJt ? "yes" : "no", derefs_max);
    dbg("mesh_derefined: %s", mesh_derefined ? "yes" : "no");
 }
 
@@ -344,7 +354,6 @@ void Operator::Update(AdvectionOperator &adv,
                       ParFiniteElementSpace *pfes_sub,
                       ParGridFunction *xsub,
                       ParGridFunction &v_sub_gf,
-                      Vector &lumpedM,
                       const double mass0_u,
                       ParGridFunction &inflow_gf,
                       FunctionCoefficient &inflow)
@@ -368,102 +377,27 @@ void Operator::Update(AdvectionOperator &adv,
                    << " elements.\033[m" << std::endl;
       }
    }
-   /// deref only for custom for now
-   //else if (opt.estimator == amr::estimator::custom &&
-   //         opt.deref_threshold >= 0.0 && !mesh_refined)
-   /// JJt deref
-   else if (mesh_derefined && derefs.Max() > 0.0)
+   else if (mesh_derefined && derefs_max > 0.0)
    {
-      dbg("Got at least one (%f), NE:%d!", derefs.Max(), pmesh.GetNE());
+      dbg("Got at least one (%f), NE:%d!", derefs_max, pmesh.GetNE());
+      const int NE = pmesh.GetNE();
+      const double threshold = opt.deref_threshold;
 
-      ///////////////////////////////////////////////////////////////////////
-      /*{
-         // Only serial ?
-         assert(pmesh.GetNRanks() == 1);
-
-         Table coarse_to_fine;
-         Table ref_type_to_matrix;
-         Array<int> coarse_to_ref_type;
-         Array<Geometry::Type> ref_type_to_geom;
-
-         const CoarseFineTransformations &rtrans = pmesh.GetRefinementTransforms();
-         rtrans.GetCoarseToFineMap(pmesh,
-                                   coarse_to_fine,
-                                   coarse_to_ref_type,
-                                   ref_type_to_matrix,
-                                   ref_type_to_geom);
-         Array<int> tabrow;
-         const double threshold = 1.0;
-
-         Vector local_err(pmesh.GetNE());
-         local_err = 2.0 * threshold; // 8.0 in aggregated error
-
-         //const int op = 1; // 0:min, 1:sum, 2:max
-         int n_derefs = 0;
-
-         assert(derefs.Size() == pmesh.GetNE());
-         assert(local_err.Size() == pmesh.GetNE());
-
-         dbg("coarse_to_fine:%d",coarse_to_fine.Size());
-
-         for (int coarse_e = 0; coarse_e < coarse_to_fine.Size(); coarse_e++)
-         {
-            coarse_to_fine.GetRow(coarse_e, tabrow);
-            const int tabsz = tabrow.Size();
-            dbg("Scanning element #%d (%d)", coarse_e, tabsz);
-            //dbg("tabrow:"); tabrow.Print();
-            if (tabsz != 4) { continue; }
-            bool all_four = true;
-            for (int j = 0; j < tabrow.Size(); j++)
-            {
-               const int fine_e = tabrow[j];
-               const double rho = derefs(fine_e);
-               dbg("\t#%d -> %d: %.4e", coarse_e, fine_e, rho);
-               all_four &= rho > opt.deref_threshold;
-            }
-
-            if (!all_four) { continue; }
-            dbg("\033[31mDERFINE #%d",coarse_e);
-            for (int j = 0; j < tabrow.Size(); j++)
-            {
-               const int fine_e = tabrow[j];
-               local_err(fine_e) = 0.0;
-            }
-            n_derefs += 1;
-         }
-         if (myid == 0 && n_derefs > 0)
-         {
-            std::cout << "\033[31m DE-Refined " << n_derefs
-                      << " elements.\033[m" << std::endl;
-            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
-         }
-      }*/
-      ///////////////////////////////////////////////////////////////////////
+      Vector local_err(NE);
+      local_err = threshold;
+      for (int e = 0; e < NE; e++)
       {
-         const int NE = pmesh.GetNE();
-         const double threshold = opt.deref_threshold;
+         const double rho = derefs(e);
+         local_err(e) = 1.0 - rho;
+      }
+      const int op = 2; // 0:min, 1:sum, 2:max
+      mesh_derefined =
+         pmesh.DerefineByError(local_err, threshold, 0, op);
 
-         Vector local_err(NE);
-         local_err = threshold;
-
-         for (int e = 0; e < NE; e++)
-         {
-            const double rho = derefs(e);
-            dbg("#%d derefs: %f", e, derefs(e));
-            local_err(e) = 1.0 - rho;
-            dbg("#%d local_err: %f", e, local_err(e));
-         }
-         //dbg("local_err: "); local_err.Print();
-         dbg("threshold: %f",threshold);
-         const int op = 2; // 0:min, 1:sum, 2:max
-         mesh_derefined =
-            pmesh.DerefineByError(local_err, threshold, 0, op);
-
-         if (myid == 0 && mesh_derefined)
-         {
-            std::cout << "\033[31m DE-Refined.\033[m" << std::endl;
-            if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
-         }
+      if (myid == 0 && mesh_derefined)
+      {
+         std::cout << "\033[31m DE-Refined.\033[m" << std::endl;
+         if (opt.nc_limit) { MFEM_VERIFY(mesh_derefined,""); }
       }
    }
    else if ((opt.estimator == amr::Estimator::ZZ ||
@@ -476,7 +410,7 @@ void Operator::Update(AdvectionOperator &adv,
    UpdateAndRebalance(S, offset, lom, subcell_mesh, pfes_sub, xsub, v_sub_gf);
 
    if (opt.estimator == Estimator::JJt &&
-       ((derefs.Max() > 0.0) && !mesh_derefined && !mesh_refined))
+       ((derefs_max > 0.0) && !mesh_derefined && !mesh_refined))
    {
       dbg("Updates aborted!");
       derefs = 0.0;
@@ -491,8 +425,6 @@ void Operator::Update(AdvectionOperator &adv,
    adv.AMRUpdate(S, u, mass0_u);
 
    ode_solver->Init(adv);
-   dbg("done");
-
 }
 
 /// Internall AMR update
@@ -505,15 +437,12 @@ void Operator::UpdateAndRebalance(BlockVector &S,
                                   ParGridFunction &v_sub_gf)
 {
    dbg("AMR Operator Update");
-   dbg("pfes VSize:%d", pfes.GetVSize());
-
    Vector tmp;
    u.GetTrueDofs(tmp);
    u.SetFromTrueDofs(tmp);
 
    if (mesh_refined)
    {
-      dbg("\033[32mREFINE");
       pfes.Update();
 
       const int vsize = pfes.GetVSize();
@@ -525,7 +454,6 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       S.Update(offset, Device::GetMemoryType());
 
       const mfem::Operator *R = pfes.GetUpdateOperator();
-      dbg("R: %dx%d", R->Width(), R->Height());
 
       R->Mult(S_bkp.GetBlock(0), S.GetBlock(0));
 
@@ -533,7 +461,7 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
    }
-   else if (derefs.Max() > 0.0 || mesh_derefined)
+   else if (derefs_max > 0.0 || mesh_derefined)
    {
       if (!mesh_derefined && opt.estimator == Estimator::JJt)
       {
@@ -542,82 +470,31 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       }
 
       dbg("DEREFINE");
-
       ParGridFunction U = u;
 
-#define PAR_P
-#ifdef PAR_P
-      //ParFiniteElementSpace fes_lor = pfes;
-      //Mass mass_lor(pfes);
-      //DGMass dg_mass_lor(pfes);
-
-      /*L2Projection lor_proj(pfes);
-      GridFunctionCoefficient fU(&U);
-      lor_proj.Project(fU, U);
-      U.ComputeL2Error(fU);*/
-#endif
-
-      //pfes.SetUpdateOperatorType(mfem::Operator::Type::MFEM_SPARSEMAT);
-      dbg("pfes:%d", pfes.GetVSize());
-      dbg("Update");
       pfes.Update();
-      dbg("updated pfes:%d", pfes.GetVSize());
 
       const int vsize = pfes.GetVSize();
       MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
       offset[0] = 0;
       offset[1] = vsize;
 
-      dbg("S:%d", S.Size());
 
       S.Update(offset, Device::GetMemoryType());
-      dbg("S.GetBlock(0) size:%d", S.GetBlock(0).Size());
 
       const mfem::Operator *R = pfes.GetUpdateOperator();
       assert(R);
-      dbg("Rop: %dx%d", R->Width(), R->Height());
-      assert(R->GetType() == mfem::Operator::ANY_TYPE);
 
       OperatorHandle Th;
       pfes.GetUpdateOperator(Th);
       SparseMatrix *Pth = Th.As<SparseMatrix>();
       assert(Pth);
-      dbg("\033[31mPop: %dx%d, type:%d", Pth->Width(), Pth->Height(), Pth->GetType());
-      assert(Pth->GetType() == mfem::Operator::MFEM_SPARSEMAT);
 
-      dbg("u.MakeRef");
       u.MakeRef(&pfes, S, offset[0]);
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
 
-#ifdef PAR_P
-#if 0
-      dbg("AMR_P");
-      Mass M_coarse(pfes);
-      dbg("Pop: %dx%d", Pth->Width(), Pth->Height());
-      AMR_P P(M_refine, M_coarse, *Pth);
-      u = 0.0;
-      dbg("U:%d, u:%d", U.Size(),  u.Size());
-      P.Mult(U, u);
-#else
-      /*dbg("TransferP");
-      ParFiniteElementSpace &fes_ho = pfes;
-      TransferP P(fes_ho, R, dg_mass_lor, fes_lor);
-      dbg("P.Mult");
-      P.Mult(U, u);
-      dbg("ml");*/
-
       R->Mult(U, u);
-
-      /*printf("\033[33mL2Projection\033[m\n");
-      L2Projection ho_proj(pfes);
-      GridFunctionCoefficient fu(&u);
-      ho_proj.Project(fu, u);*/
-#endif
-#else
-      dbg("R->Mult");
-      R->Mult(U, u);
-#endif
    }
    else { assert(false); }
 
@@ -629,529 +506,6 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       dbg("\033[31mXSUB!!");
       xsub->ParFESpace()->Update();
       xsub->Update();
-   }
-   dbg("done");
-}
-
-/// L2Projection
-L2Projection::L2Projection(ParFiniteElementSpace &fes_)
-   : fes(fes_),
-     m(&fes),
-     b(&fes),
-     cg(fes.GetComm())
-{
-   m.AddDomainIntegrator(new MassIntegrator);
-   m.Assemble();
-   m.Finalize();
-
-   m.FormSystemMatrix(empty, M);
-   //prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
-
-   cg.SetRelTol(1e-12);
-   cg.SetAbsTol(1e-12);
-   cg.SetMaxIter(1000);
-   cg.SetPrintLevel(1);
-   cg.SetOperator(*M);
-   //cg.SetPreconditioner(*prec);
-}
-
-void L2Projection::Project(Coefficient &coeff, ParGridFunction &u)
-{
-   Array<LinearFormIntegrator*> &integs = *b.GetDLFI();
-   if (integs.Size() > 0)
-   {
-      for (int i=0; i<integs.Size(); ++i)
-      {
-         delete integs[i];
-      }
-      integs.DeleteAll();
-   }
-   b.AddDomainIntegrator(new DomainLFIntegrator(coeff, 2, 10));
-   b.Assemble();
-
-   u = 0.0;
-
-   const mfem::Operator &P = *fes.GetProlongationMatrix();
-   Vector B(fes.GetTrueVSize());
-   P.MultTranspose(b, B);
-   Vector X(B.Size());
-   X = 0.0;
-
-   cg.Mult(B, X);
-
-   P.Mult(X, u);
-}
-
-/// TransferR
-TransferR::TransferR(ParFiniteElementSpace &fes_ho,
-                     ParFiniteElementSpace &fes_lor)
-   : Operator(fes_lor.GetVSize(), fes_ho.GetVSize()),
-     mass_mixed(fes_ho, fes_lor),
-     mass_lor(fes_lor)
-{
-}
-
-void TransferR::Mult(const Vector &x, Vector &y) const
-{
-   mass_mixed.Mult(x, y);
-   mass_lor.Solve(y);
-}
-
-void TransferR::MultTranspose(const Vector &x, Vector &y) const
-{
-   Minvx.SetSize(x.Size());
-   mass_lor.Solve(x, Minvx);
-   mass_mixed.MultTranspose(Minvx, y);
-}
-
-/// PtRtMRPOperator
-PtRtMRPOperator::PtRtMRPOperator(const Operator &P_,
-                                 const Operator &R_,
-                                 const Operator &M_)
-   : Operator(P_.Width()), P(P_), R(R_), M(M_)
-{
-   z1.SetSize(P.Height());
-   z2.SetSize(R.Height());
-   z3.SetSize(z2.Size());
-}
-
-void PtRtMRPOperator::Mult(const Vector &x, Vector &y) const
-{
-   P.Mult(x, z1);
-   R.Mult(z1, z2);
-   M.Mult(z2, z3);
-   R.MultTranspose(z3, z1);
-   P.MultTranspose(z1, y);
-}
-
-/// Transfer P
-TransferP::TransferP(ParFiniteElementSpace &fes_ho,
-                     const mfem::Operator *R_,
-                     //Mass mass_lor,
-                     DGMass &dg_mass_lor,
-                     ParFiniteElementSpace &fes_lor)
-   : Operator(fes_lor.GetTrueVSize(),
-              fes_ho.GetTrueVSize()),
-     R(*R_), // R(fes_ho, fes_lor),
-     P(*fes_ho.GetProlongationMatrix()),
-     mass_lor(/*R.mass_lor*/dg_mass_lor),
-     PtRtMRP(P, R, /*R.mass_lor*/dg_mass_lor),
-     cg(fes_ho.GetComm())
-{
-   dbg();
-   ParBilinearForm mass_ho(&fes_ho);
-   mass_ho.AddDomainIntegrator(new MassIntegrator);
-
-   dbg("mass_ho");
-   mass_ho.Assemble();
-   mass_ho.Finalize();
-   M_ho = mass_ho.ParallelAssemble();
-   //prec.reset(new HypreSmoother(*M_ho, 0));
-
-   cg.SetRelTol(1e-14);
-   cg.SetAbsTol(1e-14);
-   cg.SetMaxIter(1000);
-   cg.SetPrintLevel(1);
-   dbg("PtRtMRP");
-   cg.SetOperator(PtRtMRP);
-   //cg.SetPreconditioner(*prec);
-}
-
-void TransferP::Mult(const Vector &x, Vector &y) const
-{
-   dbg();
-   Y.SetSize(P.Width());
-   RtMx.SetSize(P.Height());
-   PtRtMx.SetSize(P.Width());
-   Mx.SetSize(x.Size());
-
-   mass_lor.Mult(x, Mx);
-   R.MultTranspose(Mx, RtMx);
-   P.MultTranspose(RtMx, PtRtMx);
-   Y = 0.0;
-   cg.Mult(PtRtMx, Y);
-   P.Mult(Y, y);
-}
-
-TransferP::~TransferP()
-{
-   delete M_ho;
-}
-
-/// AMR_P
-AMR_P::AMR_P(Mass &M_refine,
-             Mass &M_coarse,
-             const mfem::Operator &P)
-   : M_refine(M_refine),
-     M_coarse(M_coarse),
-     P(P),
-     rap(P, M_coarse, P),
-     cg(MPI_COMM_WORLD)
-{
-   dbg("M_refine:%d, M_coarse: %d", M_refine.vsize, M_coarse.vsize);
-   assert(M_refine.vsize > M_coarse.vsize);
-   cg.SetRelTol(1e-14);
-   cg.SetAbsTol(0.0);
-   cg.SetMaxIter(1000);
-   cg.SetPrintLevel(1);
-   cg.SetOperator(rap);
-   //cg.SetPreconditioner(*M_coarse.prec);
-}
-
-/// AMR_P Mult
-void AMR_P::Mult(const Vector &x, Vector &y) const
-{
-   dbg("\033[33m[AMR_P::Mult]");
-#if 0
-   z1.SetSize(x.Size());
-   z2.SetSize(x.Size());
-
-   dbg("\033[33m[AMR_P::Mult] M_refine.Mult: %d => %d", x.Size(), z1.Size());
-   M_refine.Mult(x, z1);
-
-   dbg("\033[33m[AMR_P::Mult] cg.Mult: %d => %d", z1.Size(), z2.Size());
-   cg.Mult(z1, z2);
-
-   dbg("\033[33m[AMR_P::Mult] P->Mult: %d => %d", z1.Size(), z2.Size());
-   P.Mult(z2, y);
-#else
-   z1.SetSize(x.Size());
-   z2.SetSize(y.Size());
-
-   dbg("\033[33m[AMR_P::Mult] M_refine.Mult: %d => %d", x.Size(), z1.Size());
-   M_refine.Mult(x, z1);
-
-   dbg("\033[33m[AMR_P::Mult] P->Mult: %d => %d", z1.Size(), z2.Size());
-   P.Mult(z1, z2);
-
-   dbg("\033[33m[AMR_P::Mult] M_coarse.Mult: %d => %d", z2.Size(), y.Size());
-   M_coarse.Mult(z2, y);
-#endif
-   dbg("\033[33mAMR_P::Mult done");
-}
-
-/// DGMass
-DGMass::DGMass(ParFiniteElementSpace &fes) : Operator(fes.GetTrueVSize())
-{
-   // Precompute local mass matrix inverses
-   nel = fes.GetNE();
-   vdim = fes.GetVDim();
-
-   MFEM_VERIFY(fes.GetOrdering() == Ordering::byNODES, "");
-
-   M_offsets.SetSize(nel+1);
-   vec_offsets.SetSize(nel+1);
-   vec_offsets[0] = 0;
-   M_offsets[0] = 0;
-   for (int i=0; i<nel; ++i)
-   {
-      int dof = fes.GetFE(i)->GetDof();
-      vec_offsets[i+1] = vec_offsets[i] + dof;
-      M_offsets[i+1] = M_offsets[i] + dof*dof;
-   }
-   // The final "offset" is the total size of all the blocks
-   M.SetSize(M_offsets[nel]);
-   Minv.SetSize(M_offsets[nel]);
-   ipiv.SetSize(vec_offsets[nel]);
-
-   // Assemble the local mass matrices and compute LU factorization
-   MassIntegrator mi;
-   for (int i=0; i<nel; ++i)
-   {
-      int offset = M_offsets[i];
-      const FiniteElement *fe = fes.GetFE(i);
-      ElementTransformation *tr = fes.GetElementTransformation(i);
-      IsoparametricTransformation iso_tr;
-      int dof = fe->GetDof();
-      DenseMatrix Me(&M[offset], dof, dof);
-      mi.AssembleElementMatrix(*fe, *tr, Me);
-      std::copy(&M[offset], M + M_offsets[i+1], &Minv[offset]);
-      LUFactors lu(&Minv[offset], &ipiv[vec_offsets[i]]);
-      lu.Factor(dof);
-   }
-}
-
-/// DGMass y = Mx
-void DGMass::Mult(const Vector &x, Vector &y) const
-{
-   for (int vd=0; vd<vdim; ++ vd)
-   {
-      for (int i=0; i<nel; ++i)
-      {
-         int dof = vec_offsets[i+1] - vec_offsets[i];
-         DenseMatrix Me(&M[M_offsets[i]], dof, dof);
-         int vo = vec_offsets[i] + vd*vec_offsets[nel];
-         Me.Mult(&x[vo], &y[vo]);
-      }
-   }
-}
-
-/// DGMass Solve Mx = b, overwrite b with solution x
-void DGMass::Solve(Vector &b) const
-{
-   for (int vd=0; vd<vdim; ++ vd)
-   {
-      for (int i=0; i<nel; ++i)
-      {
-         int dof = vec_offsets[i+1] - vec_offsets[i];
-         LUFactors lu(&Minv[M_offsets[i]], &ipiv[vec_offsets[i]]);
-         int vo = vec_offsets[i] + vd*vec_offsets[nel];
-         lu.Solve(dof, 1, &b[vo]);
-      }
-   }
-}
-
-/// DGMass Solve Mx = b
-void DGMass::Solve(const Vector &b, Vector &x) const
-{
-   x = b;
-   Solve(x);
-}
-
-/// Mass
-Mass::Mass(ParFiniteElementSpace &fes, bool pa)
-   : mfem::Operator(fes.GetVSize()),
-     vsize(fes.GetVSize()),
-     R_ptr(fes.GetRestrictionMatrix()),
-     R((assert(R_ptr),R_ptr->ToDenseMatrix())),
-     m(&fes),
-     cg(MPI_COMM_WORLD)
-{
-   dbg("[MASS] VSize:%d",vsize);
-
-   m.AddDomainIntegrator(new MassIntegrator);
-   m.Assemble();
-
-   if (!pa) { m.Finalize(); }
-
-   m.FormSystemMatrix(empty, M);
-   /*
-      if (pa) { prec.reset(new OperatorJacobiSmoother(m, empty)); }
-      else
-      {
-         if (M.Type() == mfem::Operator::Type::Hypre_ParCSR)
-         {
-            prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
-         }
-         else if (M.Type() == mfem::Operator::Type::MFEM_SPARSEMAT)
-         {
-            prec.reset(new DSmoother(*M.As<SparseMatrix>()));
-         }
-      }*/
-}
-
-/// Mass MULT
-void Mass::Mult(const Vector &x, Vector &y) const
-{
-   dbg("[Mass] vsize:%d", vsize);
-   assert(R);
-   if (!R)
-   {
-      dbg("!R");
-      M->Mult(x, y);
-   }
-   else
-   {
-      dbg("[Mass] R");
-      z1.SetSize(R->Height());
-      z2.SetSize(R->Height());
-
-      dbg("[Mass] R:%dx%d", R->Height(), R->Width());
-      dbg("[Mass] x:%d, z1:%d, y:%d", x.Size(), z1.Size(), y.Size());
-      dbg("[Mass] R->Mult");
-      R->Mult(x, z1);
-
-      dbg("[Mass] M->Mult");
-      M->Mult(z1, z2);
-      dbg("[Mass] R->MultTranspose");
-      R->MultTranspose(z2, y);
-      dbg("[Mass] done");
-   }
-}
-
-void MakeHO2LOR(Mesh &mesh_lor, Table &ho2lor)
-{
-   const CoarseFineTransformations &cf_tr = mesh_lor.GetRefinementTransforms();
-
-   int nref_max = 0;
-   Array<Geometry::Type> geoms;
-   mesh_lor.GetGeometries(mesh_lor.Dimension(), geoms);
-   for (int ig=0; ig<geoms.Size(); ++ig)
-   {
-      Geometry::Type geom = geoms[ig];
-      nref_max = std::max(nref_max, cf_tr.point_matrices[geom].SizeK());
-   }
-
-   int nel_ho = 0;
-   int nel_lor = mesh_lor.GetNE();
-   for (int ilor=0; ilor<nel_lor; ++ilor)
-   {
-      nel_ho = std::max(nel_ho, cf_tr.embeddings[ilor].parent + 1);
-   }
-
-   // Construct the mapping from HO to LOR
-   // ho2lor.GetRow(iho) will give all the LOR elements contained in iho
-   ho2lor.SetSize(nel_ho, nref_max);
-   for (int ilor=0; ilor<nel_lor; ++ilor)
-   {
-      int iho = cf_tr.embeddings[ilor].parent;
-      ho2lor.AddConnection(iho, ilor);
-   }
-   ho2lor.ShiftUpI();
-}
-
-LORMixedMass::LORMixedMass(ParFiniteElementSpace &fes_ho_,
-                           ParFiniteElementSpace &fes_lor_)
-   : Operator(fes_lor_.GetTrueVSize(), fes_ho_.GetTrueVSize()),
-     fes_ho(fes_ho_),
-     fes_lor(fes_lor_)
-{
-   Mesh &mesh_ho = *fes_ho.GetMesh();
-   MFEM_VERIFY(mesh_ho.GetNE() > 0, "");
-
-   const int nel_ho = fes_ho.GetNE();
-
-   const CoarseFineTransformations &cf_tr =
-      fes_lor.GetMesh()->GetRefinementTransforms();
-
-   MakeHO2LOR(*fes_lor.GetMesh(), ho2lor);
-
-   offsets.SetSize(nel_ho+1);
-   offsets[0] = 0;
-   for (int iho=0; iho<nel_ho; ++iho)
-   {
-      int nref = ho2lor.RowSize(iho);
-      const FiniteElement &fe_ho = *fes_ho.GetFE(iho);
-      const FiniteElement &fe_lor = *fes_lor.GetFE(ho2lor.GetRow(iho)[0]);
-      offsets[iho+1] = offsets[iho] + fe_ho.GetDof()*fe_lor.GetDof()*nref;
-   }
-   M_mixed.SetSize(offsets[nel_ho]);
-
-   IntegrationPointTransformation ip_tr;
-   IsoparametricTransformation &emb_tr = ip_tr.Transf;
-
-   for (int iho=0; iho<nel_ho; ++iho)
-   {
-      Array<int> lor_els;
-      int nref = ho2lor.RowSize(iho);
-      ho2lor.GetRow(iho, lor_els);
-
-      Geometry::Type geom = mesh_ho.GetElementBaseGeometry(iho);
-      const FiniteElement &fe_ho = *fes_ho.GetFE(iho);
-      const FiniteElement &fe_lor = *fes_lor.GetFE(lor_els[0]);
-      int ndof_ho = fe_ho.GetDof();
-      int ndof_lor = fe_lor.GetDof();
-
-      DenseMatrix M_mixed_el(ndof_lor, ndof_ho);
-      Vector shape_ho(ndof_ho);
-      Vector shape_lor(ndof_lor);
-
-      emb_tr.SetIdentityTransformation(geom);
-      const DenseTensor &pmats = cf_tr.point_matrices[geom];
-
-      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
-
-      for (int iref=0; iref<nref; ++iref)
-      {
-         int ilor = lor_els[iref];
-         ElementTransformation *el_tr = fes_lor.GetElementTransformation(ilor);
-
-         // Now assemble the block-row of the mixed mass matrix associated
-         // with integrating HO functions against LOR functions on the LOR
-         // sub-element.
-
-         // Create the transformation that embeds the fine low-order element
-         // within the coarse high-order element in reference space
-         emb_tr.SetPointMat(pmats(cf_tr.embeddings[ilor].matrix));
-
-         int order = fe_lor.GetOrder() + fe_ho.GetOrder() + el_tr->OrderW();
-         const IntegrationRule *ir = &IntRules.Get(geom, order);
-
-         M_mixed_el.SetSize(fe_lor.GetDof(), fe_ho.GetDof());
-         M_mixed_el = 0.0;
-         for (int i = 0; i < ir->GetNPoints(); i++)
-         {
-            const IntegrationPoint &ip_lor = ir->IntPoint(i);
-            IntegrationPoint ip_ho;
-            ip_tr.Transform(ip_lor, ip_ho);
-            fe_lor.CalcShape(ip_lor, shape_lor);
-            fe_ho.CalcShape(ip_ho, shape_ho);
-            el_tr->SetIntPoint(&ip_lor);
-            // For now we use the geometry information from the LOR space
-            // which means we won't be mass conservative if the mesh is curved
-            double w = el_tr->Weight()*ip_lor.weight;
-            shape_lor *= w;
-            AddMultVWt(shape_lor, shape_ho, M_mixed_el);
-         }
-         M_mixed_iho.CopyMN(M_mixed_el, iref*ndof_lor, 0);
-      }
-   }
-}
-
-void LORMixedMass::Mult(const Vector &x, Vector &y) const
-{
-   int vdim = fes_ho.GetVDim();
-   Array<int> vdofs;
-   DenseMatrix xel_mat, yel_mat;
-
-   for (int iho=0; iho<fes_ho.GetNE(); ++iho)
-   {
-      int nref = ho2lor.RowSize(iho);
-      int ndof_ho = fes_ho.GetFE(iho)->GetDof();
-      int ndof_lor = fes_lor.GetFE(ho2lor.GetRow(iho)[0])->GetDof();
-      xel_mat.SetSize(ndof_ho, vdim);
-      yel_mat.SetSize(ndof_lor*nref, vdim);
-      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
-
-      fes_ho.GetElementVDofs(iho, vdofs);
-      x.GetSubVector(vdofs, xel_mat.GetData());
-      mfem::Mult(M_mixed_iho, xel_mat, yel_mat);
-      // Place result correctly into the low-order vector
-      for (int iref=0; iref<nref; ++iref)
-      {
-         int ilor = ho2lor.GetRow(iho)[iref];
-         for (int vd=0; vd<vdim; ++vd)
-         {
-            fes_lor.GetElementDofs(ilor, vdofs);
-            fes_lor.DofsToVDofs(vd, vdofs);
-            y.SetSubVector(vdofs, &yel_mat(iref*ndof_lor,vd));
-         }
-      }
-   }
-}
-
-void LORMixedMass::MultTranspose(const Vector &x, Vector &y) const
-{
-   int vdim = fes_ho.GetVDim();
-   Array<int> vdofs;
-   DenseMatrix xel_mat, yel_mat;
-
-   y = 0.0;
-   for (int iho=0; iho<fes_ho.GetNE(); ++iho)
-   {
-      int nref = ho2lor.RowSize(iho);
-      int ndof_ho = fes_ho.GetFE(iho)->GetDof();
-      int ndof_lor = fes_lor.GetFE(ho2lor.GetRow(iho)[0])->GetDof();
-      xel_mat.SetSize(ndof_lor*nref, vdim);
-      yel_mat.SetSize(ndof_ho, vdim);
-      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
-
-      // Extract the LOR DOFs
-      for (int iref=0; iref<nref; ++iref)
-      {
-         int ilor = ho2lor.GetRow(iho)[iref];
-         for (int vd=0; vd<vdim; ++vd)
-         {
-            fes_lor.GetElementDofs(ilor, vdofs);
-            fes_lor.DofsToVDofs(vd, vdofs);
-            x.GetSubVector(vdofs, &xel_mat(iref*ndof_lor, vd));
-         }
-      }
-      // Locally prolongate
-      mfem::MultAtB(M_mixed_iho, xel_mat, yel_mat);
-      // Place the result in the HO vector
-      fes_ho.GetElementVDofs(iho, vdofs);
-      y.AddElementVector(vdofs, yel_mat.GetData());
    }
 }
 
@@ -1199,15 +553,14 @@ void Operator::ApplyJJt()
    const int ref_factor = 2;
    // Specify the positions of the new vertices.
    const int ref_type = BasisType::ClosedUniform; // ClosedUniform || GaussLobatto
-   const int lorder = 1; // LOR space order
-   dbg("order:%d, ref_factor:%d, lorder:%d", horder, ref_factor, lorder);
-   //dbg("pmesh.GetNE:%d", pmesh.GetNE());
+
+   dbg("order:%d, ref_factor:%d, lorder:%d", horder, ref_factor, lorder_JJt);
 
    // Create the low-order refined mesh
    ParMesh mesh_lor(&pmesh, ref_factor, ref_type);
 
    L2_FECollection fec_ho(horder, dim);
-   L2_FECollection fec_lo(lorder, dim);
+   L2_FECollection fec_lo(lorder_JJt, dim);
    L2_FECollection fec0(0, dim);
 
    ParFiniteElementSpace fes_ho(&pmesh, &fec_ho);
@@ -1225,7 +578,7 @@ void Operator::ApplyJJt()
    const bool L2projection = true;
 
    const IntegrationRule &ir_ho = IntRules.Get(Geometry::SQUARE, horder + 1);
-   const IntegrationRule &ir_lo = IntRules.Get(Geometry::SQUARE, lorder + 1);
+   const IntegrationRule &ir_lo = IntRules.Get(Geometry::SQUARE, lorder_JJt + 1);
 
    if (L2projection)
    {
@@ -1277,12 +630,9 @@ void Operator::ApplyJJt()
 
    constexpr int DIM = 2;
    constexpr int SDIM = 3;
-   constexpr bool discont = false;
    DenseMatrix Jadjt, Jadj(DIM, SDIM);
-   Mesh quad(1, 1, Element::QUADRILATERAL);
-   constexpr int ordering = Ordering::byVDIM;
-   quad.SetCurvature(lorder, discont, SDIM, ordering);
-   GridFunction &q_nodes = *quad.GetNodes();
+
+   GridFunction &q_nodes = *quad_JJt.GetNodes();
    constexpr double NL_DMAX = std::numeric_limits<double>::max();
 
    for (int e = 0; e < mesh_lor.GetNE(); e++)
@@ -1310,7 +660,7 @@ void Operator::ApplyJJt()
       const int qe = 0;
       double minW = +NL_DMAX;
       double maxW = -NL_DMAX;
-      ElementTransformation *eTr = quad.GetElementTransformation(qe);
+      ElementTransformation *eTr = quad_JJt.GetElementTransformation(qe);
       for (int q = 0; q < nip; q++) // nip == 4
       {
          eTr->SetIntPoint(&ir_lo.IntPoint(q));
@@ -1321,7 +671,6 @@ void Operator::ApplyJJt()
          const double w = Jadjt.Weight();
          minW = std::fmin(minW, w);
          maxW = std::fmax(maxW, w);
-         //elemvect[q] = w;
       }
       assert(std::fabs(maxW) > 0.0);
       const double rho = minW / maxW;

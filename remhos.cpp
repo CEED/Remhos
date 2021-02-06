@@ -897,7 +897,7 @@ int main(int argc, char *argv[])
             dbg("AMR->Update");
             AMR->Update(adv, ode_solver, S, offset,
                         lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
-                        lumpedM, mass0_u, inflow_gf, inflow);
+                        mass0_u, inflow_gf, inflow);
             /*if (visualization)
             {
                MPI_Barrier(pmesh.GetComm());
@@ -923,7 +923,7 @@ int main(int argc, char *argv[])
             dbg("DEREFINE, AMR->Update");
             AMR->Update(adv, ode_solver, S, offset,
                         lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
-                        lumpedM, mass0_u, inflow_gf, inflow);
+                        mass0_u, inflow_gf, inflow);
             /*if (visualization)
             {
                MPI_Barrier(pmesh.GetComm());

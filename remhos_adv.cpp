@@ -134,6 +134,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    x_gf = u;
    dbg("ExchangeFaceNbrData");
    x_gf.ExchangeFaceNbrData();
+   dbg("done");
 
    if (mono_solver)
    {
