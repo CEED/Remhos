@@ -545,15 +545,23 @@ void Operator::UpdateAndRebalance(BlockVector &S,
 
       ParGridFunction U = u;
 
-      //Mass M_refine(pfes);
+#define PAR_P
+#ifdef PAR_P
+      //ParFiniteElementSpace fes_lor = pfes;
+      //Mass mass_lor(pfes);
+      //DGMass dg_mass_lor(pfes);
+
+      /*L2Projection lor_proj(pfes);
+      GridFunctionCoefficient fU(&U);
+      lor_proj.Project(fU, U);
+      U.ComputeL2Error(fU);*/
+#endif
 
       //pfes.SetUpdateOperatorType(mfem::Operator::Type::MFEM_SPARSEMAT);
       dbg("pfes:%d", pfes.GetVSize());
       dbg("Update");
       pfes.Update();
       dbg("updated pfes:%d", pfes.GetVSize());
-
-      //Mass M_coarse(pfes);
 
       const int vsize = pfes.GetVSize();
       MFEM_VERIFY(offset.Size() == 2, "!product_sync vs offset size error!");
@@ -572,30 +580,44 @@ void Operator::UpdateAndRebalance(BlockVector &S,
 
       OperatorHandle Th;
       pfes.GetUpdateOperator(Th);
-      SparseMatrix *Pop = Th.As<SparseMatrix>();
-      assert(Pop);
-      dbg("\033[31mPop: %dx%d, type:%d", Pop->Width(), Pop->Height(), Pop->GetType());
-      assert(Pop->GetType() == mfem::Operator::MFEM_SPARSEMAT);
+      SparseMatrix *Pth = Th.As<SparseMatrix>();
+      assert(Pth);
+      dbg("\033[31mPop: %dx%d, type:%d", Pth->Width(), Pth->Height(), Pth->GetType());
+      assert(Pth->GetType() == mfem::Operator::MFEM_SPARSEMAT);
 
       dbg("u.MakeRef");
       u.MakeRef(&pfes, S, offset[0]);
       MFEM_VERIFY(u.Size() == vsize,"");
       u.SyncMemory(S);
 
-#if 1
-      dbg("R->Mult");
-      R->Mult(U, u);
-#else
+#ifdef PAR_P
+#if 0
       dbg("AMR_P");
-      dbg("Pop: %dx%d", Pop->Width(), Pop->Height());
-      AMR_P P(M_refine, M_coarse, *Pop);
+      Mass M_coarse(pfes);
+      dbg("Pop: %dx%d", Pth->Width(), Pth->Height());
+      AMR_P P(M_refine, M_coarse, *Pth);
       u = 0.0;
       dbg("U:%d, u:%d", U.Size(),  u.Size());
       P.Mult(U, u);
+#else
+      /*dbg("TransferP");
+      ParFiniteElementSpace &fes_ho = pfes;
+      TransferP P(fes_ho, R, dg_mass_lor, fes_lor);
+      dbg("P.Mult");
+      P.Mult(U, u);
+      dbg("ml");*/
 
-      dbg("AMR_P done");
+      R->Mult(U, u);
+
+      /*printf("\033[33mL2Projection\033[m\n");
+      L2Projection ho_proj(pfes);
+      GridFunctionCoefficient fu(&u);
+      ho_proj.Project(fu, u);*/
 #endif
-
+#else
+      dbg("R->Mult");
+      R->Mult(U, u);
+#endif
    }
    else { assert(false); }
 
@@ -609,6 +631,151 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       xsub->Update();
    }
    dbg("done");
+}
+
+/// L2Projection
+L2Projection::L2Projection(ParFiniteElementSpace &fes_)
+   : fes(fes_),
+     m(&fes),
+     b(&fes),
+     cg(fes.GetComm())
+{
+   m.AddDomainIntegrator(new MassIntegrator);
+   m.Assemble();
+   m.Finalize();
+
+   m.FormSystemMatrix(empty, M);
+   //prec.reset(new HypreSmoother(*M.As<HypreParMatrix>()));
+
+   cg.SetRelTol(1e-12);
+   cg.SetAbsTol(1e-12);
+   cg.SetMaxIter(1000);
+   cg.SetPrintLevel(1);
+   cg.SetOperator(*M);
+   //cg.SetPreconditioner(*prec);
+}
+
+void L2Projection::Project(Coefficient &coeff, ParGridFunction &u)
+{
+   Array<LinearFormIntegrator*> &integs = *b.GetDLFI();
+   if (integs.Size() > 0)
+   {
+      for (int i=0; i<integs.Size(); ++i)
+      {
+         delete integs[i];
+      }
+      integs.DeleteAll();
+   }
+   b.AddDomainIntegrator(new DomainLFIntegrator(coeff, 2, 10));
+   b.Assemble();
+
+   u = 0.0;
+
+   const mfem::Operator &P = *fes.GetProlongationMatrix();
+   Vector B(fes.GetTrueVSize());
+   P.MultTranspose(b, B);
+   Vector X(B.Size());
+   X = 0.0;
+
+   cg.Mult(B, X);
+
+   P.Mult(X, u);
+}
+
+/// TransferR
+TransferR::TransferR(ParFiniteElementSpace &fes_ho,
+                     ParFiniteElementSpace &fes_lor)
+   : Operator(fes_lor.GetVSize(), fes_ho.GetVSize()),
+     mass_mixed(fes_ho, fes_lor),
+     mass_lor(fes_lor)
+{
+}
+
+void TransferR::Mult(const Vector &x, Vector &y) const
+{
+   mass_mixed.Mult(x, y);
+   mass_lor.Solve(y);
+}
+
+void TransferR::MultTranspose(const Vector &x, Vector &y) const
+{
+   Minvx.SetSize(x.Size());
+   mass_lor.Solve(x, Minvx);
+   mass_mixed.MultTranspose(Minvx, y);
+}
+
+/// PtRtMRPOperator
+PtRtMRPOperator::PtRtMRPOperator(const Operator &P_,
+                                 const Operator &R_,
+                                 const Operator &M_)
+   : Operator(P_.Width()), P(P_), R(R_), M(M_)
+{
+   z1.SetSize(P.Height());
+   z2.SetSize(R.Height());
+   z3.SetSize(z2.Size());
+}
+
+void PtRtMRPOperator::Mult(const Vector &x, Vector &y) const
+{
+   P.Mult(x, z1);
+   R.Mult(z1, z2);
+   M.Mult(z2, z3);
+   R.MultTranspose(z3, z1);
+   P.MultTranspose(z1, y);
+}
+
+/// Transfer P
+TransferP::TransferP(ParFiniteElementSpace &fes_ho,
+                     const mfem::Operator *R_,
+                     //Mass mass_lor,
+                     DGMass &dg_mass_lor,
+                     ParFiniteElementSpace &fes_lor)
+   : Operator(fes_lor.GetTrueVSize(),
+              fes_ho.GetTrueVSize()),
+     R(*R_), // R(fes_ho, fes_lor),
+     P(*fes_ho.GetProlongationMatrix()),
+     mass_lor(/*R.mass_lor*/dg_mass_lor),
+     PtRtMRP(P, R, /*R.mass_lor*/dg_mass_lor),
+     cg(fes_ho.GetComm())
+{
+   dbg();
+   ParBilinearForm mass_ho(&fes_ho);
+   mass_ho.AddDomainIntegrator(new MassIntegrator);
+
+   dbg("mass_ho");
+   mass_ho.Assemble();
+   mass_ho.Finalize();
+   M_ho = mass_ho.ParallelAssemble();
+   //prec.reset(new HypreSmoother(*M_ho, 0));
+
+   cg.SetRelTol(1e-14);
+   cg.SetAbsTol(1e-14);
+   cg.SetMaxIter(1000);
+   cg.SetPrintLevel(1);
+   dbg("PtRtMRP");
+   cg.SetOperator(PtRtMRP);
+   //cg.SetPreconditioner(*prec);
+}
+
+void TransferP::Mult(const Vector &x, Vector &y) const
+{
+   dbg();
+   Y.SetSize(P.Width());
+   RtMx.SetSize(P.Height());
+   PtRtMx.SetSize(P.Width());
+   Mx.SetSize(x.Size());
+
+   mass_lor.Mult(x, Mx);
+   R.MultTranspose(Mx, RtMx);
+   P.MultTranspose(RtMx, PtRtMx);
+   Y = 0.0;
+   cg.Mult(PtRtMx, Y);
+   P.Mult(Y, y);
+}
+
+TransferP::~TransferP()
+{
+   delete M_ho;
 }
 
 /// AMR_P
@@ -661,6 +828,84 @@ void AMR_P::Mult(const Vector &x, Vector &y) const
    M_coarse.Mult(z2, y);
 #endif
    dbg("\033[33mAMR_P::Mult done");
+}
+
+/// DGMass
+DGMass::DGMass(ParFiniteElementSpace &fes) : Operator(fes.GetTrueVSize())
+{
+   // Precompute local mass matrix inverses
+   nel = fes.GetNE();
+   vdim = fes.GetVDim();
+
+   MFEM_VERIFY(fes.GetOrdering() == Ordering::byNODES, "");
+
+   M_offsets.SetSize(nel+1);
+   vec_offsets.SetSize(nel+1);
+   vec_offsets[0] = 0;
+   M_offsets[0] = 0;
+   for (int i=0; i<nel; ++i)
+   {
+      int dof = fes.GetFE(i)->GetDof();
+      vec_offsets[i+1] = vec_offsets[i] + dof;
+      M_offsets[i+1] = M_offsets[i] + dof*dof;
+   }
+   // The final "offset" is the total size of all the blocks
+   M.SetSize(M_offsets[nel]);
+   Minv.SetSize(M_offsets[nel]);
+   ipiv.SetSize(vec_offsets[nel]);
+
+   // Assemble the local mass matrices and compute LU factorization
+   MassIntegrator mi;
+   for (int i=0; i<nel; ++i)
+   {
+      int offset = M_offsets[i];
+      const FiniteElement *fe = fes.GetFE(i);
+      ElementTransformation *tr = fes.GetElementTransformation(i);
+      IsoparametricTransformation iso_tr;
+      int dof = fe->GetDof();
+      DenseMatrix Me(&M[offset], dof, dof);
+      mi.AssembleElementMatrix(*fe, *tr, Me);
+      std::copy(&M[offset], M + M_offsets[i+1], &Minv[offset]);
+      LUFactors lu(&Minv[offset], &ipiv[vec_offsets[i]]);
+      lu.Factor(dof);
+   }
+}
+
+/// DGMass y = Mx
+void DGMass::Mult(const Vector &x, Vector &y) const
+{
+   for (int vd=0; vd<vdim; ++ vd)
+   {
+      for (int i=0; i<nel; ++i)
+      {
+         int dof = vec_offsets[i+1] - vec_offsets[i];
+         DenseMatrix Me(&M[M_offsets[i]], dof, dof);
+         int vo = vec_offsets[i] + vd*vec_offsets[nel];
+         Me.Mult(&x[vo], &y[vo]);
+      }
+   }
+}
+
+/// DGMass Solve Mx = b, overwrite b with solution x
+void DGMass::Solve(Vector &b) const
+{
+   for (int vd=0; vd<vdim; ++ vd)
+   {
+      for (int i=0; i<nel; ++i)
+      {
+         int dof = vec_offsets[i+1] - vec_offsets[i];
+         LUFactors lu(&Minv[M_offsets[i]], &ipiv[vec_offsets[i]]);
+         int vo = vec_offsets[i] + vd*vec_offsets[nel];
+         lu.Solve(dof, 1, &b[vo]);
+      }
+   }
+}
+
+/// DGMass Solve Mx = b
+void DGMass::Solve(const Vector &b, Vector &x) const
+{
+   x = b;
+   Solve(x);
 }
 
 /// Mass
@@ -721,6 +966,192 @@ void Mass::Mult(const Vector &x, Vector &y) const
       dbg("[Mass] R->MultTranspose");
       R->MultTranspose(z2, y);
       dbg("[Mass] done");
+   }
+}
+
+void MakeHO2LOR(Mesh &mesh_lor, Table &ho2lor)
+{
+   const CoarseFineTransformations &cf_tr = mesh_lor.GetRefinementTransforms();
+
+   int nref_max = 0;
+   Array<Geometry::Type> geoms;
+   mesh_lor.GetGeometries(mesh_lor.Dimension(), geoms);
+   for (int ig=0; ig<geoms.Size(); ++ig)
+   {
+      Geometry::Type geom = geoms[ig];
+      nref_max = std::max(nref_max, cf_tr.point_matrices[geom].SizeK());
+   }
+
+   int nel_ho = 0;
+   int nel_lor = mesh_lor.GetNE();
+   for (int ilor=0; ilor<nel_lor; ++ilor)
+   {
+      nel_ho = std::max(nel_ho, cf_tr.embeddings[ilor].parent + 1);
+   }
+
+   // Construct the mapping from HO to LOR
+   // ho2lor.GetRow(iho) will give all the LOR elements contained in iho
+   ho2lor.SetSize(nel_ho, nref_max);
+   for (int ilor=0; ilor<nel_lor; ++ilor)
+   {
+      int iho = cf_tr.embeddings[ilor].parent;
+      ho2lor.AddConnection(iho, ilor);
+   }
+   ho2lor.ShiftUpI();
+}
+
+LORMixedMass::LORMixedMass(ParFiniteElementSpace &fes_ho_,
+                           ParFiniteElementSpace &fes_lor_)
+   : Operator(fes_lor_.GetTrueVSize(), fes_ho_.GetTrueVSize()),
+     fes_ho(fes_ho_),
+     fes_lor(fes_lor_)
+{
+   Mesh &mesh_ho = *fes_ho.GetMesh();
+   MFEM_VERIFY(mesh_ho.GetNE() > 0, "");
+
+   const int nel_ho = fes_ho.GetNE();
+
+   const CoarseFineTransformations &cf_tr =
+      fes_lor.GetMesh()->GetRefinementTransforms();
+
+   MakeHO2LOR(*fes_lor.GetMesh(), ho2lor);
+
+   offsets.SetSize(nel_ho+1);
+   offsets[0] = 0;
+   for (int iho=0; iho<nel_ho; ++iho)
+   {
+      int nref = ho2lor.RowSize(iho);
+      const FiniteElement &fe_ho = *fes_ho.GetFE(iho);
+      const FiniteElement &fe_lor = *fes_lor.GetFE(ho2lor.GetRow(iho)[0]);
+      offsets[iho+1] = offsets[iho] + fe_ho.GetDof()*fe_lor.GetDof()*nref;
+   }
+   M_mixed.SetSize(offsets[nel_ho]);
+
+   IntegrationPointTransformation ip_tr;
+   IsoparametricTransformation &emb_tr = ip_tr.Transf;
+
+   for (int iho=0; iho<nel_ho; ++iho)
+   {
+      Array<int> lor_els;
+      int nref = ho2lor.RowSize(iho);
+      ho2lor.GetRow(iho, lor_els);
+
+      Geometry::Type geom = mesh_ho.GetElementBaseGeometry(iho);
+      const FiniteElement &fe_ho = *fes_ho.GetFE(iho);
+      const FiniteElement &fe_lor = *fes_lor.GetFE(lor_els[0]);
+      int ndof_ho = fe_ho.GetDof();
+      int ndof_lor = fe_lor.GetDof();
+
+      DenseMatrix M_mixed_el(ndof_lor, ndof_ho);
+      Vector shape_ho(ndof_ho);
+      Vector shape_lor(ndof_lor);
+
+      emb_tr.SetIdentityTransformation(geom);
+      const DenseTensor &pmats = cf_tr.point_matrices[geom];
+
+      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
+
+      for (int iref=0; iref<nref; ++iref)
+      {
+         int ilor = lor_els[iref];
+         ElementTransformation *el_tr = fes_lor.GetElementTransformation(ilor);
+
+         // Now assemble the block-row of the mixed mass matrix associated
+         // with integrating HO functions against LOR functions on the LOR
+         // sub-element.
+
+         // Create the transformation that embeds the fine low-order element
+         // within the coarse high-order element in reference space
+         emb_tr.SetPointMat(pmats(cf_tr.embeddings[ilor].matrix));
+
+         int order = fe_lor.GetOrder() + fe_ho.GetOrder() + el_tr->OrderW();
+         const IntegrationRule *ir = &IntRules.Get(geom, order);
+
+         M_mixed_el.SetSize(fe_lor.GetDof(), fe_ho.GetDof());
+         M_mixed_el = 0.0;
+         for (int i = 0; i < ir->GetNPoints(); i++)
+         {
+            const IntegrationPoint &ip_lor = ir->IntPoint(i);
+            IntegrationPoint ip_ho;
+            ip_tr.Transform(ip_lor, ip_ho);
+            fe_lor.CalcShape(ip_lor, shape_lor);
+            fe_ho.CalcShape(ip_ho, shape_ho);
+            el_tr->SetIntPoint(&ip_lor);
+            // For now we use the geometry information from the LOR space
+            // which means we won't be mass conservative if the mesh is curved
+            double w = el_tr->Weight()*ip_lor.weight;
+            shape_lor *= w;
+            AddMultVWt(shape_lor, shape_ho, M_mixed_el);
+         }
+         M_mixed_iho.CopyMN(M_mixed_el, iref*ndof_lor, 0);
+      }
+   }
+}
+
+void LORMixedMass::Mult(const Vector &x, Vector &y) const
+{
+   int vdim = fes_ho.GetVDim();
+   Array<int> vdofs;
+   DenseMatrix xel_mat, yel_mat;
+
+   for (int iho=0; iho<fes_ho.GetNE(); ++iho)
+   {
+      int nref = ho2lor.RowSize(iho);
+      int ndof_ho = fes_ho.GetFE(iho)->GetDof();
+      int ndof_lor = fes_lor.GetFE(ho2lor.GetRow(iho)[0])->GetDof();
+      xel_mat.SetSize(ndof_ho, vdim);
+      yel_mat.SetSize(ndof_lor*nref, vdim);
+      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
+
+      fes_ho.GetElementVDofs(iho, vdofs);
+      x.GetSubVector(vdofs, xel_mat.GetData());
+      mfem::Mult(M_mixed_iho, xel_mat, yel_mat);
+      // Place result correctly into the low-order vector
+      for (int iref=0; iref<nref; ++iref)
+      {
+         int ilor = ho2lor.GetRow(iho)[iref];
+         for (int vd=0; vd<vdim; ++vd)
+         {
+            fes_lor.GetElementDofs(ilor, vdofs);
+            fes_lor.DofsToVDofs(vd, vdofs);
+            y.SetSubVector(vdofs, &yel_mat(iref*ndof_lor,vd));
+         }
+      }
+   }
+}
+
+void LORMixedMass::MultTranspose(const Vector &x, Vector &y) const
+{
+   int vdim = fes_ho.GetVDim();
+   Array<int> vdofs;
+   DenseMatrix xel_mat, yel_mat;
+
+   y = 0.0;
+   for (int iho=0; iho<fes_ho.GetNE(); ++iho)
+   {
+      int nref = ho2lor.RowSize(iho);
+      int ndof_ho = fes_ho.GetFE(iho)->GetDof();
+      int ndof_lor = fes_lor.GetFE(ho2lor.GetRow(iho)[0])->GetDof();
+      xel_mat.SetSize(ndof_lor*nref, vdim);
+      yel_mat.SetSize(ndof_ho, vdim);
+      DenseMatrix M_mixed_iho(&M_mixed[offsets[iho]], ndof_lor*nref, ndof_ho);
+
+      // Extract the LOR DOFs
+      for (int iref=0; iref<nref; ++iref)
+      {
+         int ilor = ho2lor.GetRow(iho)[iref];
+         for (int vd=0; vd<vdim; ++vd)
+         {
+            fes_lor.GetElementDofs(ilor, vdofs);
+            fes_lor.DofsToVDofs(vd, vdofs);
+            x.GetSubVector(vdofs, &xel_mat(iref*ndof_lor, vd));
+         }
+      }
+      // Locally prolongate
+      mfem::MultAtB(M_mixed_iho, xel_mat, yel_mat);
+      // Place the result in the HO vector
+      fes_ho.GetElementVDofs(iho, vdofs);
+      y.AddElementVector(vdofs, yel_mat.GetData());
    }
 }
 

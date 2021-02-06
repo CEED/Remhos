@@ -257,11 +257,11 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
       Vector masses(lumpedM);
       double mass_u, mass_u_loc = masses * u;
       MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-      /*std::cout << setprecision(10)
+      std::cout << setprecision(10)
                 << "AdvectionOperator, u size:" << u.Size() << std::endl
                 << "Current mass u: " << mass_u << std::endl
-                << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;*/
-      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-4, "Error in mass!");
+                << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-11, "Error in mass!");
    }
 
    dbg("Kbf");

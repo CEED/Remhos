@@ -146,6 +146,21 @@ private:
                             Vector &flux);
 };
 
+/// DGMass
+struct DGMass : mfem::Operator
+{
+   mutable Array<double> M, Minv;
+   mutable Array<int> ipiv;
+   Array<int> vec_offsets, M_offsets;
+   int nel, vdim;
+
+   DGMass(ParFiniteElementSpace &fes);
+   virtual void Mult(const Vector &u, Vector &Mu) const override;
+   void Solve(Vector &b) const;
+   void Solve(const Vector &Mu, Vector &u) const;
+};
+
+/// Mass
 struct Mass : mfem::Operator
 {
    //ParFiniteElementSpace fes;
@@ -167,6 +182,7 @@ struct Mass : mfem::Operator
    void Solve(const Vector &Mu, Vector &u) const;
 };
 
+/// AMR_P
 struct AMR_P : mfem::Operator
 {
    Mass &M_refine, &M_coarse;
@@ -180,6 +196,82 @@ struct AMR_P : mfem::Operator
          const mfem::Operator &P);
 
    void Mult(const Vector &x, Vector &y) const override;
+};
+
+/// LORMixedMass
+struct LORMixedMass : mfem::Operator
+{
+   ParFiniteElementSpace &fes_ho, &fes_lor;
+   Table ho2lor;
+   mutable Array<double> M_mixed;
+   Array<int> offsets;
+
+   LORMixedMass(ParFiniteElementSpace &fes_ho_,
+                ParFiniteElementSpace &fes_lor_);
+   virtual void Mult(const Vector &x, Vector &y) const override;
+   virtual void MultTranspose(const Vector &x, Vector &y) const override;
+};
+
+/// TransferR
+struct TransferR : mfem::Operator
+{
+   LORMixedMass mass_mixed;
+   DGMass mass_lor;
+   mutable Vector Minvx;
+
+   TransferR(ParFiniteElementSpace &fes_ho,
+             ParFiniteElementSpace &fes_lor);
+   virtual void Mult(const Vector &x, Vector &y) const override;
+   virtual void MultTranspose(const Vector &x, Vector &y) const override;
+};
+
+/// PtRtMRPOperator
+struct PtRtMRPOperator : mfem::Operator
+{
+   const mfem::Operator &P, &R, &M;
+   mutable Vector z1, z2, z3;
+   PtRtMRPOperator(const mfem::Operator &P_,
+                   const mfem::Operator &R_,
+                   const mfem::Operator &M_);
+   virtual void Mult(const Vector &x, Vector &y) const override;
+};
+
+/// TransferP
+struct TransferP : mfem::Operator
+{
+   //TransferR R;
+   const mfem::Operator &R;
+   const mfem::Operator &P;
+   DGMass &mass_lor;
+   PtRtMRPOperator PtRtMRP;
+   HypreParMatrix *M_ho;
+   std::unique_ptr<Solver> prec;
+   CGSolver cg;
+   Array<int> empty;
+
+   mutable Vector Y, Mx, RtMx, PtRtMx;
+
+   TransferP(ParFiniteElementSpace &fes_ho,
+             const mfem::Operator *R,
+             //Mass mass_lor,
+             DGMass &dg_mass_lor,
+             ParFiniteElementSpace &fes_lor);
+   ~TransferP();
+   virtual void Mult(const Vector &x, Vector &y) const override;
+};
+
+/// L2Projection
+struct L2Projection
+{
+   ParFiniteElementSpace &fes;
+   ParBilinearForm m;
+   ParLinearForm b;
+   OperatorHandle M;
+   std::unique_ptr<Solver> prec;
+   CGSolver cg;
+   Array<int> empty;
+   L2Projection(ParFiniteElementSpace &fes_);
+   void Project(Coefficient &coeff, ParGridFunction &u);
 };
 
 } // namespace amr
