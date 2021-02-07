@@ -138,6 +138,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
 
+#if 0
       // Element contributions
       rhoP = rhoN = xSum = 0.;
       assembly.dofs.xe_min(k) =   numeric_limits<double>::infinity();
@@ -235,6 +236,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
          du(dof_id) = (du(dof_id) + weightP * rhoP + weightN * rhoN) /
                       M_lumped(dof_id);
       }
+#endif
    }
 }
 

@@ -806,6 +806,16 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
    Vector xDiff(dofs.numFaceDofs);
    const int size_x = x.Size();
 
+   //Skip boundary terms
+   if(
+      ((k == 1 && BdrID == 0) ||
+       (k == 2 && BdrID == 1) ||
+       (k == 3 && BdrID == 1) ||
+       (k == 4 && BdrID == 0) ||
+       (k == 5 && BdrID == 0) ||
+       (k == 6 && BdrID == 0) )) return;
+
+   printf("element %d BdrID %d \n",k, BdrID);
    for (j = 0; j < dofs.numFaceDofs; j++)
    {
       dofInd = k*nd+dofs.BdrDofs(j,BdrID);
@@ -819,7 +829,9 @@ void Assembly::LinearFluxLumping(const int k, const int nd, const int BdrID,
                      : x_nd(nbr_dof_id - size_x);
       }
       xDiff(j) = xNeighbor - x(dofInd);
+      printf("xNeighbor, x_dof, diff %f %f %f \n",xNeighbor, x(dofInd), xDiff(j));
    }
+   printf("========\n");
 
    for (i = 0; i < dofs.numFaceDofs; i++)
    {

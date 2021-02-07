@@ -122,11 +122,11 @@ int main(int argc, char *argv[])
    const int myid = mpi.WorldRank();
 
    const char *mesh_file = "data/periodic-square.mesh";
-   int rs_levels = 2;
+   int rs_levels = 0;
    int rp_levels = 0;
-   int order = 3;
+   int order = 2;
    int mesh_order = 2;
-   int ode_solver_type = 3;
+   int ode_solver_type = 1;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
@@ -893,6 +893,7 @@ int main(int argc, char *argv[])
             dc->Save();
          }
       }
+      done = true;
    }
 
    // Print the final meshes and solution.
