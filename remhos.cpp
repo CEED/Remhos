@@ -37,14 +37,6 @@
 using namespace std;
 using namespace mfem;
 
-// Choice for the problem setup. The fluid velocity, initial condition and
-// inflow boundary condition are chosen based on this parameter.
-int problem_num = 0;
-
-// 0 is standard transport.
-// 1 is standard remap (mesh moves, solution is fixed).
-int exec_mode;
-
 // Mesh bounding box
 Vector bb_min, bb_max;
 
