@@ -21,22 +21,28 @@
 #include <iostream>
 
 #include "mfem.hpp"
-
 using namespace mfem;
+
+// Choice for the problem setup. The fluid velocity, initial condition and
+// inflow boundary condition are chosen based on this parameter.
+extern int problem_num;
+
+// 0 is standard transport.
+// 1 is standard remap (mesh moves, solution is fixed).
+extern int exec_mode;
+
+// Mesh bounding box
+extern Vector bb_min, bb_max;
 
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
+#include "remhos_ibc.hpp"
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
 #include "remhos_sync.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_adv.hpp"
 #include "remhos_amr.hpp"
-
-
-extern int problem_num;
-
-extern int exec_mode;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell};
