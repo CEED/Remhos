@@ -618,7 +618,7 @@ int main(int argc, char *argv[])
    else if (lo_type == LOSolverType::ResDist)
    {
      const bool subcell_scheme = false;
-     if(pa)
+     if (pa)
      {
        lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
