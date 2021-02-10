@@ -262,7 +262,7 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
    if (dim == 3) { face_dofs = quad1D*quad1D; }
 }
 
-//Taken from DGTraceIntegrator::SetupPA L:145
+// Taken from DGTraceIntegrator::SetupPA L:145
 void PAResidualDistribution::SampleVelocity(FaceType type) const
 {
    const int nf = pfes.GetNFbyType(type);
