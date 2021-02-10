@@ -668,8 +668,8 @@ int main(int argc, char *argv[])
 
       us.MakeRef(&pfes, S, offset[1]);
       double *h_us = us.HostWrite();
-      const double *h_u  = u.HostRead();
-      const double *h_s  = s.HostRead();
+      const double *h_u = u.HostRead();
+      const double *h_s = s.HostRead();
       // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
       us.SyncAliasMemory(S);
