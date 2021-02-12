@@ -793,11 +793,18 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
+   const int NE = pmesh.GetNE();
    for (int ti = 0; !done;)
    {
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+      if (myid == 0) { std::cout << "   --- Full time step" << std::endl; }
+      std::cout << "   in:  ";
+      ComputeMinMaxS(NE, us, u, myid);
+#endif
 
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -805,6 +812,11 @@ int main(int argc, char *argv[])
       //S has been modified, update the alias
       u.SyncMemory(S);
       if (product_sync) { us.SyncMemory(S); }
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+      std::cout << "   out: ";
+      ComputeMinMaxS(NE, us, u, myid);
+#endif
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -1158,8 +1170,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Vector s(size);
          Array<bool> s_bool_el, s_bool_dofs;
          ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
-#ifdef REMHOS_FCT_DEBUG
-         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         const int myid = x_gf.ParFESpace()->GetMyRank();
+         if (myid == 0) { std::cout << "      --- RK stage" << std::endl; }
+         std::cout << "      in:  ";
+         ComputeMinMaxS(s, s_bool_dofs, myid);
 #endif
 
          // Bounds for s, based on the old values (and old active dofs).
@@ -1181,12 +1196,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                     u_new,
                                     s_bool_el_new, s_bool_dofs_new, d_us);
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
          Vector us_new(size);
          add(1.0, us, dt, d_us, us_new);
-         int myid = x_gf.ParFESpace()->GetMyRank();
+         std::cout << "      out: ";
          ComputeMinMaxS(NE, us_new, u_new, myid);
-         if (myid == 0) { std::cout << " --- " << std::endl; }
 #endif
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }

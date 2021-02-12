@@ -128,7 +128,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
              mass_us - eps < s_max * mass_u) { s_avg = s_max; }
 
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
          // Check if s_avg = mass_us / mass_u is within the bounds of the full
          // stencil of active dofs.
          if (mass_us + eps < s_min * mass_u ||
@@ -195,7 +195,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          us_max(dof_id) = s_max_loc(j) * u_new(dof_id);
       }
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
       // Check the LO product solution.
       for (int j = 0; j < ndofs; j++)
       {         
@@ -238,7 +238,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       dus_lo_fct = d_us;
    }
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
    // Check the bounds of the final solution.
    Vector us_new(d_us.Size());
    add(1.0, us, dt, d_us, us_new);
