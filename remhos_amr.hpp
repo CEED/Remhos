@@ -25,7 +25,7 @@ namespace mfem
 namespace amr
 {
 
-enum Estimator: int { ZZ = 0, L2ZZ, JJt, Custom };
+enum Estimator: int { ZZ = 0, L2ZZ, JJt, Custom, DRL4AMR };
 
 struct Options
 {
@@ -79,7 +79,7 @@ public:
    ~Operator();
 
    void Reset();
-   void Apply();
+   void Apply(int el = -1);
    bool Refined();
    bool DeRefined();
 
@@ -100,6 +100,7 @@ private:
    void ApplyZZ();
    void ApplyJJt();
    void ApplyCustom();
+   void ApplyDRL4AMR(int);
    void UpdateAndRebalance(BlockVector &S,
                            Array<int> &offset,
                            LowOrderMethod &lom,

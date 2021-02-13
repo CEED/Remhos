@@ -40,6 +40,7 @@ static const char *EstimatorName(const int est)
       case amr::Estimator::L2ZZ: return "L2ZZ";
       case amr::Estimator::JJt: return "JJt";
       case amr::Estimator::Custom: return "Custom";
+      case amr::Estimator::DRL4AMR: return "DRL4AMR";
       default: MFEM_ABORT("Unknown estimator!");
    }
    return nullptr;
@@ -292,7 +293,7 @@ void Operator::Reset()
 }
 
 /// APPLY
-void Operator::Apply()
+void Operator::Apply(int el)
 {
    dbg("%s", EstimatorName(opt.estimator));
 
@@ -306,14 +307,16 @@ void Operator::Apply()
    switch (opt.estimator)
    {
       case Estimator::ZZ:
-      case Estimator::L2ZZ:   { ApplyZZ(); break; }
-      case Estimator::JJt:    { ApplyJJt(); break; }
-      case Estimator::Custom: { ApplyCustom(); break; }
+      case Estimator::L2ZZ:    { ApplyZZ(); break; }
+      case Estimator::JJt:     { ApplyJJt(); break; }
+      case Estimator::Custom:  { ApplyCustom(); break; }
+      case Estimator::DRL4AMR: { ApplyDRL4AMR(el); break; }
       default: MFEM_ABORT("Unknown AMR estimator!");
    }
 
-   const bool JJt = opt.estimator == Estimator::JJt;
-   if (!JJt) { dbg("mesh_refined/derefined set by ZZ"); return; }
+   const bool use_ref_array = opt.estimator == Estimator::JJt ||
+                              opt.estimator == Estimator::DRL4AMR ;
+   if (!use_ref_array) { dbg("mesh_refined/derefined set by ZZ"); return; }
 
    const int nref = pmesh.ReduceInt(refs.Size());
    mesh_refined = nref > 0;
@@ -326,7 +329,9 @@ void Operator::Apply()
    mesh_derefined = !mesh_refined &&
                     pmesh.GetLastOperation() == Mesh::REFINE &&
                     derefs_max > 0.0;
-   dbg("JJt: %s, derefs.Max():%f", JJt ? "yes" : "no", derefs_max);
+   dbg("use_ref_array: %s, derefs.Max():%f",
+       use_ref_array ? "yes" : "no",
+       derefs_max);
    dbg("mesh_derefined: %s", mesh_derefined ? "yes" : "no");
 }
 
@@ -366,7 +371,7 @@ void Operator::Update(AdvectionOperator &adv,
 
    if (nref > 0 && mesh_refined)
    {
-      dbg("JJt GeneralRefinement");
+      dbg("Using 'refs' array for GeneralRefinement");
       constexpr int non_conforming = 1;
       pmesh.GetNodes()->HostReadWrite();
       pmesh.GeneralRefinement(refs, non_conforming, opt.nc_limit);
@@ -443,6 +448,7 @@ void Operator::UpdateAndRebalance(BlockVector &S,
 
    if (mesh_refined)
    {
+      dbg("REFINE");
       pfes.Update();
 
       const int vsize = pfes.GetVSize();
@@ -507,6 +513,13 @@ void Operator::UpdateAndRebalance(BlockVector &S,
       xsub->ParFESpace()->Update();
       xsub->Update();
    }
+}
+
+/// AMR Update for DRL4AMR Estimator
+void Operator::ApplyDRL4AMR(int el)
+{
+   dbg("Appending #%d",el);
+   refs.Append(Refinement(el));
 }
 
 /// AMR Update for Custom Estimator
