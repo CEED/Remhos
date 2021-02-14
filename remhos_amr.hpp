@@ -79,7 +79,7 @@ public:
    ~Operator();
 
    void Reset();
-   void Apply(int el = -1);
+   void Apply(Array<Refinement> = {});
    bool Refined();
    bool DeRefined();
 
@@ -100,7 +100,7 @@ private:
    void ApplyZZ();
    void ApplyJJt();
    void ApplyCustom();
-   void ApplyDRL4AMR(int);
+   void ApplyDRL4AMR(Array<Refinement>&);
    void UpdateAndRebalance(BlockVector &S,
                            Array<int> &offset,
                            LowOrderMethod &lom,

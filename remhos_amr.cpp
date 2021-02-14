@@ -293,7 +293,7 @@ void Operator::Reset()
 }
 
 /// APPLY
-void Operator::Apply(int el)
+void Operator::Apply(Array<Refinement> input_refs)
 {
    dbg("%s", EstimatorName(opt.estimator));
 
@@ -310,7 +310,7 @@ void Operator::Apply(int el)
       case Estimator::L2ZZ:    { ApplyZZ(); break; }
       case Estimator::JJt:     { ApplyJJt(); break; }
       case Estimator::Custom:  { ApplyCustom(); break; }
-      case Estimator::DRL4AMR: { ApplyDRL4AMR(el); break; }
+      case Estimator::DRL4AMR: { ApplyDRL4AMR(input_refs); break; }
       default: MFEM_ABORT("Unknown AMR estimator!");
    }
 
@@ -516,10 +516,10 @@ void Operator::UpdateAndRebalance(BlockVector &S,
 }
 
 /// AMR Update for DRL4AMR Estimator
-void Operator::ApplyDRL4AMR(int el)
+void Operator::ApplyDRL4AMR(Array<Refinement> &input_refs)
 {
-   dbg("Appending #%d",el);
-   refs.Append(Refinement(el));
+   dbg("refs <= input_refs");
+   refs = input_refs;
 }
 
 /// AMR Update for Custom Estimator
