@@ -105,16 +105,16 @@ LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
 CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
-SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
-  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp
+SOURCE_FILES = remhos.cpp remhos_adv.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
+  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp remhos_amr.cpp remhos_ibc.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
-HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
-  remhos_mono.hpp remhos_sync.hpp
+HEADER_FILES = remhos.hpp remhos_adv.hpp remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
+  remhos_mono.hpp remhos_sync.hpp remhos_amr.hpp remhos_ibc.hpp
 
 # Targets
 
-.PHONY: all clean distclean install status info opt debug test style clean-build clean-exec
+.PHONY: all lib clean distclean install status info opt debug test style clean-build clean-exec
 
 .SUFFIXES: .c .cpp .o
 .cpp.o:
@@ -123,8 +123,13 @@ HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
 	cd $(<D); $(Ccc) -c $(<F)
 
 remhos: override MFEM_DIR = $(MFEM_DIR1)
-remhos:	$(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
-	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
+remhos: remhos.o libremhos.a $(CONFIG_MK) $(MFEM_LIB_FILE)
+	$(CXX) $(MFEM_LINK_FLAGS) -o remhos remhos.o libremhos.a $(LIBS)
+
+lib: libremhos.a
+OBJECT_LIB_FILES = $(filter-out remhos.o,$(OBJECT_FILES))
+libremhos.a: $(OBJECT_LIB_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
+	$(AR) $(ARFLAGS) $(@) $(OBJECT_LIB_FILES)
 
 all: remhos
 
@@ -155,7 +160,7 @@ $(CONFIG_MK) $(MFEM_LIB_FILE):
 clean: clean-build clean-exec
 
 clean-build:
-	rm -rf remhos *.o *~ *.dSYM *.mesh *.gf
+	rm -rf remhos *.a *.o *~ *.dSYM *.mesh *.gf
 clean-exec:
 	rm -rf ./results
 
