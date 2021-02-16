@@ -207,7 +207,7 @@ int main(int argc, char *argv[])
 
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
-   //mesh->Finalize(true);
+   mesh->Finalize(true);
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
@@ -246,12 +246,13 @@ int main(int argc, char *argv[])
    FiniteElementCollection *mesh_fec;
    if (periodic)
    {
+      dbg("\033[7mPeriodic => L2_FECollection");
       mesh_fec = new L2_FECollection(mesh_order, dim, BasisType::GaussLobatto);
    }
    else
    {
-      assert(false);
-      //mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
+      dbg("\033[7mStandard => H1_FECollection");
+      mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
    }
    // Current mesh positions.
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);

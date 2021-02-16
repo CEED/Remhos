@@ -507,6 +507,14 @@ void Operator::UpdateAndRebalance(BlockVector &S,
    u.GetTrueDofs(tmp);
    u.SetFromTrueDofs(tmp);
 
+   if (pfes.GetProlongationMatrix())
+   {
+      dbg("Constrain slave nodes!");
+      Vector y(pfes.GetTrueVSize());
+      pfes.GetRestrictionMatrix()->Mult(u, y);
+      pfes.GetProlongationMatrix()->Mult(y, u);
+   }
+
    if (xsub)
    {
       dbg("\033[31mXSUB!!");
