@@ -132,6 +132,7 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
+   bool next_gen_full = false;
    int smth_ind_type = 0;
    double t_final = 4.0;
    double dt = 0.005;
@@ -184,6 +185,9 @@ int main(int argc, char *argv[])
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
+   args.AddOption(&next_gen_full, "-full", "--next-gen-full", "-no-full",
+                  "--no-next-gen-full",
+                  "Enable or disable next gen full assembly for the HO solution.");
    args.AddOption(&device_config, "-d", "--device",
                   "Device configuration string, see Device::Configure().");
    args.AddOption(&smth_ind_type, "-si", "--smth_ind",
@@ -232,6 +236,14 @@ int main(int argc, char *argv[])
    const int dim = mesh->Dimension();
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+
+   // Only standard assembly in 1D (some mfem functions just abort in 1D).
+   if ((pa || next_gen_full) && dim == 1)
+   {
+      MFEM_WARNING("Disabling PA / FA for 1D.");
+      pa = false;
+      next_gen_full = false;
+   }
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
@@ -412,6 +424,11 @@ int main(int argc, char *argv[])
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+   }
+
+   if (next_gen_full)
+   {
+      K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
    }
 
    M_HO.Assemble();
@@ -600,9 +617,26 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::ResDist)
    {
-      const bool subcell_scheme = false;
-      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell_scheme, time_dep);
+     const bool subcell_scheme = false;
+     if (pa)
+     {
+       lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
+                                              subcell_scheme, time_dep);
+       if (exec_mode == 0)
+       {
+         const PAResidualDistribution *RD_ptr =
+           dynamic_cast<const PAResidualDistribution*>(lo_solver);
+         RD_ptr->SampleVelocity(FaceType::Interior);
+         RD_ptr->SampleVelocity(FaceType::Boundary);
+         RD_ptr->SetupPA(FaceType::Interior);
+         RD_ptr->SetupPA(FaceType::Boundary);
+       }
+     }
+     else
+     {
+       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                            subcell_scheme, time_dep);
+     }
    }
    else if (lo_type == LOSolverType::ResDistSubcell)
    {
@@ -633,11 +667,11 @@ int main(int argc, char *argv[])
       s.ProjectCoefficient(sc);
 
       us.MakeRef(&pfes, S, offset[1]);
-      us.HostWrite();
-      u.HostRead();
-      s.HostRead();
+      double *h_us = us.HostWrite();
+      const double *h_u = u.HostRead();
+      const double *h_s = s.HostRead();
       // Simple - we don't target conservation at initialization.
-      for (int i = 0; i < s.Size(); i++) { us(i) = u(i) * s(i); }
+      for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
       us.SyncAliasMemory(S);
    }
 
@@ -754,7 +788,9 @@ int main(int argc, char *argv[])
    if (fct_type == FCTSolverType::FluxBased)
    {
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
-
+      K_HO.SpMat().HostReadI();
+      K_HO.SpMat().HostReadJ();
+      K_HO.SpMat().HostReadData();
       K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
       const int fct_iterations = 1;
       fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
@@ -837,7 +873,13 @@ int main(int argc, char *argv[])
 
       if (exec_mode == 1)
       {
+         x0.HostReadWrite(); v_sub_gf.HostReadWrite();
+         x.HostReadWrite();
          add(x0, t, v_gf, x);
+         x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
+         MFEM_VERIFY(xsub != NULL,
+                     "xsub == NULL/This code should not be entered for order = 1.");
+         xsub->HostReadWrite();
          add(x0_sub, t, v_sub_gf, *xsub);
       }
 
@@ -1087,17 +1129,27 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      for (int k = 0; k < ne; k++)
+      if(auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
       {
-         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+        RD_ptr->SampleVelocity(FaceType::Interior);
+        RD_ptr->SampleVelocity(FaceType::Boundary);
+        RD_ptr->SetupPA(FaceType::Interior);
+        RD_ptr->SetupPA(FaceType::Boundary);
+      }
+      else
+      {
+        for (int k = 0; k < ne; k++)
+        {
+           if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+           else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+           else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-         for (int i = 0; i < dofs.numBdrs; i++)
-         {
-            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.ComputeFluxTerms(k, i, Trans, lom);
-         }
+           for (int i = 0; i < dofs.numBdrs; i++)
+           {
+              Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+              asmbl.ComputeFluxTerms(k, i, Trans, lom);
+           }
+        }
       }
    }
 
