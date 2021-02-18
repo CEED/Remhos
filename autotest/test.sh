@@ -58,7 +58,7 @@ for method in "${methods[@]}"; do
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
   echo -e '\n'"- Transport bump nonper-unstruct-3D" >> $file
-  run_line=$command" -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.04 -tf 3 "$method
+  run_line=$command" -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.035 -tf 3 "$method
   echo -e $run_line >> $file
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
