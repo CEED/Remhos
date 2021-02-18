@@ -75,6 +75,37 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
+//PA based Residual Distribution
+class PAResidualDistribution : public ResidualDistribution
+{
+protected:
+   // Data at quadrature points
+   const int quad1D, dofs1D, face_dofs;
+   mutable Array<double> D_int, D_bdry;
+   mutable Array<double> IntVelocity, BdryVelocity;
+
+public:
+   PAResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
+                          Assembly &asmbly, const Vector &Mlump,
+                          bool subcell, bool timedep);
+
+   void SampleVelocity(FaceType type) const;
+
+   void SetupPA(FaceType type) const;
+
+   void SetupPA2D(FaceType) const;
+
+   void SetupPA3D(FaceType) const;
+
+   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
 } // namespace mfem
 
 #endif // MFEM_REMHOS_LO

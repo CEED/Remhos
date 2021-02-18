@@ -198,7 +198,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 #ifdef REMHOS_FCT_DEBUG
       // Check the LO product solution.
       for (int j = 0; j < ndofs; j++)
-      {         
+      {
          dof_id = k*ndofs + j;
          if (active_dofs[dof_id] == false) { continue; }
 
@@ -281,9 +281,10 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
                                      SparseMatrix &flux_mat) const
 {
    const int s = u.Size();
-   double *flux_data = flux_mat.GetData();
-   const int *K_I = K.GetI(), *K_J = K.GetJ();
-   const double *K_data = K.GetData();
+   double *flux_data = flux_mat.HostReadWriteData();
+   flux_mat.HostReadI(); flux_mat.HostReadJ();
+   const int *K_I = K.HostReadI(), *K_J = K.HostReadJ();
+   const double *K_data = K.HostReadData();
    const double *u_np = u.FaceNbrData().HostRead();
    u.HostRead();
    du_ho.HostRead();
@@ -397,8 +398,8 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
    coeff_neg.HostReadWrite();
    du.HostReadWrite();
 
-   double *flux_data = flux_mat.GetData();
-   const int *flux_I = flux_mat.GetI(), *flux_J = flux_mat.GetJ();
+   double *flux_data = flux_mat.HostReadWriteData();
+   const int *flux_I = flux_mat.HostReadI(), *flux_J = flux_mat.HostReadJ();
    const int s = du.Size();
    for (int i = 0; i < s; i++)
    {
@@ -451,8 +452,9 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    }
 
    u.HostRead();
+   m.HostRead();
    du.HostReadWrite();
-   du_lo.Read(); du_ho.Read();
+   du_lo.HostRead(); du_ho.HostRead();
    for (int k = 0; k < NE; k++)
    {
       sumPos = sumNeg = 0.0;
@@ -519,6 +521,11 @@ void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
    Vector du_ho_star(size);
 
    double umin, umax;
+
+   u.HostRead();  m.HostRead();
+   du_ho.HostRead(); du_lo.HostRead();
+   u_min.HostRead(); u_max.HostRead();
+   du.HostReadWrite();
 
    // Smoothness indicator.
    ParGridFunction si_val;
