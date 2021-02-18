@@ -622,7 +622,7 @@ int main(int argc, char *argv[])
      {
        lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
-       if(exec_mode == 0)
+       if (exec_mode == 0)
        {
          const PAResidualDistribution *RD_ptr =
            dynamic_cast<const PAResidualDistribution*>(lo_solver);

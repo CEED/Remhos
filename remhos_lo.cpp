@@ -238,28 +238,24 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    }
 }
 
+const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
+{
+   const FiniteElement *el_trace =
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
+}
+
 PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                ParBilinearForm &Kbf,
-                                               Assembly &asmbly, const Vector &Mlump,
+                                               Assembly &asmbly,
+                                               const Vector &Mlump,
                                                bool subcell, bool timedep)
-   : LOSolver(space),
-     K(Kbf), assembly(asmbly),
-     M_lumped(Mlump), subcell_scheme(subcell), time_dep(timedep)
+   : ResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep),
+     quad1D(get_maps(pfes, assembly)->nqpt),
+     dofs1D(get_maps(pfes, assembly)->ndof),
+     face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
 {
    MFEM_VERIFY(subcell == false, "Subcell scheme not supported with PA");
-
-   const ParMesh *pmesh = pfes.GetParMesh();
-   const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pmesh->GetFaceBaseGeometry(0));
-
-   const IntegrationRule *ir = assembly.lom.irF;
-   const DofToQuad *maps = &el_trace->GetDofToQuad(*ir, DofToQuad::TENSOR);
-
-   const int dim = pmesh->Dimension();
-   quad1D = maps->nqpt;
-   dofs1D = maps->ndof;
-   if (dim == 2) { face_dofs = quad1D; }
-   if (dim == 3) { face_dofs = quad1D*quad1D; }
 }
 
 // Taken from DGTraceIntegrator::SetupPA L:145

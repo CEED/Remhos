@@ -76,18 +76,11 @@ public:
 };
 
 //PA based Residual Distribution
-class PAResidualDistribution : public LOSolver
+class PAResidualDistribution : public ResidualDistribution
 {
 protected:
-   ParBilinearForm &K;
-   Assembly &assembly;
-   const Vector &M_lumped;
-   const bool subcell_scheme;
-   const bool time_dep;
-
-   //For PA
-   //Data at quadrature points
-   mutable int quad1D, dofs1D, face_dofs; //should not be mutable!
+   // Data at quadrature points
+   const int quad1D, dofs1D, face_dofs;
    mutable Array<double> D_int, D_bdry;
    mutable Array<double> IntVelocity, BdryVelocity;
 
