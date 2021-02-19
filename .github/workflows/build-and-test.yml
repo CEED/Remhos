@@ -105,19 +105,20 @@ jobs:
 
     - name: test Remhos
       run: |
-        echo "test_run=true" >> $GITHUB_ENV
         cd remhos/autotest && ./test.sh 2
         diff --report-identical-files out_test.dat out_baseline.dat
 
+    # TODO (bernede1@llnl.gov): Ideally, we would generate and export
+    # the path only on test failure. I couldn't find how.
     - name: Prepare patch
-      if: always() && env.test_run == 'true'
+      if: always()
       run: |
         cd remhos
         mv autotest/out_test.dat autotest/out_baseline.dat
         git diff -- autotest/out_baseline.dat > baseline.patch
 
     - name: Archive test results patch
-      if: always() && env.test_run == 'true'
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: baseline-patch
