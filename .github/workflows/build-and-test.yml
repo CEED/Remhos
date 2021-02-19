@@ -106,3 +106,15 @@ jobs:
       run: |
         cd remhos/autotest && ./test.sh 2
         diff --report-identical-files out_test.dat out_baseline.dat
+
+    - name: Prepare patch
+      run: |
+        cd remhos
+        mv autotest/out_test.dat autotest/out_baseline.dat
+        git diff -- autotest/out_baseline.dat > baseline.patch
+
+    - name: Archive test results patch
+      uses: actions/upload-artifact@v2
+      with:
+        name: baseline-patch
+        path: baseline.patch
