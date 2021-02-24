@@ -127,8 +127,8 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
+   HOSolverType ho_type           = HOSolverType::None;
+   LOSolverType lo_type           = LOSolverType::ResDistSubcell;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
@@ -617,32 +617,50 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::ResDist)
    {
-     const bool subcell_scheme = false;
-     if (pa)
-     {
-       lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
+      const bool subcell_scheme = false;
+      if (pa)
+      {
+         lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
+                                                subcell_scheme, time_dep);
+         if (exec_mode == 0)
+         {
+            const PAResidualDistribution *RD_ptr =
+               dynamic_cast<const PAResidualDistribution*>(lo_solver);
+            RD_ptr->SampleVelocity(FaceType::Interior);
+            RD_ptr->SampleVelocity(FaceType::Boundary);
+            RD_ptr->SetupPA(FaceType::Interior);
+            RD_ptr->SetupPA(FaceType::Boundary);
+         }
+      }
+      else
+      {
+         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
-       if (exec_mode == 0)
-       {
-         const PAResidualDistribution *RD_ptr =
-           dynamic_cast<const PAResidualDistribution*>(lo_solver);
-         RD_ptr->SampleVelocity(FaceType::Interior);
-         RD_ptr->SampleVelocity(FaceType::Boundary);
-         RD_ptr->SetupPA(FaceType::Interior);
-         RD_ptr->SetupPA(FaceType::Boundary);
-       }
-     }
-     else
-     {
-       lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                            subcell_scheme, time_dep);
-     }
+      }
    }
    else if (lo_type == LOSolverType::ResDistSubcell)
    {
       const bool subcell_scheme = true;
-      lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
-                                           subcell_scheme, time_dep);
+      if (pa)
+      {
+         printf("Using ResDistSubcell w partial assembly \n");
+         lo_solver = new PASubcellResidualDistribution(pfes, k, asmbl, lumpedM,
+                                                       subcell_scheme, time_dep);
+         if (exec_mode == 0)
+         {
+            const PASubcellResidualDistribution *RD_ptr =
+               dynamic_cast<const PASubcellResidualDistribution*>(lo_solver);
+            RD_ptr->SampleVelocity(FaceType::Interior);
+            RD_ptr->SampleVelocity(FaceType::Boundary);
+            RD_ptr->SetupPA(FaceType::Interior);
+            RD_ptr->SetupPA(FaceType::Boundary);
+         }
+      }
+      else
+      {
+         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+                                              subcell_scheme, time_dep);
+      }
    }
 
    // Setup the initial conditions.
@@ -1129,27 +1147,27 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      if(auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
+      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
       {
-        RD_ptr->SampleVelocity(FaceType::Interior);
-        RD_ptr->SampleVelocity(FaceType::Boundary);
-        RD_ptr->SetupPA(FaceType::Interior);
-        RD_ptr->SetupPA(FaceType::Boundary);
+         RD_ptr->SampleVelocity(FaceType::Interior);
+         RD_ptr->SampleVelocity(FaceType::Boundary);
+         RD_ptr->SetupPA(FaceType::Interior);
+         RD_ptr->SetupPA(FaceType::Boundary);
       }
       else
       {
-        for (int k = 0; k < ne; k++)
-        {
-           if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-           else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-           else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+         for (int k = 0; k < ne; k++)
+         {
+            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-           for (int i = 0; i < dofs.numBdrs; i++)
-           {
-              Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-              asmbl.ComputeFluxTerms(k, i, Trans, lom);
-           }
-        }
+            for (int i = 0; i < dofs.numBdrs; i++)
+            {
+               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               asmbl.ComputeFluxTerms(k, i, Trans, lom);
+            }
+         }
       }
    }
 

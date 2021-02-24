@@ -106,6 +106,19 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
+class PASubcellResidualDistribution : virtual public PAResidualDistribution
+{
+
+public:
+
+   PASubcellResidualDistribution(ParFiniteElementSpace &space,
+                                 ParBilinearForm &Kbf,
+                                 Assembly &asmbly, const Vector &Mlump,
+                                 bool subcell, bool timedep);
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
 } // namespace mfem
 
 #endif // MFEM_REMHOS_LO
