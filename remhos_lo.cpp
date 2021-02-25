@@ -968,6 +968,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    const int ne = pfes.GetMesh()->GetNE();
    Vector z(u.Size());
 
+   const double gamma = 1.0;
    const double eps = 1.E-15;
    const double infinity = numeric_limits<double>::infinity();
 
@@ -1026,6 +1027,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
 
       int dof_id;
+      double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
       if (subcell_scheme)
       {
          fluctSubcellP.SetSize(assembly.dofs.numSubcells);
@@ -1036,7 +1038,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          sumWeightsSubcellN.SetSize(assembly.dofs.numSubcells);
          nodalWeightsP.SetSize(ndof);
          nodalWeightsN.SetSize(ndof);
-         double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
+         sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
          nodalWeightsP = 0.; nodalWeightsN = 0.;
 
          // compute min-/max-values and the fluctuation for subcells
@@ -1093,6 +1095,18 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          //eq 46
          double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
          double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
+
+         if (subcell_scheme)
+         {
+            double aux = gamma / (rhoP + eps);
+            weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
+            weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP(i);
+
+            aux = gamma / (rhoN - eps);
+            weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
+            weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN(i);
+         }
+
 
          // (lumpped trace term  + LED convection )/lumpped mass matrix
          d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
