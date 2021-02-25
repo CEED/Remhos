@@ -17,7 +17,7 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
-//#define REMHOS_FCT_DEBUG
+#define REMHOS_FCT_DEBUG
 
 #include "mfem.hpp"
 
@@ -120,6 +120,13 @@ public:
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
+
+   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                               const Vector &d_us_HO, const Vector &d_us_LO,
+                               Vector &s_min, Vector &s_max,
+                               const Vector &u_new,
+                               const Array<bool> &active_el,
+                               const Array<bool> &active_dofs, Vector &d_us);
 };
 
 // TODO doesn't conserve mass exactly for some reason.

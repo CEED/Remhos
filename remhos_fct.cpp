@@ -73,7 +73,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    int dof_id;
 
    // Update the flux matrix to a product-compatible version.
-   // Compute a compatible low-order solutions.
+   // Compute a compatible low-order solution.
    const int NE = us.ParFESpace()->GetNE();
    const int ndofs = us.Size() / NE;
    Vector us_new_LO_el(ndofs), flux_el(ndofs), beta(ndofs);
@@ -507,6 +507,153 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
          du(dof_id) = du_lo(dof_id) + f_clip(j) / m(dof_id);
       }
    }
+}
+
+void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                                     const Vector &d_us_HO, const Vector &d_us_LO,
+                                     Vector &s_min, Vector &s_max,
+                                     const Vector &u_new,
+                                     const Array<bool> &active_el,
+                                     const Array<bool> &active_dofs, Vector &d_us)
+{
+   us.HostRead();
+   d_us_LO.HostRead();
+   s_min.HostReadWrite();
+   s_max.HostReadWrite();
+   u_new.HostRead();
+   active_el.HostRead();
+   active_dofs.HostRead();
+
+   const double eps = 1e-12;
+   int dof_id;
+
+   // Compute a compatible low-order solution.
+   const int NE = us.ParFESpace()->GetNE();
+   const int ndofs = us.Size() / NE;
+   Vector us_new_LO_el(ndofs);
+   Vector dus_lo_fct(us.Size()), us_min(us.Size()), us_max(us.Size());
+
+   Vector s_min_loc, s_max_loc;
+
+   dus_lo_fct = 0.0;
+
+   for (int k = 0; k < NE; k++)
+   {
+      if (active_el[k] == false) { continue; }
+
+      double mass_us = 0.0, mass_u = 0.0;
+      for (int j = 0; j < ndofs; j++)
+      {
+         us_new_LO_el(j) = us(k*ndofs + j) + dt * d_us_LO(k*ndofs + j);
+         mass_us += us_new_LO_el(j) * m(k*ndofs + j);
+         mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
+      }
+      double s_avg = mass_us / mass_u;
+
+      // Min and max of s using the full stencil of active dofs.
+      s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
+      s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
+      double s_min = numeric_limits<double>::infinity(),
+             s_max = -numeric_limits<double>::infinity();
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (active_dofs[k*ndofs + j] == false) { continue; }
+         s_min = min(s_min, s_min_loc(j));
+         s_max = max(s_max, s_max_loc(j));
+      }
+
+      // Fix inconsistencies due to round-off and the usage of local bounds.
+      for (int j = 0; j < ndofs; j++)
+      {
+         if (active_dofs[k*ndofs + j] == false) { continue; }
+
+         // Check if there's a violation, s_avg < s_min, due to round-offs in
+         // division (the 2nd check means s_avg = mass_us / mass_u > s_min).
+         if (s_avg + eps < s_min &&
+             mass_us + eps > s_min * mass_u) { s_avg = s_min; }
+         // Check if there's a violation, s_avg > s_max, due to round-offs in
+         // division (the 2nd check means s_avg = mass_us / mass_u < s_max).
+         if (s_avg - eps > s_max &&
+             mass_us - eps < s_max * mass_u) { s_avg = s_max; }
+
+
+#ifdef REMHOS_FCT_DEBUG
+         // Check if s_avg = mass_us / mass_u is within the bounds of the full
+         // stencil of active dofs.
+         if (mass_us + eps < s_min * mass_u ||
+             mass_us - eps > s_max * mass_u ||
+             s_avg + eps < s_min ||
+             s_avg - eps > s_max)
+         {
+            std::cout << "---\ns_avg element bounds: "
+                      << s_min << " " << s_avg << " " << s_max << std::endl;
+            std::cout << "Element " << k << std::endl;
+            std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
+            PrintCellValues(k, NE, u_new, "u_loc: ");
+            std::cout << "us_loc_LO: " << std::endl; us_new_LO_el.Print();
+
+            MFEM_ABORT("s_avg is not in the full stencil bounds!");
+         }
+#endif
+
+         // When s_avg is not in the local bounds for some dof (it should be
+         // within the full stencil of active dofs), reset the bounds to s_avg.
+         if (s_avg + eps < s_min_loc(j)) { s_min_loc(j) = s_avg; }
+         if (s_avg - eps > s_max_loc(j)) { s_max_loc(j) = s_avg; }
+      }
+
+      // Take into account the compatible low-order solution.
+      for (int j = 0; j < ndofs; j++)
+      {
+         // In inactive dofs we get u_new*s_avg ~ 0, which should be fine.
+
+         // Compatible LO solution.
+         dof_id = k*ndofs + j;
+         dus_lo_fct(dof_id) = (u_new(dof_id) * s_avg - us(dof_id)) / dt;
+      }
+
+      // Rescale the bounds (s_min, s_max) -> (u*s_min, u*s_max).
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_id = k*ndofs + j;
+
+         // For inactive dofs, s_min and s_max are undefined (inf values).
+         if (active_dofs[dof_id] == false)
+         {
+            us_min(dof_id) = 0.0;
+            us_max(dof_id) = 0.0;
+            continue;
+         }
+
+         us_min(dof_id) = s_min_loc(j) * u_new(dof_id);
+         us_max(dof_id) = s_max_loc(j) * u_new(dof_id);
+      }
+
+#ifdef REMHOS_FCT_DEBUG
+      // Check the LO product solution.
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_id = k*ndofs + j;
+         if (active_dofs[dof_id] == false) { continue; }
+
+         if (s_avg * u_new(dof_id) + eps < us_min(dof_id) ||
+             s_avg * u_new(dof_id) - eps > us_max(dof_id))
+         {
+            std::cout << "---\ns_avg * u: " << k << " "
+                      << us_min(dof_id) << " "
+                      << s_avg * u_new(dof_id) << " "
+                      << us_max(dof_id) << endl
+                      << u_new(dof_id) << " " << s_avg << endl
+                      << s_min_loc(j) << " " << s_max_loc(j) << "\n---\n";
+
+            MFEM_ABORT("s_avg * u not in bounds");
+         }
+      }
+#endif
+   }
+
+   // ClipScale solve for d_us.
+   d_us = dus_lo_fct;
 }
 
 void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
