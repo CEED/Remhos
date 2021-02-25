@@ -128,7 +128,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
              mass_us - eps < s_max * mass_u) { s_avg = s_max; }
 
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
          // Check if s_avg = mass_us / mass_u is within the bounds of the full
          // stencil of active dofs.
          if (mass_us + eps < s_min * mass_u ||
@@ -195,7 +195,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          us_max(dof_id) = s_max_loc(j) * u_new(dof_id);
       }
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
       // Check the LO product solution.
       for (int j = 0; j < ndofs; j++)
       {
@@ -238,7 +238,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       dus_lo_fct = d_us;
    }
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
    // Check the bounds of the final solution.
    Vector us_new(d_us.Size());
    add(1.0, us, dt, d_us, us_new);
@@ -577,7 +577,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
              mass_us - eps < s_max * mass_u) { s_avg = s_max; }
 
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
          // Check if s_avg = mass_us / mass_u is within the bounds of the full
          // stencil of active dofs.
          if (mass_us + eps < s_min * mass_u ||
@@ -629,7 +629,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
          us_max(dof_id) = s_max_loc(j) * u_new(dof_id);
       }
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
       // Check the LO product solution.
       for (int j = 0; j < ndofs; j++)
       {
@@ -653,7 +653,46 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    }
 
    // ClipScale solve for d_us.
-   d_us = dus_lo_fct;
+   //d_us = dus_lo_fct;
+   CalcFCTSolution(us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
+   ZeroOutEmptyDofs(active_el, active_dofs, d_us);
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+   // Check the bounds of the final solution.
+   Vector us_new(d_us.Size());
+   add(1.0, us, dt, d_us, us_new);
+   for (int k = 0; k < NE; k++)
+   {
+      if (active_el[k] == false) { continue; }
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_id = k*ndofs + j;
+         if (active_dofs[dof_id] == false) { continue; }
+
+         double s = us_new(dof_id) / u_new(dof_id);
+         if (s + eps < s_min(dof_id) ||
+             s - eps > s_max(dof_id))
+         {
+            std::cout << "Final s " << j << " " << k << " "
+                      << s_min(dof_id) << " "
+                      << s << " "
+                      << s_max(dof_id) << std::endl;
+            std::cout << "---\n";
+         }
+
+         if (us_new(dof_id) + eps < us_min(dof_id) ||
+             us_new(dof_id) - eps > us_max(dof_id))
+         {
+            std::cout << "Final us " << j << " " << k << " "
+                      << us_min(dof_id) << " "
+                      << us_new(dof_id) << " "
+                      << us_max(dof_id) << std::endl;
+            std::cout << "---\n";
+         }
+      }
+   }
+#endif
 }
 
 void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,

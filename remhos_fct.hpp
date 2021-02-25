@@ -17,7 +17,7 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
-#define REMHOS_FCT_DEBUG
+//#define REMHOS_FCT_PRODUCT_DEBUG
 
 #include "mfem.hpp"
 
@@ -52,6 +52,10 @@ public:
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const = 0;
 
+   // Used in the case of product remap.
+   // Given the input, calculates d_us, so that:
+   // bounds preservation: s_min_i <= (us_i + dt d_us_i) / u_new_i <= s_max_i,
+   // conservation: sum m_i (us_i + dt d_us_HO_i) = sum m_i (us_i + dt d_us_i).
    virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
