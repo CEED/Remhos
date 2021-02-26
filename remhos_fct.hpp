@@ -34,6 +34,20 @@ protected:
    SmoothnessIndicator *smth_indicator;
    double dt;
 
+   // Computes a compatible slope (piecewise constan = mass_us / mass_u).
+   // It could also update s_min and s_max, if required.
+   void CalcCompatibleLOProduct(const ParGridFunction &us, const Vector &m,
+                                const Vector &d_us_HO, const Vector &d_us_LO,
+                                Vector &s_min, Vector &s_max,
+                                const Vector &u_new,
+                                const Array<bool> &active_el,
+                                const Array<bool> &active_dofs,
+                                Vector &d_us_LO_new);
+   void ScaleProductBounds(const Vector &s_min, const Vector &s_max,
+                           const Vector &u_new, const Array<bool> &active_el,
+                           const Array<bool> &active_dofs,
+                           Vector &us_min, Vector &us_max);
+
 public:
    FCTSolver(ParFiniteElementSpace &space,
              SmoothnessIndicator *si, double dt_)
