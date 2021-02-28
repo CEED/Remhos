@@ -152,7 +152,12 @@ void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
    MPI_Allreduce(&min_s, &min_s_glob, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    MPI_Allreduce(&max_s, &max_s_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-   if (myid == 0) { std::cout << min_s_glob << " " << max_s_glob << std::endl; }
+   if (myid == 0)
+   {
+      std::cout << std::scientific << std::setprecision(5);
+      std::cout << "min_s: " << min_s_glob
+                << "; max_s: " << max_s_glob << std::endl;
+   }
 }
 
 void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid)
@@ -175,7 +180,11 @@ void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid)
    MPI_Allreduce(&max_s, &max_s_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
    if (myid == 0)
-   { std::cout << min_s_glob << " " << max_s_glob << std::endl; }
+   {
+      std::cout << std::scientific << std::setprecision(5);
+      std::cout << "min_s: " << min_s_glob
+                << "; max_s: " << max_s_glob << std::endl;
+   }
 }
 
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg)
