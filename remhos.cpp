@@ -1214,8 +1214,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
-         lo_solver->CalcLOSolution(us, d_us_LO);
+         Vector d_us_HO(us.Size()), d_us_LO;
+         if (fct_solver->NeedsLOProductInput())
+         {
+            d_us_LO.SetSize(us.Size());
+            lo_solver->CalcLOSolution(us, d_us_LO);
+         }
          ho_solver->CalcHOSolution(us, d_us_HO);
 
          // Compute the ratio s = us_old / u_old, and old active dofs.

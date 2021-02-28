@@ -17,7 +17,7 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
-//#define REMHOS_FCT_PRODUCT_DEBUG
+// #define REMHOS_FCT_PRODUCT_DEBUG
 
 #include "mfem.hpp"
 
@@ -33,11 +33,12 @@ protected:
    ParFiniteElementSpace &pfes;
    SmoothnessIndicator *smth_indicator;
    double dt;
+   const bool needs_LO_input_for_products;
 
    // Computes a compatible slope (piecewise constan = mass_us / mass_u).
    // It could also update s_min and s_max, if required.
-   void CalcCompatibleLOProduct(const ParGridFunction &us, const Vector &m,
-                                const Vector &d_us_HO, const Vector &d_us_LO,
+   void CalcCompatibleLOProduct(const ParGridFunction &us,
+                                const Vector &m, const Vector &d_us_HO,
                                 Vector &s_min, Vector &s_max,
                                 const Vector &u_new,
                                 const Array<bool> &active_el,
@@ -50,12 +51,15 @@ protected:
 
 public:
    FCTSolver(ParFiniteElementSpace &space,
-             SmoothnessIndicator *si, double dt_)
-      : pfes(space), smth_indicator(si), dt(dt_) { }
+             SmoothnessIndicator *si, double dt_, bool needs_LO_prod)
+      : pfes(space), smth_indicator(si), dt(dt_),
+        needs_LO_input_for_products(needs_LO_prod) { }
 
    virtual ~FCTSolver() { }
 
    virtual void UpdateTimeStep(double dt_) { dt = dt_; }
+
+   bool NeedsLOProductInput() const { return needs_LO_input_for_products; }
 
    // Calculate du that satisfies the following:
    // bounds preservation: u_min_i <= u_i + dt du_i <= u_max_i,
@@ -109,10 +113,9 @@ public:
                 SmoothnessIndicator *si, double delta_t,
                 const SparseMatrix &adv_mat, const Array<int> &adv_smap,
                 const SparseMatrix &mass_mat, int fct_iterations = 1)
-      : FCTSolver(space, si, delta_t),
+      : FCTSolver(space, si, delta_t, true),
         K(adv_mat), M(mass_mat), K_smap(adv_smap), flux_ij(adv_mat),
-        gp(&pfes), gm(&pfes),
-        iter_cnt(fct_iterations) { }
+        gp(&pfes), gm(&pfes), iter_cnt(fct_iterations) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
@@ -132,7 +135,7 @@ class ClipScaleSolver : public FCTSolver
 public:
    ClipScaleSolver(ParFiniteElementSpace &space,
                    SmoothnessIndicator *si, double dt_)
-      : FCTSolver(space, si, dt_) { }
+      : FCTSolver(space, si, dt_, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
@@ -157,7 +160,7 @@ protected:
 public:
    NonlinearPenaltySolver(ParFiniteElementSpace &space,
                           SmoothnessIndicator *si, double dt_)
-      : FCTSolver(space, si, dt_) { }
+      : FCTSolver(space, si, dt_, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,

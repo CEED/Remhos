@@ -23,8 +23,8 @@ using namespace std;
 namespace mfem
 {
 
-void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us, const Vector &m,
-                                        const Vector &d_us_HO, const Vector &d_us_LO,
+void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
+                                        const Vector &m, const Vector &d_us_HO,
                                         Vector &s_min, Vector &s_max,
                                         const Vector &u_new,
                                         const Array<bool> &active_el,
@@ -37,7 +37,6 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us, const Vector 
    // Compute a compatible low-order solution.
    const int NE = us.ParFESpace()->GetNE();
    const int ndofs = us.Size() / NE;
-   Vector us_new_LO_el(ndofs);
 
    Vector s_min_loc, s_max_loc;
 
@@ -50,8 +49,8 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us, const Vector 
       double mass_us = 0.0, mass_u = 0.0;
       for (int j = 0; j < ndofs; j++)
       {
-         us_new_LO_el(j) = us(k*ndofs + j) + dt * d_us_LO(k*ndofs + j);
-         mass_us += us_new_LO_el(j) * m(k*ndofs + j);
+         const double us_new_HO = us(k*ndofs + j) + dt * d_us_HO(k*ndofs + j);
+         mass_us += us_new_HO * m(k*ndofs + j);
          mass_u  += u_new(k*ndofs + j) * m(k*ndofs + j);
       }
       double s_avg = mass_us / mass_u;
@@ -95,7 +94,6 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us, const Vector 
             std::cout << "Element " << k << std::endl;
             std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
             PrintCellValues(k, NE, u_new, "u_loc: ");
-            std::cout << "us_loc_LO: " << std::endl; us_new_LO_el.Print();
 
             MFEM_ABORT("s_avg is not in the full stencil bounds!");
          }
@@ -225,7 +223,7 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
    // Compute a compatible low-order solution.
    Vector dus_lo_fct(us.Size()), us_min(us.Size()), us_max(us.Size());
-   CalcCompatibleLOProduct(us, m, d_us_HO, d_us_LO, s_min, s_max, u_new,
+   CalcCompatibleLOProduct(us, m, d_us_HO, s_min, s_max, u_new,
                            active_el, active_dofs, dus_lo_fct);
    ScaleProductBounds(s_min, s_max, u_new, active_el, active_dofs,
                       us_min, us_max);
@@ -566,7 +564,6 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                      const Array<bool> &active_dofs, Vector &d_us)
 {
    us.HostRead();
-   d_us_LO.HostRead();
    s_min.HostReadWrite();
    s_max.HostReadWrite();
    u_new.HostRead();
@@ -575,7 +572,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 
    // Compute a compatible low-order solution.
    Vector dus_lo_fct(us.Size()), us_min(us.Size()), us_max(us.Size());
-   CalcCompatibleLOProduct(us, m, d_us_HO, d_us_LO, s_min, s_max, u_new,
+   CalcCompatibleLOProduct(us, m, d_us_HO, s_min, s_max, u_new,
                            active_el, active_dofs, dus_lo_fct);
    ScaleProductBounds(s_min, s_max, u_new, active_el, active_dofs,
                       us_min, us_max);
