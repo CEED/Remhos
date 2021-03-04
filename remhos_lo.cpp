@@ -1003,6 +1003,27 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
    double *d_du = du.ReadWrite();
 
+   //Setup vector sizes for subcell
+   fluctSubcellP.SetSize(assembly.dofs.numSubcells);
+   fluctSubcellN.SetSize(assembly.dofs.numSubcells);
+   xMaxSubcell.SetSize(assembly.dofs.numSubcells);
+   xMinSubcell.SetSize(assembly.dofs.numSubcells);
+   sumWeightsSubcellP.SetSize(assembly.dofs.numSubcells);
+   sumWeightsSubcellN.SetSize(assembly.dofs.numSubcells);
+   nodalWeightsP.SetSize(ndof);
+   nodalWeightsN.SetSize(ndof);
+
+   for(int k=0; k<ne; ++k) {
+     for (int m = 0; m < assembly.dofs.numSubcells; m++) {
+
+       if (time_dep)
+       {
+         assembly.ComputeSubcellWeights(k, m);
+       }
+     }
+   }
+
+
    //MFEM_FORALL(k, ne,
    for (int k=0; k<ne; ++k)
    {
@@ -1025,19 +1046,10 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       double sumWeightsP = ndof*xe_max[k] - xSum + eps;
       double sumWeightsN = ndof*xe_min[k] - xSum - eps;
 
-
       int dof_id;
       double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
       if (subcell_scheme)
       {
-         fluctSubcellP.SetSize(assembly.dofs.numSubcells);
-         fluctSubcellN.SetSize(assembly.dofs.numSubcells);
-         xMaxSubcell.SetSize(assembly.dofs.numSubcells);
-         xMinSubcell.SetSize(assembly.dofs.numSubcells);
-         sumWeightsSubcellP.SetSize(assembly.dofs.numSubcells);
-         sumWeightsSubcellN.SetSize(assembly.dofs.numSubcells);
-         nodalWeightsP.SetSize(ndof);
-         nodalWeightsN.SetSize(ndof);
          sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
          nodalWeightsP = 0.; nodalWeightsN = 0.;
 
@@ -1048,10 +1060,6 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
             xMaxSubcell(m) = - numeric_limits<double>::infinity();;
             double fluct = 0; double xSum = 0.;
 
-            if (time_dep)
-            {
-               assembly.ComputeSubcellWeights(k, m);
-            }
 
             for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
             {
