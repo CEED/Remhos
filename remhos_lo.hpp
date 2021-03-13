@@ -116,6 +116,8 @@ public:
                                  Assembly &asmbly, const Vector &Mlump,
                                  bool subcell, bool timedep);
 
+   void SubCellComputation(DenseTensor &subWeights) const ;
+
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
