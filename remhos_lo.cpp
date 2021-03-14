@@ -962,169 +962,183 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
 
 
 //Compute contributions from inside the subcell
-void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights) const
+void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights)
+const
 {
 
-  //Add a switch for 2d/3d
-  const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
-  const int nq = ir->GetNPoints();
+   //Add a switch for 2d/3d
+   const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
+   const int nq = ir->GetNPoints();
 
-  printf("Computing Subweights ... \n");
+   printf("Computing Subweights ... \n");
 
-  //Subcell FEM spaces
-  FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
-  FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
+   //Subcell FEM spaces
+   FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
+   FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
 
-  //Convection term only...
+   //Convection term only...
 
-  //For setup we follow PAConvectionSetup2D
-  ////const int NE = SubFes0->GetNE();
-  //const int NE_1 = SubFes1->GetNE();
-  //printf("No of Elements %d %d\n",NE, NE_1);
+   //For setup we follow PAConvectionSetup2D
+   ////const int NE = SubFes0->GetNE();
+   //const int NE_1 = SubFes1->GetNE();
+   //printf("No of Elements %d %d\n",NE, NE_1);
 
-  Mesh *mesh = assembly.GetSubCellMesh();
-  const int NE = mesh->GetNE();
-  printf("No of Elements %d \n",mesh->GetNE());
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int NE = mesh->GetNE();
+   printf("No of Elements %d \n",mesh->GetNE());
 
-  //Data from first space
-  const FiniteElement &el_0 = *SubFes0->GetFE(0);
+   //Data from first space
+   const FiniteElement &el_0 = *SubFes0->GetFE(0);
 
-  ElementTransformation &Trans_0 = *SubFes0->GetElementTransformation(0);
+   ElementTransformation &Trans_0 = *SubFes0->GetElementTransformation(0);
 
-  const int dims_0 = el_0.GetDim();
-  const int nq_0 = ir->GetNPoints();
+   const int dims_0 = el_0.GetDim();
+   const int nq_0 = ir->GetNPoints();
 
-  const int dim_0 = mesh->Dimension();
+   const int dim_0 = mesh->Dimension();
 
-  const GeometricFactors *geom_0 = mesh->GetGeometricFactors(*ir, GeometricFactors::JACOBIANS);
-  const DofToQuad * maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
+   const GeometricFactors *geom_0 = mesh->GetGeometricFactors(*ir,
+                                                              GeometricFactors::JACOBIANS);
+   const DofToQuad * maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
-  const int dofs1D_0 = maps_0->ndof;
-  const int quad1D_0 = maps_0->nqpt;
+   const int dofs1D_0 = maps_0->ndof;
+   const int quad1D_0 = maps_0->nqpt;
 
-  printf("Space 1: dofs1D_0 %d quad1D_0 %d \n", dofs1D_0, quad1D_0);
-
-
-  const FiniteElement &el_1 = *SubFes1->GetFE(0);
-
-  ElementTransformation &Trans_1 = *SubFes1->GetElementTransformation(0);
-
-  const int dims_1 = el_1.GetDim();
-  const int nq_1 = ir->GetNPoints();
-
-  const int dim_1 = mesh->Dimension();
-  const int NE_1 = mesh->GetNE();
-
-  const GeometricFactors *geom_1 = mesh->GetGeometricFactors(*ir, GeometricFactors::JACOBIANS);
-  const DofToQuad * maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
-
-  const int dofs1D_1 = maps_1->ndof;
-  const int quad1D_1 = maps_1->nqpt;
-
-  printf("Space 2: dofs1D_1 %d quad1D_1 %d \n", dofs1D_1, quad1D_1);
+   printf("Space 1: dofs1D_0 %d quad1D_0 %d \n", dofs1D_0, quad1D_0);
 
 
-  //Sample velocity:
-  Vector vel(dim_0*nq*NE);
+   const FiniteElement &el_1 = *SubFes1->GetFE(0);
 
-  auto V = mfem::Reshape(vel.HostWrite(), dim_0, nq_0, NE);
+   ElementTransformation &Trans_1 = *SubFes1->GetElementTransformation(0);
 
-  DenseMatrix Q_ir;
+   const int dims_1 = el_1.GetDim();
+   const int nq_1 = ir->GetNPoints();
 
-  for(int e=0; e<1; ++e)
-  {
+   const int dim_1 = mesh->Dimension();
+   const int NE_1 = mesh->GetNE();
 
-    ElementTransformation& T = *SubFes0->GetElementTransformation(e);
-    //Q->Eval
-    assembly.lom.coef->Eval(Q_ir, T, *ir);
-    for(int q=0; q<nq; ++q){
-      for(int i=0; i<dim_0; ++i) {
-        V(i,q,e) = Q_ir(i,q);
+   const GeometricFactors *geom_1 = mesh->GetGeometricFactors(*ir,
+                                                              GeometricFactors::JACOBIANS);
+   const DofToQuad * maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_1 = maps_1->ndof;
+   const int quad1D_1 = maps_1->nqpt;
+
+   printf("Space 2: dofs1D_1 %d quad1D_1 %d \n", dofs1D_1, quad1D_1);
+
+
+   //Sample velocity:
+   Vector vel(dim_0*nq*NE);
+
+   auto V = mfem::Reshape(vel.HostWrite(), dim_0, nq_0, NE);
+
+   DenseMatrix Q_ir;
+
+   for (int e=0; e<NE; ++e)
+   {
+
+      ElementTransformation& T = *SubFes0->GetElementTransformation(e);
+      //Q->Eval
+      assembly.lom.coef->Eval(Q_ir, T, *ir);
+      for (int q=0; q<nq; ++q)
+      {
+         for (int i=0; i<dim_0; ++i)
+         {
+            V(i,q,e) = Q_ir(i,q);
+         }
+         //printf("vel %f %f \n",V(0,q,e), V(1,q,e));
       }
-      //printf("vel %f %f \n",V(0,q,e), V(1,q,e));
-    }
-  }
+   }
 
-  //Calculated velocity field - now need to set up PA
+   //Calculated velocity field - now need to set up PA
 
-  //Assume 2D case
-  const int NQ = quad1D_0*quad1D_0;
-  Vector pa_data(2*NQ*NE);
-  auto J = Reshape(geom_0->J.HostRead(), NQ, 2, 2, NE);
-  auto q_data = Reshape(pa_data.HostWrite(), NQ, 2, NE);
-  const double alpha = -1.0;
-  const double *W = ir->GetWeights().Read();
+   //Assume 2D case
+   const int NQ = quad1D_0*quad1D_0;
+   Vector pa_data(2*NQ*NE);
+   auto J = Reshape(geom_0->J.HostRead(), NQ, 2, 2, NE);
+   auto q_data = Reshape(pa_data.HostWrite(), NQ, 2, NE);
+   const double alpha = -1.0;
+   const double *W = ir->GetWeights().Read();
 
-  for(int e=0; e<1; ++e)
-  {
-    for(int q=0; q<nq; ++q){
-      const double J11 = J(q,0,0,e);
-      const double J21 = J(q,1,0,e);
-      const double J12 = J(q,0,1,e);
-      const double J22 = J(q,1,1,e);
-      double w = alpha * W[q];
+   for (int e=0; e<NE; ++e)
+   {
+      for (int q=0; q<nq; ++q)
+      {
+         const double J11 = J(q,0,0,e);
+         const double J21 = J(q,1,0,e);
+         const double J12 = J(q,0,1,e);
+         const double J22 = J(q,1,1,e);
+         double w = alpha * W[q];
 
-      const double v0 = V(0,q,e);
-      const double v1 = V(1,q,e);
-      const double wx = w * v0;
-      const double wy = w * v1;
-      //w*inv(J)
-      q_data(q, 0, e) = wx * J22 - wy * J12;
-      q_data(q, 1, e) = -wx * J21 + wy * J11;
-    }
-  }
-
-
-  auto B_0 = Reshape(maps_0->B.HostRead(), quad1D_0, dofs1D_0);
-  auto G_0 = Reshape(maps_0->G.HostRead(), quad1D_0, dofs1D_0);
-
-  auto B_1 = Reshape(maps_1->B.HostRead(), quad1D_1, dofs1D_1);
-  auto G_1 = Reshape(maps_1->G.HostRead(), quad1D_1, dofs1D_1);
-
-  auto D = Reshape(pa_data.HostRead(), quad1D_0, quad1D_0, 2, NE);
-
-  printf("quad1D_0 %d dofs1D_0 %d quad1D_1 %d dofs1D_1 %d \n",
-         quad1D_0, dofs1D_0, quad1D_1, dofs1D_1);
-
-  //Q data is formed
-  //Assemble element matrix
-  const int tot_dofs = dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0;
-  auto subWeights_view = Reshape(subWeights.HostWrite(),
-                                 dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
-                                 //dofs1D_1,dofs1D_0,dofs1D_1,dofs1D_0);
-  for(int e=0; e<1; ++e)
-  {
-
-    for(int j2=0; j2<dofs1D_0; ++j2){
-      for(int j1=0; j1<dofs1D_0; ++j1){
-
-            for(int i2=0; i2<dofs1D_1; ++i2) {
-              for(int i1=0; i1<dofs1D_1; ++i1) {
-
-                double val = 0.0;
-                for(int k1=0; k1<quad1D_0; ++k1){
-                  for(int k2=0; k2<quad1D_0; ++k2){
+         const double v0 = V(0,q,e);
+         const double v1 = V(1,q,e);
+         const double wx = w * v0;
+         const double wy = w * v1;
+         //w*inv(J)
+         q_data(q, 0, e) = wx * J22 - wy * J12;
+         q_data(q, 1, e) = -wx * J21 + wy * J11;
+      }
+   }
 
 
-                    val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
-                             + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
-                      *B_0(k1,j1)*B_0(k2,j2);
+   auto B_0 = Reshape(maps_0->B.HostRead(), quad1D_0, dofs1D_0);
+   auto G_0 = Reshape(maps_0->G.HostRead(), quad1D_0, dofs1D_0);
+
+   auto B_1 = Reshape(maps_1->B.HostRead(), quad1D_1, dofs1D_1);
+   auto G_1 = Reshape(maps_1->G.HostRead(), quad1D_1, dofs1D_1);
+
+   auto D = Reshape(pa_data.HostRead(), quad1D_0, quad1D_0, 2, NE);
+
+   printf("quad1D_0 %d dofs1D_0 %d quad1D_1 %d dofs1D_1 %d \n",
+          quad1D_0, dofs1D_0, quad1D_1, dofs1D_1);
+
+   //Q data is formed
+   //Assemble element matrix
+   const int tot_dofs = dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0;
+   auto subWeights_view = Reshape(subWeights.HostWrite(),
+                                  dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
+   //dofs1D_1,dofs1D_0,dofs1D_1,dofs1D_0);
+   for (int e=0; e<NE; ++e)
+   {
+
+      for (int j2=0; j2<dofs1D_0; ++j2)
+      {
+         for (int j1=0; j1<dofs1D_0; ++j1)
+         {
+
+            for (int i2=0; i2<dofs1D_1; ++i2)
+            {
+               for (int i1=0; i1<dofs1D_1; ++i1)
+               {
+
+                  double val = 0.0;
+                  for (int k1=0; k1<quad1D_0; ++k1)
+                  {
+                     for (int k2=0; k2<quad1D_0; ++k2)
+                     {
+
+
+                        val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
+                                 + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
+                                *B_0(k1,j1)*B_0(k2,j2);
+                     }
                   }
-                }
 
-                subWeights_view(i1,i2,j1,j2,e) = val;
-              }
+                  subWeights_view(i1,i2,j1,j2,e) = val;
+               }
             }
 
+         }
+      }
+
+      /*
+          for(int i=0; i<tot_dofs; ++i) {
+            printf("val %f \n", subWeights.Data()[i]);
           }
-        }
-
-        for(int i=0; i<tot_dofs; ++i) {
-          printf("val %f \n", subWeights.Data()[i]);
-        }
+      */
 
 
-  }
+   }
 
 
 }
@@ -1182,14 +1196,16 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    nodalWeightsP.SetSize(ndof);
    nodalWeightsN.SetSize(ndof);
 
-   for(int k=0; k<ne; ++k) {
-     for (int m = 0; m < assembly.dofs.numSubcells; m++) {
+   for (int k=0; k<ne; ++k)
+   {
+      for (int m = 0; m < assembly.dofs.numSubcells; m++)
+      {
 
-       if (time_dep)
-       {
-         assembly.ComputeSubcellWeights(k, m);
-       }
-     }
+         if (time_dep)
+         {
+            assembly.ComputeSubcellWeights(k, m);
+         }
+      }
    }
 
    const int noSubcells =  assembly.dofs.numSubcells;
@@ -1200,12 +1216,34 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    SubCellComputation(mySubWeights);
 
    double error = 0;
+   int idx = 0;
+   for (int k=0; k<ne; ++k)
+   {
+
+      for (int m = 0; m < assembly.dofs.numSubcells; m++)
+      {
+
+         for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
+         {
+            error += (mySubWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i)) *
+                     (mySubWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i));
+            idx++;
+         }
+
+      }
+   }
+
+   /*
    for(int i=0; i<mySubWeights.TotalSize(); ++i){
      error += (mySubWeights.Read()[i] - assembly.SubcellWeights.Read()[i])*
               (mySubWeights.Read()[i] - assembly.SubcellWeights.Read()[i]);
+     if(i % 4 == 0) printf("\n");
+     printf("%f %f \n",mySubWeights.Read()[i], assembly.SubcellWeights.Read()[i]);
    }
+   */
    error = sqrt(error);
-   if(error > 1e-12) { printf("error is %g \n", error); exit(-1); }
+   printf("error is %g \n",error);
+   if (error > 1e-12) { printf("error is %g \n", error); exit(-1); }
 
 
    //MFEM_FORALL(k, ne,

@@ -399,7 +399,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+         maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -997,12 +997,12 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
       adjJ.Mult(vec1, vec2);
 
       /*
-      static bool display = true; 
+      static bool display = true;
       if(display)
       {
         printf("Vector 2 \n");
         vec2.Print();
-        display = false; 
+        display = false;
       }
       */
 
@@ -1012,18 +1012,23 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
       AddMultVWt(shape, BdFidxT, elmat);
    }
 
-   static bool display = true; 
-   if(display){     
-     printf("No of integration points %d \n", ir->GetNPoints());
-     printf("tr_nd %d te_nd %d \n", tr_nd, te_nd);
-     if(te_el.GetGeomType() == Geometry::SQUARE) printf("On a square \n");
-     if(te_el.GetGeomType() == Geometry::CUBE) printf("On a cube \n");
-     //printf("dShape size %d %d , shape size %d \n", tr_nd, dim, te_nd);
-     //elmat.Print();
-     for(int i=0; i<elmat.Size(); ++i){
-       printf("%g \n",elmat.GetData()[i]);
-     }
-     display = false; 
+   static bool display = true;
+   if (display)
+   {
+      /*
+      printf("No of integration points %d \n", ir->GetNPoints());
+      printf("tr_nd %d te_nd %d \n", tr_nd, te_nd);
+      if(te_el.GetGeomType() == Geometry::SQUARE) printf("On a square \n");
+      if(te_el.GetGeomType() == Geometry::CUBE) printf("On a cube \n");
+      */
+      //printf("dShape size %d %d , shape size %d \n", tr_nd, dim, te_nd);
+      //elmat.Print();
+      for (int i=0; i<elmat.Size(); ++i)
+      {
+         printf("%g \n",elmat.GetData()[i]);
+      }
+      printf("\n \n");
+      display = false;
    }
 
 }
