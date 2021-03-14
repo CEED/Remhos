@@ -960,6 +960,103 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
    //MFEM_VERIFY(subcell == true, "Must be using subcell scheme");
 }
 
+void PASubcellResidualDistribution::SampleSubCellVelocity()
+{
+
+  const IntegrationRule *ir = nullptr;
+   const int dim = assembly.GetSubCellMesh()->Dimension();
+   if(dim == 2) ir = &IntRules.Get(Geometry::SQUARE, 1);
+   if(dim == 3) ir = &IntRules.Get(Geometry::CUBE, 1);
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int NE = mesh->GetNE();
+   const int nq = ir->GetNPoints();
+
+   //Q: which to use 0, or 1?
+   FiniteElementSpace *SubFes = assembly.lom.SubFes0;
+
+   SubCellVel.SetSize(dim*nq*NE);
+   auto V = mfem::Reshape(SubCellVel.HostWrite(), dim, nq, NE);
+
+   DenseMatrix Q_ir;
+   for (int e=0; e<NE; ++e)
+   {
+     ElementTransformation& T = *SubFes->GetElementTransformation(e);
+     //Q->Eval
+     assembly.lom.coef->Eval(Q_ir, T, *ir);
+     for (int q=0; q<nq; ++q)
+     {
+       for (int i=0; i<dim; ++i)
+       {
+         V(i,q,e) = Q_ir(i,q);
+       }
+     }
+   }
+}
+
+void PASubcellResidualDistribution::SetupSubCellPA()
+{
+
+ const int dim = assembly.GetSubCellMesh()->Dimension();
+ if(dim == 2) SetupSubCellPA2D();
+ if(dim == 3) SetupSubCellPA3D();
+ mfem_error("PA Subcell Residual Distribution not supported in 1D \n");
+}
+
+//Same as
+//bilininteg_convection_pa.cpp::PAConvectionSetup2D
+void PASubcellResidualDistribution::SetupSubCellPA2D()
+{
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
+   const int NQ = ir->GetNPoints();
+
+   //Q Should this be SubFes0 or SubFes1?
+   FiniteElementSpace *SubFes = assembly.lom.SubFes0;
+   const FiniteElement &el = *SubFes->GetFE(0);
+   ElementTransformation &Trans = *SubFes->GetElementTransformation(0);
+
+   const GeometricFactors *geom = mesh->GetGeometricFactors(*ir,
+                                       GeometricFactors::JACOBIANS);
+   const DofToQuad * map = &el.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   pa_data.SetSize(2*NQ*NE);
+   auto J = Reshape(geom->J.Read(), NQ, 2, 2, NE);
+   auto q_data = Reshape(pa_data.Write(), NQ, 2, NE);
+   auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
+   const double alpha = -1.0;
+   const double *W = ir->GetWeights().Read();
+
+   MFEM_FORALL(e, NE,
+   {
+     for (int q=0; q<NQ; ++q)
+      {
+         const double J11 = J(q,0,0,e);
+         const double J21 = J(q,1,0,e);
+         const double J12 = J(q,0,1,e);
+         const double J22 = J(q,1,1,e);
+         double w = alpha * W[q];
+
+
+         const double v0 = V(0,q,e);
+         const double v1 = V(1,q,e);
+         const double wx = w * v0;
+         const double wy = w * v1;
+         //w*inv(J)
+         q_data(q, 0, e) = wx * J22 - wy * J12;
+         q_data(q, 1, e) = -wx * J21 + wy * J11;
+      }
+   });
+}
+
+void PASubcellResidualDistribution::SetupSubCellPA3D()
+{
+  mfem_error("to do \n");
+}
+
 
 //Compute contributions from inside the subcell
 void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights)
@@ -1213,6 +1310,8 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    printf("No of Subcells %d noSubcellDofs %d \n", noSubcells, noSubcellDofs);
    DenseTensor mySubWeights(noSubcells, noSubcellDofs, ne);
 
+   //SubCellWeights();
+
    SubCellComputation(mySubWeights);
 
    double error = 0;
@@ -1233,14 +1332,6 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       }
    }
 
-   /*
-   for(int i=0; i<mySubWeights.TotalSize(); ++i){
-     error += (mySubWeights.Read()[i] - assembly.SubcellWeights.Read()[i])*
-              (mySubWeights.Read()[i] - assembly.SubcellWeights.Read()[i]);
-     if(i % 4 == 0) printf("\n");
-     printf("%f %f \n",mySubWeights.Read()[i], assembly.SubcellWeights.Read()[i]);
-   }
-   */
    error = sqrt(error);
    printf("error is %g \n",error);
    if (error > 1e-12) { printf("error is %g \n", error); exit(-1); }
