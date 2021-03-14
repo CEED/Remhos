@@ -962,9 +962,8 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
 
 void PASubcellResidualDistribution::SampleSubCellVelocity()
 {
-
-  const IntegrationRule *ir = nullptr;
    const int dim = assembly.GetSubCellMesh()->Dimension();
+   const IntegrationRule *ir;
    if(dim == 2) ir = &IntRules.Get(Geometry::SQUARE, 1);
    if(dim == 3) ir = &IntRules.Get(Geometry::CUBE, 1);
 
@@ -1057,6 +1056,76 @@ void PASubcellResidualDistribution::SetupSubCellPA3D()
   mfem_error("to do \n");
 }
 
+void PASubcellResidualDistribution::SubCellWeights(DenseTensor &subWeights) const
+{
+  FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
+  FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
+
+  Mesh *mesh = assembly.GetSubCellMesh();
+  const int DIM = mesh->Dimension();
+  const int NE = mesh->GetNE();
+  const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
+
+  const GeometricFactors *geom =
+    mesh->GetGeometricFactors(*ir, GeometricFactors::JACOBIANS);
+
+  //Data for subspace 0
+  const FiniteElement &el_0 = *SubFes0->GetFE(0);
+  ElementTransformation &Trans_0 = *SubFes0->GetElementTransformation(0);
+  const DofToQuad *maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+  const int dofs1D_0 = maps_0->ndof;
+  const int quad1D = maps_0->nqpt; //same in both spaces
+
+  //Data for subspace 1
+  const FiniteElement &el_1 = *SubFes1->GetFE(0);
+  ElementTransformation &Trans_1 = *SubFes1->GetElementTransformation(0);
+  const DofToQuad *maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+  const int dofs1D_1 = maps_1->ndof;
+
+   auto B_0 = Reshape(maps_0->B.HostRead(), quad1D, dofs1D_0);
+   auto G_0 = Reshape(maps_0->G.HostRead(), quad1D, dofs1D_0);
+
+   auto B_1 = Reshape(maps_1->B.HostRead(), quad1D, dofs1D_1);
+   auto G_1 = Reshape(maps_1->G.HostRead(), quad1D, dofs1D_1);
+
+   auto D = Reshape(pa_data.HostRead(), quad1D, quad1D, 2, NE);
+
+   auto subWeights_view = Reshape(subWeights.Write(),
+                                  dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
+
+   MFEM_FORALL(e, NE,
+   {
+
+     for (int j2=0; j2<dofs1D_0; ++j2)
+      {
+         for (int j1=0; j1<dofs1D_0; ++j1)
+         {
+
+            for (int i2=0; i2<dofs1D_1; ++i2)
+            {
+               for (int i1=0; i1<dofs1D_1; ++i1)
+               {
+                 double val=0;
+                  for (int k1=0; k1<quad1D; ++k1)
+                  {
+                     for (int k2=0; k2<quad1D; ++k2)
+                     {
+                       val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
+                                + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
+                                  *B_0(k1,j1)*B_0(k2,j2);
+                     }
+                  }
+                  subWeights_view(i1,i2,j1,j2,e) = val;
+               }
+            }
+         }
+      }
+   });
+
+}
+
 
 //Compute contributions from inside the subcell
 void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights)
@@ -1072,7 +1141,6 @@ const
    //Subcell FEM spaces
    FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
    FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
-
    //Convection term only...
 
    //For setup we follow PAConvectionSetup2D
