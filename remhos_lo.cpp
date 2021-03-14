@@ -960,7 +960,7 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
    //MFEM_VERIFY(subcell == true, "Must be using subcell scheme");
 }
 
-void PASubcellResidualDistribution::SampleSubCellVelocity()
+void PASubcellResidualDistribution::SampleSubCellVelocity() const
 {
    const int dim = assembly.GetSubCellMesh()->Dimension();
    const IntegrationRule *ir;
@@ -993,18 +993,18 @@ void PASubcellResidualDistribution::SampleSubCellVelocity()
    }
 }
 
-void PASubcellResidualDistribution::SetupSubCellPA()
+void PASubcellResidualDistribution::SetupSubCellPA() const
 {
 
  const int dim = assembly.GetSubCellMesh()->Dimension();
- if(dim == 2) SetupSubCellPA2D();
- if(dim == 3) SetupSubCellPA3D();
+ if(dim == 2) return SetupSubCellPA2D();
+ if(dim == 3) return SetupSubCellPA3D();
  mfem_error("PA Subcell Residual Distribution not supported in 1D \n");
 }
 
 //Same as
 //bilininteg_convection_pa.cpp::PAConvectionSetup2D
-void PASubcellResidualDistribution::SetupSubCellPA2D()
+void PASubcellResidualDistribution::SetupSubCellPA2D() const
 {
 
    Mesh *mesh = assembly.GetSubCellMesh();
@@ -1051,7 +1051,7 @@ void PASubcellResidualDistribution::SetupSubCellPA2D()
    });
 }
 
-void PASubcellResidualDistribution::SetupSubCellPA3D()
+void PASubcellResidualDistribution::SetupSubCellPA3D() const
 {
   mfem_error("to do \n");
 }
@@ -1378,9 +1378,12 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    printf("No of Subcells %d noSubcellDofs %d \n", noSubcells, noSubcellDofs);
    DenseTensor mySubWeights(noSubcells, noSubcellDofs, ne);
 
-   //SubCellWeights();
+   SampleSubCellVelocity();
+   SetupSubCellPA();
 
-   SubCellComputation(mySubWeights);
+   SubCellWeights(mySubWeights);
+
+   //SubCellComputation(mySubWeights);
 
    double error = 0;
    int idx = 0;
