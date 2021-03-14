@@ -1375,13 +1375,16 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
    const int noSubcells =  assembly.dofs.numSubcells;
    const int noSubcellDofs = assembly.dofs.numDofsSubcell;
-   printf("No of Subcells %d noSubcellDofs %d \n", noSubcells, noSubcellDofs);
+   //printf("No of Subcells %d noSubcellDofs %d \n", noSubcells, noSubcellDofs);
    DenseTensor mySubWeights(noSubcells, noSubcellDofs, ne);
 
-   SampleSubCellVelocity();
-   SetupSubCellPA();
+   //TODO 3D version
+   {
+     SampleSubCellVelocity();
+     SetupSubCellPA();
 
-   SubCellWeights(mySubWeights);
+     SubCellWeights(mySubWeights);
+   }
 
    //SubCellComputation(mySubWeights);
 
