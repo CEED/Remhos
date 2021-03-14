@@ -1063,13 +1063,13 @@ void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights) 
       const double J12 = J(q,0,1,e);
       const double J22 = J(q,1,1,e);
       double w = alpha * W[q];
-      
+
       const double v0 = V(0,q,e);
       const double v1 = V(1,q,e);
-      const double wx = w * v0; 
-      const double wy = w * v1; 
+      const double wx = w * v0;
+      const double wy = w * v1;
       //w*inv(J)
-      q_data(q, 0, e) = wx * J22 - wy * J12; 
+      q_data(q, 0, e) = wx * J22 - wy * J12;
       q_data(q, 1, e) = -wx * J21 + wy * J11;
     }
   }
@@ -1089,36 +1089,39 @@ void PASubcellResidualDistribution::SubCellComputation(DenseTensor &subWeights) 
   //Q data is formed
   //Assemble element matrix
   const int tot_dofs = dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0;
-  auto subWeights_view = Reshape(subWeights.HostWrite(), NE,
-                                 dofs1D_1,dofs1D_1,dofs1D_0,dofs1D_0); 
+  auto subWeights_view = Reshape(subWeights.HostWrite(),
+                                 dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
+                                 //dofs1D_1,dofs1D_0,dofs1D_1,dofs1D_0);
   for(int e=0; e<1; ++e)
   {
-    
-    for(int i1=0; i1<dofs1D_1; ++i1) {
-      for(int i2=0; i2<dofs1D_1; ++i2) {
 
-        for(int j1=0; j1<dofs1D_0; ++j1){
-          for(int j2=0; j2<dofs1D_0; ++j2){
+    for(int j2=0; j2<dofs1D_0; ++j2){
+      for(int j1=0; j1<dofs1D_0; ++j1){
 
-            double val = 0.0;
-            for(int k1=0; k1<quad1D_0; ++k1){
-              for(int k2=0; k2<quad1D_0; ++k2){
+            for(int i2=0; i2<dofs1D_1; ++i2) {
+              for(int i1=0; i1<dofs1D_1; ++i1) {
+
+                double val = 0.0;
+                for(int k1=0; k1<quad1D_0; ++k1){
+                  for(int k2=0; k2<quad1D_0; ++k2){
 
 
-                val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
-                       + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
-                        *B_0(k1,j1)*B_0(k2,j2);
+                    val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
+                             + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
+                      *B_0(k1,j1)*B_0(k2,j2);
+                  }
+                }
+
+                subWeights_view(i1,i2,j1,j2,e) = val;
               }
             }
 
-            //D(i1,i2,j1,j2, e) = 
-            subWeights_view(e, i1,i2,j1,j2) = val;
-            printf("val %g \n", val);
           }
         }
 
-      }
-    }
+        for(int i=0; i<tot_dofs; ++i) {
+          printf("val %f \n", subWeights.Data()[i]);
+        }
 
 
   }
