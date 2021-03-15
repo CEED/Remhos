@@ -121,7 +121,8 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   const char *mesh_file = "data/periodic-square.mesh";
+   //const char *mesh_file = "data/periodic-square.mesh";
+   const char *mesh_file = "data/periodic-cube.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;

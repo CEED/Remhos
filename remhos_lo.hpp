@@ -110,10 +110,10 @@ class PASubcellResidualDistribution : virtual public PAResidualDistribution
 {
 
 private:
-  mutable Vector SubCellVel;
-  mutable Vector pa_data;
+   mutable Array<double> SubCellVel;
+   mutable Array<double> pa_data;
 
-  void SampleSubCellVelocity() const;
+   void SampleSubCellVelocity() const;
 
 public:
 
@@ -122,13 +122,13 @@ public:
                                  Assembly &asmbly, const Vector &Mlump,
                                  bool subcell, bool timedep);
 
-   void SetupSubCellPA() const;
+   void SetupSubCellPA3D() const;
 
    void SetupSubCellPA2D() const;
 
-   void SetupSubCellPA3D() const;
+   void SetupSubCellPA() const;
 
-   void SubCellWeights(DenseTensor &subWeights) const;
+   void SubCellWeights(Array<double> &subWeights) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
