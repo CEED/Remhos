@@ -128,8 +128,6 @@ public:
 
    void SetupSubCellPA3D() const;
 
-   void SubCellComputation(DenseTensor &subWeights) const;
-
    void SubCellWeights(DenseTensor &subWeights) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
