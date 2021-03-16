@@ -399,7 +399,7 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-         maxvals(x_max.GetData(), x_max.Size());
+                 maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -791,7 +791,6 @@ void Assembly::ComputeSubcellWeights(const int k, const int m)
    ElementTransformation *tr = subcell_mesh->GetElementTransformation(e_id);
    VolumeTerms->AssembleElementMatrix2(*el1, *el0, *tr, elmat);
 
-   //printf("e_id %d \n",e_id);
    for (int j = 0; j < elmat.Width(); j++)
    {
       // Using the fact that elmat has just one row.
@@ -995,42 +994,10 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
       vec1 *= alpha * ip.weight;
 
       adjJ.Mult(vec1, vec2);
-
-      /*
-      static bool display = true;
-      if(display)
-      {
-        printf("Vector 2 \n");
-        vec2.Print();
-        display = false;
-      }
-      */
-
-
       dshape.Mult(vec2, BdFidxT);
 
       AddMultVWt(shape, BdFidxT, elmat);
    }
-
-   static bool display = true;
-   if (display)
-   {
-      /*
-      printf("No of integration points %d \n", ir->GetNPoints());
-      printf("tr_nd %d te_nd %d \n", tr_nd, te_nd);
-      if(te_el.GetGeomType() == Geometry::SQUARE) printf("On a square \n");
-      if(te_el.GetGeomType() == Geometry::CUBE) printf("On a cube \n");
-      */
-      //printf("dShape size %d %d , shape size %d \n", tr_nd, dim, te_nd);
-      //elmat.Print();
-      for (int i=0; i<elmat.Size(); ++i)
-      {
-         printf("%g \n",elmat.GetData()[i]);
-      }
-      printf("\n \n");
-      display = false;
-   }
-
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
