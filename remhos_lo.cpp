@@ -1115,7 +1115,7 @@ void PASubcellResidualDistribution::SetupSubCellPA3D() const
 
 }
 
-void PASubcellResidualDistribution::SubCellWeights(Array<double> &subWeights)
+void PASubcellResidualDistribution::ComputeSubCellWeights(Array<double> &subWeights)
 const
 {
    FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
@@ -1190,7 +1190,7 @@ const
 
    if (DIM == 3)
    {
-      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*dofs1D_0);
+      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*dofs1D_0*NE);
       auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D,quad1D, DIM, NE);
       auto subWeights_view = Reshape(subWeights.Write(),
                                      dofs1D_1, dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, dofs1D_0, NE);
@@ -1285,6 +1285,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    const int numSubcells = assembly.dofs.numSubcells;
    const int numDofsSubcell = assembly.dofs.numDofsSubcell;
 
+   /*
    //Setup vector sizes for subcell
    fluctSubcellP.SetSize(numSubcells*ne);
    fluctSubcellN.SetSize(numSubcells*ne);
@@ -1306,21 +1307,23 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          }
       }
    }
+   */
 
    if(time_dep || init_weights)
    {
       SampleSubCellVelocity();
       SetupSubCellPA();  
-      SubCellWeights(subCellWeights);
+      ComputeSubCellWeights(subCellWeights);
       init_weights = false;
    }
+
 
    /*
    printf("Total Size %d %d \n",
           subCellWeights.Size(), assembly.SubcellWeights.TotalSize());
    printf("ne * numSubcells * numSubcells = %d %d %d %d \n",
           ne*numSubcells*numDofsSubcell, ne, numSubcells, numDofsSubcell);
-   */
+
    double error = 0;
    int idx = 0;
    //for (int k=0; k<assembly.SubcellWeights.SizeK(); ++k)
@@ -1342,6 +1345,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
    error = sqrt(error);
    if (error > 1e-12) { printf("error is %g \n", error); exit(-1); }
+*/
 
    //Setup vector sizes for subcell
    fluctSubcellP.SetSize(numSubcells*ne);
@@ -1364,105 +1368,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    auto fluctSubcellN_v = Reshape(fluctSubcellN.Write(), numSubcells, ne);
    auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells,numSubcells);
 
-#if 0
-   //MFEM_FORALL(k, ne,
-   for (int k=0; k<ne; ++k)
-   {
-      // Boundary contributions - stored in du
-      // done before this loop
-
-      // Element contributions
-      double rhoP(0.), rhoN(0.), xSum(0.);
-      for (int j = 0; j < ndof; ++j)
-      {
-         int dof_id = k*ndof+j;
-         xe_max[k] = max(xe_max[k], d_u[dof_id]);
-         xe_min[k] = min(xe_min[k], d_u[dof_id]);
-         xSum += d_u[dof_id];
-         rhoP += max(0., d_z[dof_id]);
-         rhoN += min(0., d_z[dof_id]);
-      }
-
-      //denominator of equation 47
-      double sumWeightsP = ndof*xe_max[k] - xSum + eps;
-      double sumWeightsN = ndof*xe_min[k] - xSum - eps;
-
-      int dof_id;
-      double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
-      if (subcell_scheme)
-      {
-         sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
-         nodalWeightsP = 0.; nodalWeightsN = 0.;
-
-         // compute min-/max-values and the fluctuation for subcells
-         for (int m = 0; m < numSubcells; m++)
-         {
-            xMinSubcell(m) =   numeric_limits<double>::infinity();
-            xMaxSubcell(m) = - numeric_limits<double>::infinity();;
-            double fluct = 0; double xSum = 0.;
-            for (int i = 0; i <numDofsSubcell; i++)
-            {
-               dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
-               fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
-               xMaxSubcell(m) = max(xMaxSubcell(m), u(dof_id));
-               xMinSubcell(m) = min(xMinSubcell(m), u(dof_id));
-               xSum += u(dof_id);
-            }
-            sumWeightsSubcellP(m) =numDofsSubcell
-                                    * xMaxSubcell(m) - xSum + eps;
-            sumWeightsSubcellN(m) =numDofsSubcell
-                                    * xMinSubcell(m) - xSum - eps;
-
-            fluctSubcellP(m) = max(0., fluct);
-            fluctSubcellN(m) = min(0., fluct);
-            sumFluctSubcellP += fluctSubcellP(m);
-            sumFluctSubcellN += fluctSubcellN(m);
-         }
-
-         for (int m = 0; m < numSubcells; m++)
-         {
-            for (int i = 0; i <numDofsSubcell; i++)
-            {
-               const int loc_id = assembly.dofs.Sub2Ind(m, i);
-               dof_id = k*ndof + loc_id;
-               nodalWeightsP_v(loc_id, k) += fluctSubcellP(m)
-                                        * ((xMaxSubcell(m) - u(dof_id))
-                                           / sumWeightsSubcellP(m)); // eq. (58)
-               nodalWeightsN_v(loc_id, k) += fluctSubcellN(m)
-                                        * ((xMinSubcell(m) - u(dof_id))
-                                           / sumWeightsSubcellN(m)); // eq. (59)
-            }
-         }
-      } //subcell scheme
-
-
-      for (int i = 0; i < ndof; i++)
-      {
-         int dof_id = k*ndof+i;
-         //eq 46
-         double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
-         double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
-
-         if (subcell_scheme)
-         {
-            double aux = gamma / (rhoP + eps);
-            weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
-            weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP_v(i, k);
-
-            aux = gamma / (rhoN - eps);
-            weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
-            weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN_v(i, k);
-         }
-
-
-         // (lumpped trace term  + LED convection )/lumpped mass matrix
-         d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
-                        d_M_lumped[dof_id];
-      }
-   }//);
-
-#else
-   use_subcell_scheme = subcell_scheme; 
+   const bool use_subcell_scheme = subcell_scheme; 
    MFEM_FORALL(k, ne,
    {
       // Boundary contributions - stored in du
@@ -1488,7 +1394,6 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       if (use_subcell_scheme)
       {
          sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
-         //nodalWeightsP = 0.; nodalWeightsN = 0.;
          for(int i=0; i<ndof; ++i){
            nodalWeightsP_v(i, k) = 0.0;
            nodalWeightsN_v(i, k) = 0.0;
@@ -1503,13 +1408,11 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
             for (int i = 0; i <numDofsSubcell; i++)
             {
-              //dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
                dof_id = k*ndof + Sub2Ind(m, i);
-               //fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
                fluct += subCellWeights_v(i,m,k) * d_u[dof_id];
-               xMaxSubcell_v(m, k) = max(xMaxSubcell_v(m, k), u(dof_id));
-               xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), u(dof_id));
-               xSum += u(dof_id);
+               xMaxSubcell_v(m, k) = max(xMaxSubcell_v(m, k), d_u[dof_id]);
+               xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), d_u[dof_id]);
+               xSum += d_u[dof_id];
             }
             sumWeightsSubcellP_v(m, k) =numDofsSubcell
                                         * xMaxSubcell_v(m, k) - xSum + eps;
@@ -1564,7 +1467,6 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
                         d_M_lumped[dof_id];
       }
    });
-#endif
 
 }
 

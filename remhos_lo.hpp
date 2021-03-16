@@ -130,7 +130,7 @@ public:
 
    void SetupSubCellPA() const;
 
-   void SubCellWeights(Array<double> &subWeights) const;
+   void ComputeSubCellWeights(Array<double> &subWeights) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
