@@ -1463,7 +1463,8 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
 #else
    //MFEM_FORALL(k, ne,
-   for (int k=0; k<ne; ++k)
+   //for (int k=0; k<ne; ++k)
+   MFEM_FORALL(k, ne,
    {
       // Boundary contributions - stored in du
       // done before this loop
@@ -1488,7 +1489,11 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       if (subcell_scheme)
       {
          sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
-         nodalWeightsP = 0.; nodalWeightsN = 0.;
+         //nodalWeightsP = 0.; nodalWeightsN = 0.;
+         for(int i=0; i<ndof; ++i){
+           nodalWeightsP_v(i, k) = 0.0;
+           nodalWeightsN_v(i, k) = 0.0;
+         }
 
          // compute min-/max-values and the fluctuation for subcells
          for (int m = 0; m < numSubcells; m++)
@@ -1499,35 +1504,38 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
             for (int i = 0; i <numDofsSubcell; i++)
             {
-               dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
-               fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
+              //dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
+               dof_id = k*ndof + Sub2Ind(m, i);
+               //fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
+               fluct += subCellWeights_v(i,m,k) * d_u[dof_id];
                xMaxSubcell_v(m, k) = max(xMaxSubcell_v(m, k), u(dof_id));
                xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), u(dof_id));
                xSum += u(dof_id);
             }
-            sumWeightsSubcellP(m) =numDofsSubcell
-                                   * xMaxSubcell_v(m, k) - xSum + eps;
-            sumWeightsSubcellN(m) =numDofsSubcell
-                                   * xMinSubcell_v(m, k) - xSum - eps;
+            sumWeightsSubcellP_v(m, k) =numDofsSubcell
+                                        * xMaxSubcell_v(m, k) - xSum + eps;
+            sumWeightsSubcellN_v(m, k) =numDofsSubcell
+                                       * xMinSubcell_v(m, k) - xSum - eps;
 
-            fluctSubcellP(m) = max(0., fluct);
-            fluctSubcellN(m) = min(0., fluct);
-            sumFluctSubcellP += fluctSubcellP(m);
-            sumFluctSubcellN += fluctSubcellN(m);
+            fluctSubcellP_v(m, k) = max(0., fluct);
+            fluctSubcellN_v(m, k) = min(0., fluct);
+            sumFluctSubcellP += fluctSubcellP_v(m, k);
+            sumFluctSubcellN += fluctSubcellN_v(m, k);
          }
 
          for (int m = 0; m < numSubcells; m++)
          {
             for (int i = 0; i <numDofsSubcell; i++)
             {
-               const int loc_id = assembly.dofs.Sub2Ind(m, i);
+              //const int loc_id = assembly.dofs.Sub2Ind(m, i);
+               const int loc_id = Sub2Ind(m, i);
                dof_id = k*ndof + loc_id;
-               nodalWeightsP_v(loc_id, k) += fluctSubcellP(m)
-                                           * ((xMaxSubcell_v(m, k) - u(dof_id))
-                                           / sumWeightsSubcellP(m)); // eq. (58)
-               nodalWeightsN_v(loc_id, k) += fluctSubcellN(m)
-                                          * ((xMinSubcell_v(m, k) - u(dof_id))
-                                           / sumWeightsSubcellN(m)); // eq. (59)
+               nodalWeightsP_v(loc_id, k) += fluctSubcellP_v(m, k)
+                                           * ((xMaxSubcell_v(m, k) - d_u[dof_id])
+                                              / sumWeightsSubcellP_v(m, k)); // eq. (58)
+               nodalWeightsN_v(loc_id, k) += fluctSubcellN_v(m, k)
+                                          * ((xMinSubcell_v(m, k) - d_u[dof_id])
+                                             / sumWeightsSubcellN_v(m, k)); // eq. (59)
             }
          }
       } //subcell scheme
@@ -1556,7 +1564,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
                         d_M_lumped[dof_id];
       }
-   }//);
+   });
 #endif
 
 }
