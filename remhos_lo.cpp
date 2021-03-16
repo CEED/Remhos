@@ -258,7 +258,6 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
      dofs1D(get_maps(pfes, assembly)->ndof),
      face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
 {
-   //MFEM_VERIFY(subcell == false, "Subcell scheme not supported with PA");
 }
 
 // Taken from DGTraceIntegrator::SetupPA L:145
@@ -954,11 +953,9 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
  Assembly &asmbly,
  const Vector &Mlump,
  bool subcell, bool timedep)
-   : init_weights(true), PAResidualDistribution(space, Kbf, asmbly, Mlump, subcell,
-                                                timedep)
+   :  PAResidualDistribution(space, Kbf, asmbly, Mlump, subcell,
+                             timedep), init_weights(true)
 {
-   printf("Using subcell residual distribution scheme! \n");
-   //MFEM_VERIFY(subcell == true, "Must be using subcell scheme");
 }
 
 void PASubcellResidualDistribution::SampleSubCellVelocity() const
@@ -1013,15 +1010,8 @@ void PASubcellResidualDistribution::SetupSubCellPA2D() const
    const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
    const int NQ = ir->GetNPoints();
 
-   //Q Should this be SubFes0 or SubFes1?
-   FiniteElementSpace *SubFes = assembly.lom.SubFes0;
-   const FiniteElement &el = *SubFes->GetFE(0);
-   ElementTransformation &Trans = *SubFes->GetElementTransformation(0);
-
    const GeometricFactors *geom = mesh->GetGeometricFactors(*ir,
                                                             GeometricFactors::JACOBIANS);
-   const DofToQuad * map = &el.GetDofToQuad(*ir, DofToQuad::TENSOR);
-
    subCell_pa_data.SetSize(DIM*NQ*NE);
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
    auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
@@ -1061,14 +1051,8 @@ void PASubcellResidualDistribution::SetupSubCellPA3D() const
    const IntegrationRule *ir = &IntRules.Get(Geometry::CUBE, 1);
    const int NQ = ir->GetNPoints();
 
-   //Q Should this be SubFes0 or SubFes1?
-   FiniteElementSpace *SubFes = assembly.lom.SubFes0;
-   const FiniteElement &el = *SubFes->GetFE(0);
-   ElementTransformation &Trans = *SubFes->GetElementTransformation(0);
-
    const GeometricFactors *geom = mesh->GetGeometricFactors(*ir,
                                                             GeometricFactors::JACOBIANS);
-   const DofToQuad * map = &el.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    subCell_pa_data.SetSize(DIM*NQ*NE);
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
@@ -1130,12 +1114,8 @@ const
    if (DIM == 2) { ir = &IntRules.Get(Geometry::SQUARE, 1); }
    if (DIM == 3) { ir = &IntRules.Get(Geometry::CUBE, 1); }
 
-   const GeometricFactors *geom =
-      mesh->GetGeometricFactors(*ir, GeometricFactors::JACOBIANS);
-
    //Data for subspace 0
    const FiniteElement &el_0 = *SubFes0->GetFE(0);
-   ElementTransformation &Trans_0 = *SubFes0->GetElementTransformation(0);
    const DofToQuad *maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    const int dofs1D_0 = maps_0->ndof;
@@ -1143,13 +1123,11 @@ const
 
    //Data for subspace 1
    const FiniteElement &el_1 = *SubFes1->GetFE(0);
-   ElementTransformation &Trans_1 = *SubFes1->GetElementTransformation(0);
    const DofToQuad *maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    const int dofs1D_1 = maps_1->ndof;
 
    auto B_0 = Reshape(maps_0->B.Read(), quad1D, dofs1D_0);
-   auto G_0 = Reshape(maps_0->G.Read(), quad1D, dofs1D_0);
 
    auto B_1 = Reshape(maps_1->B.Read(), quad1D, dofs1D_1);
    auto G_1 = Reshape(maps_1->G.Read(), quad1D, dofs1D_1);
@@ -1173,9 +1151,9 @@ const
                   for (int i1=0; i1<dofs1D_1; ++i1)
                   {
                      double val=0;
-                     for (int k1=0; k1<quad1D; ++k1)
+                     for (int k2=0; k2<quad1D; ++k2)
                      {
-                        for (int k2=0; k2<quad1D; ++k2)
+                        for (int k1=0; k1<quad1D; ++k1)
                         {
                            val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
                            + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
@@ -1214,11 +1192,11 @@ const
                         for (int i1=0; i1<dofs1D_1; ++i1)
                         {
                            double val=0;
-                           for (int k1=0; k1<quad1D; ++k1)
+                           for (int k3=0; k3<quad1D; ++k3)
                            {
                               for (int k2=0; k2<quad1D; ++k2)
                               {
-                                 for (int k3=0; k3<quad1D; ++k3)
+                                 for (int k1=0; k1<quad1D; ++k1)
                                  {
                                     val +=  (G_1(k1,i1)*B_1(k2,i2)*B_1(k3,i3)*D(k1,k2,k3,0,e)
                                     + B_1(k1,i1) * G_1(k2, i2) * B_1(k3,i3) * D(k1,k2,k3,1,e)
