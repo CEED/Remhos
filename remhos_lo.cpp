@@ -1462,8 +1462,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    }//);
 
 #else
-   //MFEM_FORALL(k, ne,
-   //for (int k=0; k<ne; ++k)
+   use_subcell_scheme = subcell_scheme; 
    MFEM_FORALL(k, ne,
    {
       // Boundary contributions - stored in du
@@ -1486,7 +1485,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       double sumWeightsN = ndof*xe_min[k] - xSum - eps;
       int dof_id;
       double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
-      if (subcell_scheme)
+      if (use_subcell_scheme)
       {
          sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
          //nodalWeightsP = 0.; nodalWeightsN = 0.;
@@ -1548,7 +1547,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
          double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
 
-         if (subcell_scheme)
+         if (use_subcell_scheme)
          {
             double aux = gamma / (rhoP + eps);
             weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
