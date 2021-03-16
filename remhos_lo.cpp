@@ -1154,7 +1154,7 @@ const
 
    if (DIM == 2)
    {
-      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0);
+      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*NE);
       auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, DIM, NE);
       auto subWeights_view = Reshape(subWeights.Write(),
                                      dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
@@ -1283,7 +1283,7 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    double *d_du = du.ReadWrite();
 
    const int numSubcells = assembly.dofs.numSubcells;
-   const int numDofsSubcell =numDofsSubcell;
+   const int numDofsSubcell = assembly.dofs.numDofsSubcell;
 
    //Setup vector sizes for subcell
    fluctSubcellP.SetSize(numSubcells);
@@ -1310,21 +1310,28 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    if(time_dep || init_weights)
    {
       SampleSubCellVelocity();
-      SetupSubCellPA();
-      subCellWeights.SetSize
-        (numSubcells*numSubcells*ne);
+      SetupSubCellPA();  
       SubCellWeights(subCellWeights);
       init_weights = false;
    }
 
+   /*
+   printf("Total Size %d %d \n",
+          subCellWeights.Size(), assembly.SubcellWeights.TotalSize());
+   printf("ne * numSubcells * numSubcells = %d %d %d %d \n",
+          ne*numSubcells*numDofsSubcell, ne, numSubcells, numDofsSubcell);
+   */
    double error = 0;
    int idx = 0;
+   //for (int k=0; k<assembly.SubcellWeights.SizeK(); ++k)
    for (int k=0; k<ne; ++k)
    {
       for (int m = 0; m < numSubcells; m++)
       {
          for (int i = 0; i <numDofsSubcell; i++)
          {
+           // printf("idx  = %d \n",idx);
+           if(idx >= subCellWeights.Size()) { printf("out of range %d out of %d \n", idx, subCellWeights.Size()); exit(-1); }
             error += (subCellWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i)) *
                      (subCellWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i));
             idx++;
@@ -1334,7 +1341,6 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    }
 
    error = sqrt(error);
-   printf("error is %g \n",error);
    if (error > 1e-12) { printf("error is %g \n", error); exit(-1); }
 
 
