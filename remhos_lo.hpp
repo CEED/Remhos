@@ -106,7 +106,7 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
-class PASubcellResidualDistribution : virtual public PAResidualDistribution
+class PAResidualDistributionSubcell : virtual public PAResidualDistribution
 {
 
 private:
@@ -119,7 +119,7 @@ private:
 
 public:
 
-   PASubcellResidualDistribution(ParFiniteElementSpace &space,
+   PAResidualDistributionSubcell(ParFiniteElementSpace &space,
                                  ParBilinearForm &Kbf,
                                  Assembly &asmbly, const Vector &Mlump,
                                  bool subcell, bool timedep);

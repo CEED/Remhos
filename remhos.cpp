@@ -643,12 +643,12 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = true;
       if (pa)
       {
-         lo_solver = new PASubcellResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver = new PAResidualDistributionSubcell(pfes, k, asmbl, lumpedM,
                                                        subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
-            const PASubcellResidualDistribution *RD_ptr =
-               dynamic_cast<const PASubcellResidualDistribution*>(lo_solver);
+            const PAResidualDistributionSubcell *RD_ptr =
+               dynamic_cast<const PAResidualDistributionSubcell*>(lo_solver);
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
             RD_ptr->SetupPA(FaceType::Interior);

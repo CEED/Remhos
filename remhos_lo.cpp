@@ -945,9 +945,9 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 }
 
 //====
-//PA Subcell Residual Distribution
+//PA Residual Distribution Subcell
 //
-PASubcellResidualDistribution::PASubcellResidualDistribution
+PAResidualDistributionSubcell::PAResidualDistributionSubcell
 (ParFiniteElementSpace &space,
  ParBilinearForm &Kbf,
  Assembly &asmbly,
@@ -958,7 +958,7 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
 {
 }
 
-void PASubcellResidualDistribution::SampleSubCellVelocity() const
+void PAResidualDistributionSubcell::SampleSubCellVelocity() const
 {
    const int dim = assembly.GetSubCellMesh()->Dimension();
    const IntegrationRule *ir;
@@ -991,7 +991,7 @@ void PASubcellResidualDistribution::SampleSubCellVelocity() const
    }
 }
 
-void PASubcellResidualDistribution::SetupSubCellPA() const
+void PAResidualDistributionSubcell::SetupSubCellPA() const
 {
 
    const int dim = assembly.GetSubCellMesh()->Dimension();
@@ -1002,7 +1002,7 @@ void PASubcellResidualDistribution::SetupSubCellPA() const
 
 //Same as
 //bilininteg_convection_pa.cpp::PAConvectionSetup2D
-void PASubcellResidualDistribution::SetupSubCellPA2D() const
+void PAResidualDistributionSubcell::SetupSubCellPA2D() const
 {
    Mesh *mesh = assembly.GetSubCellMesh();
    const int DIM = mesh->Dimension();
@@ -1043,7 +1043,7 @@ void PASubcellResidualDistribution::SetupSubCellPA2D() const
 
 //Same as
 //bilininteg_convection_pa.cpp::PAConvectionSetup3D
-void PASubcellResidualDistribution::SetupSubCellPA3D() const
+void PAResidualDistributionSubcell::SetupSubCellPA3D() const
 {
    Mesh *mesh = assembly.GetSubCellMesh();
    const int DIM = mesh->Dimension();
@@ -1100,7 +1100,7 @@ void PASubcellResidualDistribution::SetupSubCellPA3D() const
 
 }
 
-void PASubcellResidualDistribution::ComputeSubCellWeights(
+void PAResidualDistributionSubcell::ComputeSubCellWeights(
    Array<double> &subWeights)
 const
 {
@@ -1219,7 +1219,7 @@ const
 
 }
 
-void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
+void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
                                                    Vector &du) const
 {
 
@@ -1231,10 +1231,9 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
    const double eps = 1.E-15;
    const double infinity = numeric_limits<double>::infinity();
 
-   //Part of subcell scheme
+   //Temporaries for kernel
    Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
           fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
-   ///---------------------------------
 
    // Discretization terms
    du.UseDevice(true);
