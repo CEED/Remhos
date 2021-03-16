@@ -954,7 +954,7 @@ PASubcellResidualDistribution::PASubcellResidualDistribution
  Assembly &asmbly,
  const Vector &Mlump,
  bool subcell, bool timedep)
-   : PAResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep)
+  : init_weights(true), PAResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep)
 {
    printf("Using subcell residual distribution scheme! \n");
    //MFEM_VERIFY(subcell == true, "Must be using subcell scheme");
@@ -1021,9 +1021,9 @@ void PASubcellResidualDistribution::SetupSubCellPA2D() const
                                                             GeometricFactors::JACOBIANS);
    const DofToQuad * map = &el.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
-   pa_data.SetSize(DIM*NQ*NE);
+   subCell_pa_data.SetSize(DIM*NQ*NE);
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
-   auto q_data = Reshape(pa_data.Write(), NQ, DIM, NE);
+   auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
    auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
    const double alpha = -1.0;
    const double *W = ir->GetWeights().Read();
@@ -1069,9 +1069,9 @@ void PASubcellResidualDistribution::SetupSubCellPA3D() const
                                                             GeometricFactors::JACOBIANS);
    const DofToQuad * map = &el.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
-   pa_data.SetSize(DIM*NQ*NE);
+   subCell_pa_data.SetSize(DIM*NQ*NE);
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
-   auto q_data = Reshape(pa_data.Write(), NQ, DIM, NE);
+   auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
    auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
    const double alpha = -1.0;
    const double *W = ir->GetWeights().Read();
@@ -1155,7 +1155,7 @@ const
    if (DIM == 2)
    {
       subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0);
-      auto D = Reshape(pa_data.Read(), quad1D, quad1D, DIM, NE);
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, DIM, NE);
       auto subWeights_view = Reshape(subWeights.Write(),
                                      dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
       MFEM_FORALL(e, NE,
@@ -1191,7 +1191,7 @@ const
    if (DIM == 3)
    {
       subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*dofs1D_0);
-      auto D = Reshape(pa_data.Read(), quad1D, quad1D,quad1D, DIM, NE);
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D,quad1D, DIM, NE);
       auto subWeights_view = Reshape(subWeights.Write(),
                                      dofs1D_1, dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, dofs1D_0, NE);
       MFEM_FORALL(e, NE,
@@ -1282,19 +1282,22 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
 
    double *d_du = du.ReadWrite();
 
+   const int numSubcells = assembly.dofs.numSubcells;
+   const int numDofsSubcell =numDofsSubcell;
+
    //Setup vector sizes for subcell
-   fluctSubcellP.SetSize(assembly.dofs.numSubcells);
-   fluctSubcellN.SetSize(assembly.dofs.numSubcells);
-   xMaxSubcell.SetSize(assembly.dofs.numSubcells);
-   xMinSubcell.SetSize(assembly.dofs.numSubcells);
-   sumWeightsSubcellP.SetSize(assembly.dofs.numSubcells);
-   sumWeightsSubcellN.SetSize(assembly.dofs.numSubcells);
+   fluctSubcellP.SetSize(numSubcells);
+   fluctSubcellN.SetSize(numSubcells);
+   xMaxSubcell.SetSize(numSubcells);
+   xMinSubcell.SetSize(numSubcells);
+   sumWeightsSubcellP.SetSize(numSubcells);
+   sumWeightsSubcellN.SetSize(numSubcells);
    nodalWeightsP.SetSize(ndof);
    nodalWeightsN.SetSize(ndof);
 
    for (int k=0; k<ne; ++k)
    {
-      for (int m = 0; m < assembly.dofs.numSubcells; m++)
+      for (int m = 0; m < numSubcells; m++)
       {
 
          if (time_dep)
@@ -1304,31 +1307,26 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
       }
    }
 
-   const int noSubcells =  assembly.dofs.numSubcells;
-   const int noSubcellDofs = assembly.dofs.numDofsSubcell;
-   //printf("No of Subcells %d noSubcellDofs %d \n", noSubcells, noSubcellDofs);
-   //DenseTensor mySubWeights(noSubcells, noSubcellDofs, ne);
-   Array<double> mySubWeights(noSubcells*noSubcellDofs*ne);
-
-   //TODO 3D version
+   if(time_dep || init_weights)
    {
       SampleSubCellVelocity();
       SetupSubCellPA();
-
-      SubCellWeights(mySubWeights);
+      subCellWeights.SetSize
+        (numSubcells*numSubcells*ne);
+      SubCellWeights(subCellWeights);
+      init_weights = false;
    }
 
-   //SubCellComputation(mySubWeights);
    double error = 0;
    int idx = 0;
    for (int k=0; k<ne; ++k)
    {
-      for (int m = 0; m < assembly.dofs.numSubcells; m++)
+      for (int m = 0; m < numSubcells; m++)
       {
-         for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
+         for (int i = 0; i <numDofsSubcell; i++)
          {
-            error += (mySubWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i)) *
-                     (mySubWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i));
+            error += (subCellWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i)) *
+                     (subCellWeights.Read()[idx] - assembly.SubcellWeights(k)(m,i));
             idx++;
          }
 
@@ -1370,14 +1368,14 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
          nodalWeightsP = 0.; nodalWeightsN = 0.;
 
          // compute min-/max-values and the fluctuation for subcells
-         for (int m = 0; m < assembly.dofs.numSubcells; m++)
+         for (int m = 0; m < numSubcells; m++)
          {
             xMinSubcell(m) =   numeric_limits<double>::infinity();
             xMaxSubcell(m) = - numeric_limits<double>::infinity();;
             double fluct = 0; double xSum = 0.;
 
 
-            for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
+            for (int i = 0; i <numDofsSubcell; i++)
             {
                dof_id = k*ndof + assembly.dofs.Sub2Ind(m, i);
                fluct += assembly.SubcellWeights(k)(m,i) * u(dof_id);
@@ -1385,9 +1383,9 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
                xMinSubcell(m) = min(xMinSubcell(m), u(dof_id));
                xSum += u(dof_id);
             }
-            sumWeightsSubcellP(m) = assembly.dofs.numDofsSubcell
+            sumWeightsSubcellP(m) =numDofsSubcell
                                     * xMaxSubcell(m) - xSum + eps;
-            sumWeightsSubcellN(m) = assembly.dofs.numDofsSubcell
+            sumWeightsSubcellN(m) =numDofsSubcell
                                     * xMinSubcell(m) - xSum - eps;
 
             fluctSubcellP(m) = max(0., fluct);
@@ -1396,9 +1394,9 @@ void PASubcellResidualDistribution::CalcLOSolution(const Vector &u,
             sumFluctSubcellN += fluctSubcellN(m);
          }
 
-         for (int m = 0; m < assembly.dofs.numSubcells; m++)
+         for (int m = 0; m < numSubcells; m++)
          {
-            for (int i = 0; i < assembly.dofs.numDofsSubcell; i++)
+            for (int i = 0; i <numDofsSubcell; i++)
             {
                const int loc_id = assembly.dofs.Sub2Ind(m, i);
                dof_id = k*ndof + loc_id;

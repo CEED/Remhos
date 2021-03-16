@@ -111,9 +111,11 @@ class PASubcellResidualDistribution : virtual public PAResidualDistribution
 
 private:
    mutable Array<double> SubCellVel;
-   mutable Array<double> pa_data;
+   mutable Array<double> subCell_pa_data;
+   mutable Array<double> subCellWeights;
 
    void SampleSubCellVelocity() const;
+   mutable bool init_weights;
 
 public:
 
