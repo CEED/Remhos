@@ -121,15 +121,14 @@ int main(int argc, char *argv[])
    MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   //const char *mesh_file = "data/periodic-square.mesh";
-   const char *mesh_file = "data/periodic-cube.mesh";
+   const char *mesh_file = "data/periodic-square.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
-   HOSolverType ho_type           = HOSolverType::None;
-   LOSolverType lo_type           = LOSolverType::ResDistSubcell;
+   HOSolverType ho_type           = HOSolverType::LocalInverse;
+   LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool pa = false;
@@ -644,7 +643,6 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = true;
       if (pa)
       {
-         printf("Using ResDistSubcell w partial assembly \n");
          lo_solver = new PASubcellResidualDistribution(pfes, k, asmbl, lumpedM,
                                                        subcell_scheme, time_dep);
          if (exec_mode == 0)
