@@ -1219,6 +1219,306 @@ const
 
 }
 
+void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u, Vector &y) const
+{
+
+   FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
+   FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = nullptr;
+   if (DIM == 2) { ir = &IntRules.Get(Geometry::SQUARE, 1); }
+   if (DIM == 3) { ir = &IntRules.Get(Geometry::CUBE, 1); }
+
+   //Data for subspace 0
+   const FiniteElement &el_0 = *SubFes0->GetFE(0);
+   const DofToQuad *maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_0 = maps_0->ndof;
+   const int quad1D = maps_0->nqpt; //same in both spaces
+
+   //Data for subspace 1
+   const FiniteElement &el_1 = *SubFes1->GetFE(0);
+   const DofToQuad *maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_1 = maps_1->ndof;
+
+   auto Bt_0 = Reshape(maps_0->Bt.Read(), dofs1D_0, quad1D);
+
+   auto B_1 = Reshape(maps_1->B.Read(), quad1D, dofs1D_1);
+   auto G_1 = Reshape(maps_1->G.Read(), quad1D, dofs1D_1);
+
+   //Element restriction step
+   const int numSubcells = assembly.dofs.numSubcells;
+   const int numDofsSubcell = assembly.dofs.numDofsSubcell;
+   Vector x_ext(numSubcells*numDofsSubcell*NE);
+   {
+     const double *d_u = u.Read();
+     const int ndof = pfes.GetFE(0)->GetDof();
+     const int ne = pfes.GetMesh()->GetNE();
+     auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells, numDofsSubcell);
+     double *d_x_ext = x_ext.Write();
+
+     MFEM_FORALL(k, ne, {
+         for(int m = 0; m<numSubcells; ++m) {
+           for(int i=0; i<numDofsSubcell; ++i){
+
+             int dof_id = k*ndof + Sub2Ind(m,i);
+             const int idx = i + numDofsSubcell*(m + numSubcells*k);
+             d_x_ext[idx] = d_u[dof_id];
+           }
+         }
+     });
+   }
+
+   if (DIM == 2)
+   {
+
+     auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, DIM, NE);
+     auto X = Reshape(x_ext.Read(), dofs1D_1, dofs1D_1, NE);
+     auto Y = Reshape(y.Write(), dofs1D_0, dofs1D_0, NE);
+
+     MFEM_FORALL(e, NE, {
+
+         constexpr int iDIM = 2;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+         double U[iDIM][max_D1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+           {
+             for (int i2 = 0; i2 < dofs1D_1; ++i2)
+               {
+                 double dot0 = 0.0;
+                 double dot1 = 0.0;
+                 for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                   {
+                     dot0 += G_1(j1, i1) * X(i1, i2, e);
+                     dot1 += B_1(j1, i1) * X(i1, i2, e);
+                   }
+                 U[0][i2][j1] = dot0;
+                 U[1][i2][j1] = dot1;
+               }
+           }
+
+         double W[iDIM][max_Q1D][max_Q1D];
+         for (int j1 = 0; j1 < quad1D; ++j1)
+           {
+             for (int i2 = 0; i2 < quad1D; ++i2)
+               {
+                 double dot0 = 0.0;
+                 double dot1 = 0.0;
+                 for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                   {
+                     dot0 += B_1(j1, i1) * U[0][i1][i2];
+                     dot1 += G_1(j1, i1) * U[1][i1][i2];
+                   }
+                 W[0][i2][j1] = dot0;
+                 W[1][i2][j1] = dot1;
+               }
+           }
+
+         double Z[max_Q1D][max_Q1D];
+         for (int k2 = 0; k2 < quad1D; ++k2)
+           {
+             for (int k1 = 0; k1 < quad1D; ++k1)
+               {
+                 double dot(0.0);
+                 for (int c = 0; c < 2; ++c)
+                   {
+                     dot += D(c, k1, k2, e) * W[c][k1][k2];
+                   }
+                 Z[k1][k2] = dot;
+               }
+           }
+
+         //Transposed contraction onward
+         double Q[max_Q1D][max_D1D];
+         for (int j1 = 0; j1 <dofs1D_0; ++j1)
+           {
+             for (int i2 = 0; i2 < quad1D; ++i2)
+               {
+                 double dot(0.0);
+                 for (int i1 = 0; i1 < quad1D; ++i1)
+                   {
+                     dot += Bt_0(j1, i1) * Z[i1][i2];
+                   }
+                 Q[i2][j1] = dot;
+               }
+           }
+
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+           {
+             for (int i2 = 0; i2 < dofs1D_0; ++i2)
+               {
+                 double dot(0.0);
+                 for (int i1 = 0; i1 < quad1D; ++i1)
+                   {
+                     dot += Bt_0(j1, i1) * Q[i1][i2];
+                   }
+
+                 Y(i2, j1, e) = dot;
+               }
+           }
+
+       });
+   }//DIM == 2
+
+   if(DIM == 3)
+   {
+
+     auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, quad1D, DIM, NE);
+     auto X = Reshape(x_ext.Read(), dofs1D_1, dofs1D_1, dofs1D_1, NE);
+     auto Y = Reshape(y.Write(), dofs1D_0, dofs1D_0, dofs1D_0, NE);
+
+     MFEM_FORALL(e, NE,{
+
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+
+         //qpt x dof x dof
+         double BX[max_D1D][max_D1D][max_Q1D];
+         double GX[max_D1D][max_D1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+           {
+             for (int i3 = 0; i3 < dofs1D_1; ++i3)
+               {
+                 for (int i2 = 0; i2 < dofs1D_1; ++i2)
+                   {
+                     BX[i2][i3][j1] = 0.0;
+                     GX[i2][i3][j1] = 0.0;
+                     for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                       {
+                         BX[i2][i3][j1] += B_1(j1, i1) * X(i1, i2, i3, e);
+                         GX[i2][i3][j1] += G_1(j1, i1) * X(i1, i2, i3, e);
+                       }
+                   }
+               }
+           }
+
+         double BBX[max_D1D][max_Q1D][max_Q1D];
+         double GBX[max_D1D][max_Q1D][max_Q1D];
+         double BGX[max_D1D][max_Q1D][max_Q1D];
+         for (int j1 = 0; j1 < quad1D; ++j1)
+           {
+             for (int i3 = 0; i3 < quad1D; ++i3)
+               {
+                 for (int i2 = 0; i2 < dofs1D_1; ++i2)
+                   {
+                     BBX[i2][i3][j1] = 0.0;
+                     GBX[i2][i3][j1] = 0.0;
+                     BGX[i2][i3][j1] = 0.0;
+                     for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                       {
+                         BBX[i2][i3][j1] += B_1(j1, i1) * BX[i1][i2][i3];
+                         GBX[i2][i3][j1] += G_1(j1, i1) * BX[i1][i2][i3];
+                         BGX[i2][i3][j1] += B_1(j1, i1) * GX[i1][i2][i3];
+                       }
+                   }
+               }
+           }
+
+         double GBBX[max_Q1D][max_Q1D][max_Q1D];
+         double BGBX[max_Q1D][max_Q1D][max_Q1D];
+         double BBGX[max_Q1D][max_Q1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+           {
+             for (int i3 = 0; i3 < quad1D; ++i3)
+               {
+                 for (int i2 = 0; i2 < quad1D; ++i2)
+                   {
+                     GBBX[i2][i3][j1] = 0.0;
+                     BGBX[i2][i3][j1] = 0.0;
+                     BBGX[i2][i3][j1] = 0.0;
+                     for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                       {
+                         GBBX[i2][i3][j1] += G_1(j1, i1) * BBX[i1][i2][i3];
+                         BGBX[i2][i3][j1] += B_1(j1, i1) * GBX[i1][i2][i3];
+                         BBGX[i2][i3][j1] += B_1(j1, i1) * BGX[i1][i2][i3];
+                       }
+                   }
+               }
+           }
+
+         double Z[max_Q1D][max_Q1D][max_Q1D];
+         for (int k3 = 0; k3 < quad1D; ++k3)
+           {
+             for (int k2 = 0; k2 < quad1D; ++k2)
+               {
+                 for (int k1 = 0; k1 < quad1D; ++k1)
+                   {
+                     double dot(0.0);
+                     {
+                       dot += D(0, k1, k2, k3, e) * BBGX[k1][k2][k3];
+                       dot += D(1, k1, k2, k3, e) * BGBX[k1][k2][k3];
+                       dot += D(2, k1, k2, k3, e) * GBBX[k1][k2][k3];
+                     }
+                     Z[k1][k2][k3] = dot;
+                   }
+               }
+           }
+
+         //Apply (B1d)^T 3 more times
+         double BZ[max_Q1D][max_Q1D][max_D1D];
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+           {
+             for (int i3 = 0; i3 < quad1D; ++i3)
+               {
+                 for (int i2 = 0; i2 < quad1D; ++i2)
+                   {
+                     BZ[i2][i3][j1] = 0.0;
+                     for (int i1 = 0; i1 < quad1D; ++i1)
+                       {
+                         BZ[i2][i3][j1] += Bt_0(j1, i1) * Z[i1][i2][i3];
+                       }
+                   }
+               }
+           }
+
+         double BBZ[max_Q1D][max_D1D][max_D1D];
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+           {
+             for (int i3 = 0; i3 < dofs1D_0; ++i3)
+               {
+                 for (int i2 = 0; i2 < quad1D; ++i2)
+                   {
+                     BBZ[i2][i3][j1] = 0.0;
+                     for (int i1 = 0; i1 < quad1D; ++i1)
+                       {
+                         BBZ[i2][i3][j1] += Bt_0(j1, i1) * BZ[i1][i2][i3];
+                       }
+                   }
+               }
+           }
+
+       for (int j1 = 0; j1 < dofs1D_0; ++j1)
+           {
+             for (int i3 = 0; i3 < dofs1D_0; ++i3)
+               {
+                 for (int i2 = 0; i2 < dofs1D_0; ++i2)
+                   {
+                     double dot(0.0);
+                     for (int i1 = 0; i1 < quad1D; ++i1)
+                       {
+                         dot += Bt_0(j1, i1) * BBZ[i1][i2][i3];
+                       }
+                     Y(i2, i3, j1, e) = dot;
+                   }
+               }
+           }
+
+       });
+
+
+   }
+
+
+}
+
 void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
                                                    Vector &du) const
 {
@@ -1264,6 +1564,8 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
    const int numSubcells = assembly.dofs.numSubcells;
    const int numDofsSubcell = assembly.dofs.numDofsSubcell;
 
+   Vector fluct_all(numSubcells*ne);
+   //printf("numSubcells*ne = %d \n",numSubcells*ne);
    if (time_dep || init_weights)
    {
       SampleSubCellVelocity();
@@ -1271,6 +1573,8 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
       ComputeSubCellWeights(subCellWeights);
       init_weights = false;
    }
+
+   ApplySubCellWeights(u, fluct_all);
 
    //Setup temporary memory
    fluctSubcellP.SetSize(numSubcells*ne);
@@ -1292,10 +1596,12 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
    auto sumWeightsSubcellN_v = Reshape(sumWeightsSubcellN.Write(),numSubcells, ne);
    auto fluctSubcellP_v = Reshape(fluctSubcellP.Write(), numSubcells, ne);
    auto fluctSubcellN_v = Reshape(fluctSubcellN.Write(), numSubcells, ne);
-   auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells,numSubcells);
+   auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells, numDofsSubcell);
+   auto fluct_all_v = Reshape(fluct_all.Read(),numSubcells, ne);
 
    const bool use_subcell_scheme = subcell_scheme;
-   MFEM_FORALL(k, ne,
+   //MFEM_FORALL(k, ne,
+   for(int k=0; k<ne; ++k)
    {
       // Boundary contributions - stored in du
       // done before this loop
@@ -1341,6 +1647,9 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
                xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), d_u[dof_id]);
                xSum += d_u[dof_id];
             }
+            double diff = abs(fluct - fluct_all_v(m, k));
+
+            if(diff > 1e-12) {printf("Error too high! %g \n", diff); exit(-1);}
             sumWeightsSubcellP_v(m, k) =numDofsSubcell
                                         * xMaxSubcell_v(m, k) - xSum + eps;
             sumWeightsSubcellN_v(m, k) =numDofsSubcell
@@ -1392,7 +1701,7 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
          d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
                         d_M_lumped[dof_id];
       }
-   });
+   }
 
 }
 

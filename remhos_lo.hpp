@@ -132,6 +132,8 @@ public:
 
    void ComputeSubCellWeights(Array<double> &subWeights) const;
 
+   void ApplySubCellWeights(const Vector &u, Vector &y) const;
+
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
