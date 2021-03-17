@@ -1251,7 +1251,7 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
    auto B_1 = Reshape(maps_1->B.Read(), quad1D, dofs1D_1);
    auto G_1 = Reshape(maps_1->G.Read(), quad1D, dofs1D_1);
 
-   //Element restriction step
+   //Subcell restriction step
    const int numSubcells = assembly.dofs.numSubcells;
    const int numDofsSubcell = assembly.dofs.numDofsSubcell;
    Vector x_ext(numSubcells*numDofsSubcell*NE);
