@@ -589,10 +589,12 @@ int main(int argc, char *argv[])
       // Integrator on the submesh.
       if (exec_mode == 0)
       {
+         lom.subcellCoeff = &velocity;
          lom.VolumeTerms = new MixedConvectionIntegrator(velocity, -1.0);
       }
       else if (exec_mode == 1)
       {
+         lom.subcellCoeff = &v_sub_coef;
          lom.VolumeTerms = new MixedConvectionIntegrator(v_sub_coef);
       }
    }

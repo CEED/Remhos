@@ -980,7 +980,7 @@ void PAResidualDistributionSubcell::SampleSubCellVelocity() const
    {
       ElementTransformation& T = *SubFes->GetElementTransformation(e);
       //Q->Eval
-      assembly.lom.coef->Eval(Q_ir, T, *ir);
+      assembly.lom.subcellCoeff->Eval(Q_ir, T, *ir);
       for (int q=0; q<nq; ++q)
       {
          for (int i=0; i<dim; ++i)
@@ -1016,7 +1016,7 @@ void PAResidualDistributionSubcell::SetupSubCellPA2D() const
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
    auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
    auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
-   const double alpha = -1.0;
+   const double alpha = (int) assembly.GetExecMode() == 0 ? -1 : 1;
    const double *W = ir->GetWeights().Read();
 
    MFEM_FORALL(e, NE,
@@ -1058,7 +1058,7 @@ void PAResidualDistributionSubcell::SetupSubCellPA3D() const
    auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
    auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
    auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
-   const double alpha = -1.0;
+   const double alpha = (int) assembly.GetExecMode() == 0 ? -1 : 1;
    const double *W = ir->GetWeights().Read();
 
    MFEM_FORALL(e, NE,
@@ -1334,7 +1334,7 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
                double dot(0.0);
                for (int c = 0; c < 2; ++c)
                {
-                  dot += D(c, k1, k2, e) * W[c][k1][k2];
+                  dot += D(k1, k2, c, e) * W[c][k1][k2];
                }
                Z[k1][k2] = dot;
             }
@@ -1460,9 +1460,9 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
                {
                   double dot(0.0);
                   {
-                     dot += D(0, k1, k2, k3, e) * BBGX[k1][k2][k3];
-                     dot += D(1, k1, k2, k3, e) * BGBX[k1][k2][k3];
-                     dot += D(2, k1, k2, k3, e) * GBBX[k1][k2][k3];
+                     dot += D(k1, k2, k3, 0, e) * BBGX[k1][k2][k3];
+                     dot += D(k1, k2, k3, 1, e) * BGBX[k1][k2][k3];
+                     dot += D(k1, k2, k3, 2, e) * GBBX[k1][k2][k3];
                   }
                   Z[k1][k2][k3] = dot;
                }
@@ -1672,7 +1672,6 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
          {
             for (int i = 0; i <numDofsSubcell; i++)
             {
-               //const int loc_id = assembly.dofs.Sub2Ind(m, i);
                const int loc_id = Sub2Ind(m, i);
                dof_id = k*ndof + loc_id;
                nodalWeightsP_v(loc_id, k) += fluctSubcellP_v(m, k)
