@@ -527,9 +527,6 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 void PAResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
                                             FaceType type) const
 {
-   int nf = pfes.GetNFbyType(type);
-   if (nf == 0) {return;}
-
    Mesh *mesh = pfes.GetMesh();
    int dim = mesh->Dimension();
 
@@ -560,7 +557,9 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, 2, nf);
@@ -626,7 +625,9 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, nf);
@@ -697,7 +698,9 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, 2, nf);
@@ -796,7 +799,9 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, nf);
