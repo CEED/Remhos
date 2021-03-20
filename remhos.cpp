@@ -848,7 +848,6 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   const int NE = pmesh.GetNE();
    for (int ti = 0; !done;)
    {
       double dt_real = min(dt, t_final - t);

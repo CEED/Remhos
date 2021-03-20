@@ -1603,8 +1603,7 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
    auto nodalWeightsN_v = Reshape(nodalWeightsN.Write(), ndof, ne);
    auto xMinSubcell_v = Reshape(xMinSubcell.Write(), numSubcells, ne);
    auto xMaxSubcell_v = Reshape(xMaxSubcell.Write(), numSubcells, ne);
-   auto subCellWeights_v = Reshape(subCellWeights.Read(), numDofsSubcell,
-                                   numSubcells, ne);
+
    auto sumWeightsSubcellP_v = Reshape(sumWeightsSubcellP.Write(),numSubcells, ne);
    auto sumWeightsSubcellN_v = Reshape(sumWeightsSubcellN.Write(),numSubcells, ne);
    auto fluctSubcellP_v = Reshape(fluctSubcellP.Write(), numSubcells, ne);
