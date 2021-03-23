@@ -19,8 +19,6 @@ env:
   MFEM_BRANCH: master
   MFEM_TOP_DIR: mfem
 
-wget https://github.com/hypre-space/hypre/archive/v2.11.2.tar.gz
-
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
