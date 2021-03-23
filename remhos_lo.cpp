@@ -1000,6 +1000,7 @@ void PAResidualDistributionSubcell::SetupSubCellPA() const
 {
 
    const int dim = assembly.GetSubCellMesh()->Dimension();
+   assembly.GetSubCellMesh()->DeleteGeometricFactors();
    if (dim == 2) { return SetupSubCellPA2D(); }
    if (dim == 3) { return SetupSubCellPA3D(); }
    mfem_error("PA Subcell Residual Distribution not supported in 1D \n");
