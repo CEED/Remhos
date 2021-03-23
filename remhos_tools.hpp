@@ -88,6 +88,7 @@ struct LowOrderMethod
    SparseMatrix D;
    ParBilinearForm* pk;
    VectorCoefficient* coef;
+   VectorCoefficient* subcellCoeff;
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;
 };
@@ -184,6 +185,8 @@ public:
    const FiniteElementSpace * GetFes() {return fes;}
 
    int GetExecMode() const { return exec_mode;}
+
+   Mesh *GetSubCellMesh() { return subcell_mesh;}
 };
 
 // Class for local assembly of M_L M_C^-1 K, where M_L and M_C are the lumped

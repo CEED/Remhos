@@ -213,7 +213,7 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
                                            / sumWeightsSubcellN(m)); // eq. (59)
             }
          }
-      }
+      } //subcell scheme
 
       for (int i = 0; i < ndof; i++)
       {
@@ -245,6 +245,9 @@ const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
    return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
+//====
+//Residual Distribution
+//
 PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                ParBilinearForm &Kbf,
                                                Assembly &asmbly,
@@ -255,7 +258,6 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
      dofs1D(get_maps(pfes, assembly)->ndof),
      face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
 {
-   MFEM_VERIFY(subcell == false, "Subcell scheme not supported with PA");
 }
 
 // Taken from DGTraceIntegrator::SetupPA L:145
@@ -525,9 +527,6 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 void PAResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
                                             FaceType type) const
 {
-   int nf = pfes.GetNFbyType(type);
-   if (nf == 0) {return;}
-
    Mesh *mesh = pfes.GetMesh();
    int dim = mesh->Dimension();
 
@@ -558,7 +557,9 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, 2, nf);
@@ -624,7 +625,9 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, nf);
@@ -695,7 +698,9 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, 2, nf);
@@ -794,7 +799,9 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
 
+      //Currently all ranks must call Mult
       face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
       y_loc = 0.0;
 
       auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, nf);
@@ -940,6 +947,773 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
          d_M_lumped[dof_id];
       }
    });
+}
+
+//====
+//PA Residual Distribution Subcell
+//
+PAResidualDistributionSubcell::PAResidualDistributionSubcell
+(ParFiniteElementSpace &space,
+ ParBilinearForm &Kbf,
+ Assembly &asmbly,
+ const Vector &Mlump,
+ bool subcell, bool timedep)
+   :  PAResidualDistribution(space, Kbf, asmbly, Mlump, subcell,
+                             timedep), init_weights(true)
+{
+}
+
+void PAResidualDistributionSubcell::SampleSubCellVelocity() const
+{
+   const int dim = assembly.GetSubCellMesh()->Dimension();
+   const IntegrationRule *ir;
+   if (dim == 2) { ir = &IntRules.Get(Geometry::SQUARE, 1); }
+   if (dim == 3) { ir = &IntRules.Get(Geometry::CUBE, 1); }
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int NE = mesh->GetNE();
+   const int nq = ir->GetNPoints();
+
+   //Q: which to use 0, or 1?
+   FiniteElementSpace *SubFes = assembly.lom.SubFes0;
+
+   SubCellVel.SetSize(dim*nq*NE);
+   auto V = mfem::Reshape(SubCellVel.HostWrite(), dim, nq, NE);
+
+   DenseMatrix Q_ir;
+   for (int e=0; e<NE; ++e)
+   {
+      ElementTransformation& T = *SubFes->GetElementTransformation(e);
+      //Q->Eval
+      assembly.lom.subcellCoeff->Eval(Q_ir, T, *ir);
+      for (int q=0; q<nq; ++q)
+      {
+         for (int i=0; i<dim; ++i)
+         {
+            V(i,q,e) = Q_ir(i,q);
+         }
+      }
+   }
+}
+
+void PAResidualDistributionSubcell::SetupSubCellPA() const
+{
+
+   const int dim = assembly.GetSubCellMesh()->Dimension();
+   assembly.GetSubCellMesh()->DeleteGeometricFactors();
+   if (dim == 2) { return SetupSubCellPA2D(); }
+   if (dim == 3) { return SetupSubCellPA3D(); }
+   mfem_error("PA Subcell Residual Distribution not supported in 1D \n");
+}
+
+//Same as
+//bilininteg_convection_pa.cpp::PAConvectionSetup2D
+void PAResidualDistributionSubcell::SetupSubCellPA2D() const
+{
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = &IntRules.Get(Geometry::SQUARE, 1);
+   const int NQ = ir->GetNPoints();
+
+   const GeometricFactors *geom = mesh->GetGeometricFactors(*ir,
+                                                            GeometricFactors::JACOBIANS);
+   subCell_pa_data.SetSize(DIM*NQ*NE);
+   auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
+   auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
+   auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
+   const double alpha = (int) assembly.GetExecMode() == 0 ? -1 : 1;
+   const double *W = ir->GetWeights().Read();
+
+   MFEM_FORALL(e, NE,
+   {
+      for (int q=0; q<NQ; ++q)
+      {
+         const double J11 = J(q,0,0,e);
+         const double J21 = J(q,1,0,e);
+         const double J12 = J(q,0,1,e);
+         const double J22 = J(q,1,1,e);
+         double w = alpha * W[q];
+
+
+         const double v0 = V(0,q,e);
+         const double v1 = V(1,q,e);
+         const double wx = w * v0;
+         const double wy = w * v1;
+         //w*inv(J)
+         q_data(q, 0, e) = wx * J22 - wy * J12;
+         q_data(q, 1, e) = -wx * J21 + wy * J11;
+      }
+   });
+}
+
+//Same as
+//bilininteg_convection_pa.cpp::PAConvectionSetup3D
+void PAResidualDistributionSubcell::SetupSubCellPA3D() const
+{
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = &IntRules.Get(Geometry::CUBE, 1);
+   const int NQ = ir->GetNPoints();
+
+   const GeometricFactors *geom = mesh->GetGeometricFactors(*ir,
+                                                            GeometricFactors::JACOBIANS);
+
+   subCell_pa_data.SetSize(DIM*NQ*NE);
+   auto J = Reshape(geom->J.Read(), NQ, DIM, DIM, NE);
+   auto q_data = Reshape(subCell_pa_data.Write(), NQ, DIM, NE);
+   auto V = Reshape(SubCellVel.Read(), DIM, NQ, NE);
+   const double alpha = (int) assembly.GetExecMode() == 0 ? -1 : 1;
+   const double *W = ir->GetWeights().Read();
+
+   MFEM_FORALL(e, NE,
+   {
+      for (int q = 0; q < NQ; ++q)
+      {
+         const double J11 = J(q,0,0,e);
+         const double J21 = J(q,1,0,e);
+         const double J31 = J(q,2,0,e);
+         const double J12 = J(q,0,1,e);
+         const double J22 = J(q,1,1,e);
+         const double J32 = J(q,2,1,e);
+         const double J13 = J(q,0,2,e);
+         const double J23 = J(q,1,2,e);
+         const double J33 = J(q,2,2,e);
+         const double w = alpha * W[q];
+         const double v0 = V(0, q, e);
+         const double v1 = V(1, q, e);
+         const double v2 = V(2, q, e);
+         const double wx = w * v0;
+         const double wy = w * v1;
+         const double wz = w * v2;
+         // adj(J)
+         const double A11 = (J22 * J33) - (J23 * J32);
+         const double A12 = (J32 * J13) - (J12 * J33);
+         const double A13 = (J12 * J23) - (J22 * J13);
+         const double A21 = (J31 * J23) - (J21 * J33);
+         const double A22 = (J11 * J33) - (J13 * J31);
+         const double A23 = (J21 * J13) - (J11 * J23);
+         const double A31 = (J21 * J32) - (J31 * J22);
+         const double A32 = (J31 * J12) - (J11 * J32);
+         const double A33 = (J11 * J22) - (J12 * J21);
+         // q . J^{-1} = q . adj(J)
+         q_data(q,0,e) =  wx * A11 + wy * A12 + wz * A13;
+         q_data(q,1,e) =  wx * A21 + wy * A22 + wz * A23;
+         q_data(q,2,e) =  wx * A31 + wy * A32 + wz * A33;
+      }
+   });
+
+}
+
+void PAResidualDistributionSubcell::ComputeSubCellWeights(
+   Array<double> &subWeights)
+const
+{
+   FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
+   FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = nullptr;
+   if (DIM == 2) { ir = &IntRules.Get(Geometry::SQUARE, 1); }
+   if (DIM == 3) { ir = &IntRules.Get(Geometry::CUBE, 1); }
+
+   //Data for subspace 0
+   const FiniteElement &el_0 = *SubFes0->GetFE(0);
+   const DofToQuad *maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_0 = maps_0->ndof;
+   const int quad1D = maps_0->nqpt; //same in both spaces
+
+   //Data for subspace 1
+   const FiniteElement &el_1 = *SubFes1->GetFE(0);
+   const DofToQuad *maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_1 = maps_1->ndof;
+
+   auto B_0 = Reshape(maps_0->B.Read(), quad1D, dofs1D_0);
+
+   auto B_1 = Reshape(maps_1->B.Read(), quad1D, dofs1D_1);
+   auto G_1 = Reshape(maps_1->G.Read(), quad1D, dofs1D_1);
+
+   if (DIM == 2)
+   {
+      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*NE);
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, DIM, NE);
+      auto subWeights_view = Reshape(subWeights.Write(),
+                                     dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, NE);
+      MFEM_FORALL(e, NE,
+      {
+
+         for (int j2=0; j2<dofs1D_0; ++j2)
+         {
+            for (int j1=0; j1<dofs1D_0; ++j1)
+            {
+
+               for (int i2=0; i2<dofs1D_1; ++i2)
+               {
+                  for (int i1=0; i1<dofs1D_1; ++i1)
+                  {
+                     double val=0;
+                     for (int k2=0; k2<quad1D; ++k2)
+                     {
+                        for (int k1=0; k1<quad1D; ++k1)
+                        {
+                           val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
+                           + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
+                           *B_0(k1,j1)*B_0(k2,j2);
+                        }
+                     }
+                     subWeights_view(i1,i2,j1,j2,e) = val;
+                  }
+               }
+            }
+         }
+      });
+   }
+
+   if (DIM == 3)
+   {
+      subWeights.SetSize(dofs1D_1*dofs1D_1*dofs1D_1*dofs1D_0*dofs1D_0*dofs1D_0*NE);
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D,quad1D, DIM, NE);
+      auto subWeights_view = Reshape(subWeights.Write(),
+                                     dofs1D_1, dofs1D_1, dofs1D_1, dofs1D_0, dofs1D_0, dofs1D_0, NE);
+      MFEM_FORALL(e, NE,
+      {
+
+         for (int j3=0; j3<dofs1D_0; ++j3)
+         {
+            for (int j2=0; j2<dofs1D_0; ++j2)
+            {
+               for (int j1=0; j1<dofs1D_0; ++j1)
+               {
+
+                  for (int i3=0; i3<dofs1D_1; ++i3)
+                  {
+
+                     for (int i2=0; i2<dofs1D_1; ++i2)
+                     {
+                        for (int i1=0; i1<dofs1D_1; ++i1)
+                        {
+                           double val=0;
+                           for (int k3=0; k3<quad1D; ++k3)
+                           {
+                              for (int k2=0; k2<quad1D; ++k2)
+                              {
+                                 for (int k1=0; k1<quad1D; ++k1)
+                                 {
+                                    val +=  (G_1(k1,i1)*B_1(k2,i2)*B_1(k3,i3)*D(k1,k2,k3,0,e)
+                                    + B_1(k1,i1) * G_1(k2, i2) * B_1(k3,i3) * D(k1,k2,k3,1,e)
+                                    + B_1(k1,i1) * B_1(k2,i2) * G_1(k3, i3) * D(k1,k2,k3,2,e)
+                                            )
+                                    *B_0(k1,j1) * B_0(k2,j2) * B_0(k3, j3);
+                                 }
+                              }
+                           }
+                           subWeights_view(i1,i2,i3,j1,j2,j3,e) = val;
+                        }
+                     }
+
+                  }
+               }
+            }
+         }
+      });
+   }
+
+}
+
+void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
+                                                        Vector &y) const
+{
+
+   FiniteElementSpace *SubFes0 = assembly.lom.SubFes0;
+   FiniteElementSpace *SubFes1 = assembly.lom.SubFes1;
+
+   Mesh *mesh = assembly.GetSubCellMesh();
+   const int DIM = mesh->Dimension();
+   const int NE = mesh->GetNE();
+   const IntegrationRule *ir = nullptr;
+   if (DIM == 2) { ir = &IntRules.Get(Geometry::SQUARE, 1); }
+   if (DIM == 3) { ir = &IntRules.Get(Geometry::CUBE, 1); }
+
+   //Data for subspace 0
+   const FiniteElement &el_0 = *SubFes0->GetFE(0);
+   const DofToQuad *maps_0 = &el_0.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_0 = maps_0->ndof;
+   const int quad1D = maps_0->nqpt; //same in both spaces
+
+   //Data for subspace 1
+   const FiniteElement &el_1 = *SubFes1->GetFE(0);
+   const DofToQuad *maps_1 = &el_1.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   const int dofs1D_1 = maps_1->ndof;
+
+   auto Bt_0 = Reshape(maps_0->Bt.Read(), dofs1D_0, quad1D);
+
+   auto B_1 = Reshape(maps_1->B.Read(), quad1D, dofs1D_1);
+   auto G_1 = Reshape(maps_1->G.Read(), quad1D, dofs1D_1);
+
+   //Subcell restriction step
+   const int numSubcells = assembly.dofs.numSubcells;
+   const int numDofsSubcell = assembly.dofs.numDofsSubcell;
+   Vector x_ext(numSubcells*numDofsSubcell*NE);
+   {
+      const double *d_u = u.Read();
+      const int ndof = pfes.GetFE(0)->GetDof();
+      const int ne = pfes.GetMesh()->GetNE();
+      auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells,
+                             numDofsSubcell);
+      double *d_x_ext = x_ext.Write();
+
+      MFEM_FORALL(k, ne,
+      {
+         for (int m = 0; m<numSubcells; ++m)
+         {
+            for (int i=0; i<numDofsSubcell; ++i)
+            {
+
+               int dof_id = k*ndof + Sub2Ind(m,i);
+               const int idx = i + numDofsSubcell*(m + numSubcells*k);
+               d_x_ext[idx] = d_u[dof_id];
+            }
+         }
+      });
+   }
+
+   if (DIM == 2)
+   {
+
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, DIM, NE);
+      auto X = Reshape(x_ext.Read(), dofs1D_1, dofs1D_1, NE);
+      auto Y = Reshape(y.Write(), dofs1D_0, dofs1D_0, NE);
+
+      MFEM_FORALL(e, NE,
+      {
+
+         constexpr int iDIM = 2;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+         double U[iDIM][max_D1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+         {
+            for (int i2 = 0; i2 < dofs1D_1; ++i2)
+            {
+               double dot0 = 0.0;
+               double dot1 = 0.0;
+               for (int i1 = 0; i1 < dofs1D_1; ++i1)
+               {
+                  dot0 += G_1(j1, i1) * X(i1, i2, e);
+                  dot1 += B_1(j1, i1) * X(i1, i2, e);
+               }
+               U[0][i2][j1] = dot0;
+               U[1][i2][j1] = dot1;
+            }
+         }
+
+         double W[iDIM][max_Q1D][max_Q1D];
+         for (int j1 = 0; j1 < quad1D; ++j1)
+         {
+            for (int i2 = 0; i2 < quad1D; ++i2)
+            {
+               double dot0 = 0.0;
+               double dot1 = 0.0;
+               for (int i1 = 0; i1 < dofs1D_1; ++i1)
+               {
+                  dot0 += B_1(j1, i1) * U[0][i1][i2];
+                  dot1 += G_1(j1, i1) * U[1][i1][i2];
+               }
+               W[0][i2][j1] = dot0;
+               W[1][i2][j1] = dot1;
+            }
+         }
+
+         double Z[max_Q1D][max_Q1D];
+         for (int k2 = 0; k2 < quad1D; ++k2)
+         {
+            for (int k1 = 0; k1 < quad1D; ++k1)
+            {
+               double dot(0.0);
+               for (int c = 0; c < 2; ++c)
+               {
+                  dot += D(k1, k2, c, e) * W[c][k1][k2];
+               }
+               Z[k1][k2] = dot;
+            }
+         }
+
+         //Transposed contraction onward
+         double Q[max_Q1D][max_D1D];
+         for (int j1 = 0; j1 <dofs1D_0; ++j1)
+         {
+            for (int i2 = 0; i2 < quad1D; ++i2)
+            {
+               double dot(0.0);
+               for (int i1 = 0; i1 < quad1D; ++i1)
+               {
+                  dot += Bt_0(j1, i1) * Z[i1][i2];
+               }
+               Q[i2][j1] = dot;
+            }
+         }
+
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+         {
+            for (int i2 = 0; i2 < dofs1D_0; ++i2)
+            {
+               double dot(0.0);
+               for (int i1 = 0; i1 < quad1D; ++i1)
+               {
+                  dot += Bt_0(j1, i1) * Q[i1][i2];
+               }
+
+               Y(i2, j1, e) = dot;
+            }
+         }
+
+      });
+   }//DIM == 2
+
+   if (DIM == 3)
+   {
+
+      auto D = Reshape(subCell_pa_data.Read(), quad1D, quad1D, quad1D, DIM, NE);
+      auto X = Reshape(x_ext.Read(), dofs1D_1, dofs1D_1, dofs1D_1, NE);
+      auto Y = Reshape(y.Write(), dofs1D_0, dofs1D_0, dofs1D_0, NE);
+
+      MFEM_FORALL(e, NE,
+      {
+
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+
+         //qpt x dof x dof
+         double BX[max_D1D][max_D1D][max_Q1D];
+         double GX[max_D1D][max_D1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+         {
+            for (int i3 = 0; i3 < dofs1D_1; ++i3)
+            {
+               for (int i2 = 0; i2 < dofs1D_1; ++i2)
+               {
+                  BX[i2][i3][j1] = 0.0;
+                  GX[i2][i3][j1] = 0.0;
+                  for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                  {
+                     BX[i2][i3][j1] += B_1(j1, i1) * X(i1, i2, i3, e);
+                     GX[i2][i3][j1] += G_1(j1, i1) * X(i1, i2, i3, e);
+                  }
+               }
+            }
+         }
+
+         double BBX[max_D1D][max_Q1D][max_Q1D];
+         double GBX[max_D1D][max_Q1D][max_Q1D];
+         double BGX[max_D1D][max_Q1D][max_Q1D];
+         for (int j1 = 0; j1 < quad1D; ++j1)
+         {
+            for (int i3 = 0; i3 < quad1D; ++i3)
+            {
+               for (int i2 = 0; i2 < dofs1D_1; ++i2)
+               {
+                  BBX[i2][i3][j1] = 0.0;
+                  GBX[i2][i3][j1] = 0.0;
+                  BGX[i2][i3][j1] = 0.0;
+                  for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                  {
+                     BBX[i2][i3][j1] += B_1(j1, i1) * BX[i1][i2][i3];
+                     GBX[i2][i3][j1] += G_1(j1, i1) * BX[i1][i2][i3];
+                     BGX[i2][i3][j1] += B_1(j1, i1) * GX[i1][i2][i3];
+                  }
+               }
+            }
+         }
+
+         double GBBX[max_Q1D][max_Q1D][max_Q1D];
+         double BGBX[max_Q1D][max_Q1D][max_Q1D];
+         double BBGX[max_Q1D][max_Q1D][max_Q1D];
+
+         for (int j1 = 0; j1 < quad1D; ++j1)
+         {
+            for (int i3 = 0; i3 < quad1D; ++i3)
+            {
+               for (int i2 = 0; i2 < quad1D; ++i2)
+               {
+                  GBBX[i2][i3][j1] = 0.0;
+                  BGBX[i2][i3][j1] = 0.0;
+                  BBGX[i2][i3][j1] = 0.0;
+                  for (int i1 = 0; i1 < dofs1D_1; ++i1)
+                  {
+                     GBBX[i2][i3][j1] += G_1(j1, i1) * BBX[i1][i2][i3];
+                     BGBX[i2][i3][j1] += B_1(j1, i1) * GBX[i1][i2][i3];
+                     BBGX[i2][i3][j1] += B_1(j1, i1) * BGX[i1][i2][i3];
+                  }
+               }
+            }
+         }
+
+         double Z[max_Q1D][max_Q1D][max_Q1D];
+         for (int k3 = 0; k3 < quad1D; ++k3)
+         {
+            for (int k2 = 0; k2 < quad1D; ++k2)
+            {
+               for (int k1 = 0; k1 < quad1D; ++k1)
+               {
+                  double dot(0.0);
+                  {
+                     dot += D(k1, k2, k3, 0, e) * BBGX[k1][k2][k3];
+                     dot += D(k1, k2, k3, 1, e) * BGBX[k1][k2][k3];
+                     dot += D(k1, k2, k3, 2, e) * GBBX[k1][k2][k3];
+                  }
+                  Z[k1][k2][k3] = dot;
+               }
+            }
+         }
+
+         //Apply (B1d)^T 3 more times
+         double BZ[max_Q1D][max_Q1D][max_D1D];
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+         {
+            for (int i3 = 0; i3 < quad1D; ++i3)
+            {
+               for (int i2 = 0; i2 < quad1D; ++i2)
+               {
+                  BZ[i2][i3][j1] = 0.0;
+                  for (int i1 = 0; i1 < quad1D; ++i1)
+                  {
+                     BZ[i2][i3][j1] += Bt_0(j1, i1) * Z[i1][i2][i3];
+                  }
+               }
+            }
+         }
+
+         double BBZ[max_Q1D][max_D1D][max_D1D];
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+         {
+            for (int i3 = 0; i3 < dofs1D_0; ++i3)
+            {
+               for (int i2 = 0; i2 < quad1D; ++i2)
+               {
+                  BBZ[i2][i3][j1] = 0.0;
+                  for (int i1 = 0; i1 < quad1D; ++i1)
+                  {
+                     BBZ[i2][i3][j1] += Bt_0(j1, i1) * BZ[i1][i2][i3];
+                  }
+               }
+            }
+         }
+
+         for (int j1 = 0; j1 < dofs1D_0; ++j1)
+         {
+            for (int i3 = 0; i3 < dofs1D_0; ++i3)
+            {
+               for (int i2 = 0; i2 < dofs1D_0; ++i2)
+               {
+                  double dot(0.0);
+                  for (int i1 = 0; i1 < quad1D; ++i1)
+                  {
+                     dot += Bt_0(j1, i1) * BBZ[i1][i2][i3];
+                  }
+                  Y(i2, i3, j1, e) = dot;
+               }
+            }
+         }
+
+      });
+
+
+   }
+
+
+}
+
+void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
+                                                   Vector &du) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int ne = pfes.GetMesh()->GetNE();
+   Vector z(u.Size());
+
+   const double gamma = 1.0;
+   const double eps = 1.E-15;
+   const double infinity = numeric_limits<double>::infinity();
+
+   //Temporaries for kernel
+   Vector xMaxSubcell, xMinSubcell, sumWeightsSubcellP, sumWeightsSubcellN,
+          fluctSubcellP, fluctSubcellN, nodalWeightsP, nodalWeightsN;
+
+   // Discretization terms
+   du.UseDevice(true);
+   du = 0.;
+
+   //z = Conv * u
+   K.Mult(u, z);
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+
+   ApplyFaceTerms(u, du, FaceType::Interior);
+   ApplyFaceTerms(u, du, FaceType::Boundary);
+
+   //Initialize to infinity
+   assembly.dofs.xe_min =  infinity;
+   assembly.dofs.xe_max = -infinity;
+
+   double *xe_min = assembly.dofs.xe_min.ReadWrite();
+   double *xe_max = assembly.dofs.xe_max.ReadWrite();
+
+   const double *d_u = u.Read();
+   const double *d_z = z.Read();
+   const double *d_M_lumped = M_lumped.Read();
+
+   double *d_du = du.ReadWrite();
+
+   const int numSubcells = assembly.dofs.numSubcells;
+   const int numDofsSubcell = assembly.dofs.numDofsSubcell;
+
+   //Stores subcell constributions
+   Vector fluct_all(numSubcells*ne);
+
+   if (time_dep || init_weights)
+   {
+      SampleSubCellVelocity();
+      SetupSubCellPA();
+      init_weights = false;
+   }
+
+   //Matrix free subcell contribution
+   ApplySubCellWeights(u, fluct_all);
+
+   //Setup temporary memory
+   fluctSubcellP.SetSize(numSubcells*ne);
+   fluctSubcellN.SetSize(numSubcells*ne);
+   xMaxSubcell.SetSize(numSubcells*ne);
+   xMinSubcell.SetSize(numSubcells*ne);
+   sumWeightsSubcellP.SetSize(numSubcells*ne);
+   sumWeightsSubcellN.SetSize(numSubcells*ne);
+   nodalWeightsP.SetSize(ndof*ne);
+   nodalWeightsN.SetSize(ndof*ne);
+
+   auto nodalWeightsP_v = Reshape(nodalWeightsP.Write(), ndof, ne);
+   auto nodalWeightsN_v = Reshape(nodalWeightsN.Write(), ndof, ne);
+   auto xMinSubcell_v = Reshape(xMinSubcell.Write(), numSubcells, ne);
+   auto xMaxSubcell_v = Reshape(xMaxSubcell.Write(), numSubcells, ne);
+
+   auto sumWeightsSubcellP_v = Reshape(sumWeightsSubcellP.Write(),numSubcells, ne);
+   auto sumWeightsSubcellN_v = Reshape(sumWeightsSubcellN.Write(),numSubcells, ne);
+   auto fluctSubcellP_v = Reshape(fluctSubcellP.Write(), numSubcells, ne);
+   auto fluctSubcellN_v = Reshape(fluctSubcellN.Write(), numSubcells, ne);
+   auto Sub2Ind = Reshape(assembly.dofs.Sub2Ind.Read(),numSubcells,
+                          numDofsSubcell);
+   auto fluct_all_v = Reshape(fluct_all.Read(),numSubcells, ne);
+
+   const bool use_subcell_scheme = subcell_scheme;
+   MFEM_FORALL(k, ne,
+   {
+      // Boundary contributions - stored in du
+      // done before this loop
+
+      // Element contributions
+      double rhoP(0.), rhoN(0.), xSum(0.);
+      for (int j = 0; j < ndof; ++j)
+      {
+         int dof_id = k*ndof+j;
+         xe_max[k] = max(xe_max[k], d_u[dof_id]);
+         xe_min[k] = min(xe_min[k], d_u[dof_id]);
+         xSum += d_u[dof_id];
+         rhoP += max(0., d_z[dof_id]);
+         rhoN += min(0., d_z[dof_id]);
+      }
+
+      //denominator of equation 47
+      double sumWeightsP = ndof*xe_max[k] - xSum + eps;
+      double sumWeightsN = ndof*xe_min[k] - xSum - eps;
+      int dof_id;
+      double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
+      if (use_subcell_scheme)
+      {
+         sumFluctSubcellP = 0.; sumFluctSubcellN = 0.;
+         for (int i=0; i<ndof; ++i)
+         {
+            nodalWeightsP_v(i, k) = 0.0;
+            nodalWeightsN_v(i, k) = 0.0;
+         }
+
+         // compute min-/max-values and the fluctuation for subcells
+         for (int m = 0; m < numSubcells; m++)
+         {
+            xMinSubcell_v(m, k) = infinity;
+            xMaxSubcell_v(m, k) = - infinity;
+            double xSum = 0.;
+
+            for (int i = 0; i <numDofsSubcell; i++)
+            {
+               dof_id = k*ndof + Sub2Ind(m, i);
+               xMaxSubcell_v(m, k) = max(xMaxSubcell_v(m, k), d_u[dof_id]);
+               xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), d_u[dof_id]);
+               xSum += d_u[dof_id];
+            }
+
+            double fluct = fluct_all_v(m, k);
+
+            sumWeightsSubcellP_v(m, k) =numDofsSubcell
+                                        * xMaxSubcell_v(m, k) - xSum + eps;
+            sumWeightsSubcellN_v(m, k) =numDofsSubcell
+                                        * xMinSubcell_v(m, k) - xSum - eps;
+
+            fluctSubcellP_v(m, k) = max(0., fluct);
+            fluctSubcellN_v(m, k) = min(0., fluct);
+            sumFluctSubcellP += fluctSubcellP_v(m, k);
+            sumFluctSubcellN += fluctSubcellN_v(m, k);
+         }
+
+         for (int m = 0; m < numSubcells; m++)
+         {
+            for (int i = 0; i <numDofsSubcell; i++)
+            {
+               const int loc_id = Sub2Ind(m, i);
+               dof_id = k*ndof + loc_id;
+               nodalWeightsP_v(loc_id, k) += fluctSubcellP_v(m, k)
+                                             * ((xMaxSubcell_v(m, k) - d_u[dof_id])
+                                                / sumWeightsSubcellP_v(m, k)); // eq. (58)
+               nodalWeightsN_v(loc_id, k) += fluctSubcellN_v(m, k)
+                                             * ((xMinSubcell_v(m, k) - d_u[dof_id])
+                                                / sumWeightsSubcellN_v(m, k)); // eq. (59)
+            }
+         }
+      } //subcell scheme
+
+      for (int i = 0; i < ndof; i++)
+      {
+         int dof_id = k*ndof+i;
+         //eq 46
+         double weightP = (xe_max[k] - d_u[dof_id]) / sumWeightsP;
+         double weightN = (xe_min[k] - d_u[dof_id]) / sumWeightsN;
+
+         if (use_subcell_scheme)
+         {
+            double aux = gamma / (rhoP + eps);
+            weightP *= 1. - min(aux * sumFluctSubcellP, 1.);
+            weightP += min(aux, 1./(sumFluctSubcellP+eps))*nodalWeightsP_v(i, k);
+
+            aux = gamma / (rhoN - eps);
+            weightN *= 1. - min(aux * sumFluctSubcellN, 1.);
+            weightN += max(aux, 1./(sumFluctSubcellN-eps))*nodalWeightsN_v(i, k);
+         }
+
+
+         // (lumpped trace term  + LED convection )/lumpped mass matrix
+         d_du[dof_id] = (d_du[dof_id] + weightP * rhoP + weightN * rhoN) /
+                        d_M_lumped[dof_id];
+      }
+   });
+
 }
 
 } // namespace mfem

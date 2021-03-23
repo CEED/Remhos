@@ -106,6 +106,37 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
+class PAResidualDistributionSubcell : virtual public PAResidualDistribution
+{
+
+private:
+   mutable Array<double> SubCellVel;
+   mutable Array<double> subCell_pa_data;
+   mutable Array<double> subCellWeights;
+
+   void SampleSubCellVelocity() const;
+   mutable bool init_weights;
+
+public:
+
+   PAResidualDistributionSubcell(ParFiniteElementSpace &space,
+                                 ParBilinearForm &Kbf,
+                                 Assembly &asmbly, const Vector &Mlump,
+                                 bool subcell, bool timedep);
+
+   void SetupSubCellPA3D() const;
+
+   void SetupSubCellPA2D() const;
+
+   void SetupSubCellPA() const;
+
+   void ComputeSubCellWeights(Array<double> &subWeights) const;
+
+   void ApplySubCellWeights(const Vector &u, Vector &y) const;
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
 } // namespace mfem
 
 #endif // MFEM_REMHOS_LO

@@ -16,7 +16,8 @@ fi
 
 methods=( "-ho 1 -lo 2 -fct 2"     # Hennes 1
           "-ho 3 -lo 4 -fct 2"     # Hennes 2
-          "-ho 2 -lo 3 -fct 2 -pa" # Arturo (PA for HO and LO)
+          "-ho 2 -lo 3 -fct 2 -pa" # Arturo 1 (PA for HO and LO RD)
+          "-ho 2 -lo 4 -fct 2 -pa" # Arturo 2 (PA for HO and LO RDsubcell)
         # "-ho 2 -lo 3 -fct 3"     # Manuel (penalty-based FCT)
           "-ho 3 -lo 1 -fct 1" )   # Blast
 
