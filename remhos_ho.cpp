@@ -113,6 +113,8 @@ NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,
 
 void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
+   MFEM_VERIFY(K.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+               "PA for DG is not supported for Neummann Solver.");
    const int n = u.Size(), ne = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    Vector rhs(n), res(n);
    Vector alpha(ndof); alpha = 1.0;
