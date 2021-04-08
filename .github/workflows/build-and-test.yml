@@ -7,10 +7,8 @@ on:
   pull_request:
 
 env:
-  HYPRE_URL: https://github.com/hypre-space/hypre/archive
   HYPRE_ARCHIVE: v2.19.0.tar.gz
   HYPRE_TOP_DIR: hypre-2.19.0
-  METIS_URL: http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/OLD
   METIS_ARCHIVE: metis-4.0.3.tar.gz
   METIS_TOP_DIR: metis-4.0.3
   MFEM_TOP_DIR: mfem
@@ -46,7 +44,6 @@ jobs:
       if: steps.hypre-cache.outputs.cache-hit != 'true'
       uses: mfem/mfem-actions/build-hypre@master
       with:
-        hypre-url: ${{ env.HYPRE_URL }}
         hypre-archive: ${{ env.HYPRE_ARCHIVE }}
         hypre-dir: ${{ env.HYPRE_TOP_DIR }}
 
@@ -63,7 +60,6 @@ jobs:
       if: steps.metis-cache.outputs.cache-hit != 'true'
       uses: mfem/mfem-actions/build-metis@master
       with:
-        metis-url: ${{ env.METIS_URL }}
         metis-archive: ${{ env.METIS_ARCHIVE }}
         metis-dir: ${{ env.METIS_TOP_DIR }}
 
