@@ -17,7 +17,7 @@
 #ifndef MFEM_REMHOS_FCT
 #define MFEM_REMHOS_FCT
 
-// #define REMHOS_FCT_PRODUCT_DEBUG
+//#define REMHOS_FCT_PRODUCT_DEBUG
 
 #include "mfem.hpp"
 

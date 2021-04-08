@@ -232,7 +232,7 @@ int main(int argc, char *argv[])
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
-   Mesh *mesh = new Mesh(mesh_file, 1, 1);
+   Mesh *mesh = new Mesh(Mesh::LoadFromFile(mesh_file, 1, 1));
    const int dim = mesh->Dimension();
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
@@ -529,7 +529,8 @@ int main(int argc, char *argv[])
       MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
 
       // Get a uniformly refined mesh.
-      subcell_mesh = new ParMesh(&pmesh, order, BasisType::ClosedUniform);
+      const int btype = BasisType::ClosedUniform;
+      subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, btype));
 
       // Check if the mesh is periodic.
       const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
@@ -845,6 +846,11 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual;
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+   MFEM_VERIFY(mpi.WorldSize() == 1, "REMHOS_FCT_PRODUCT_DEBUG - run serial.");
+   const int NE = pmesh.GetNE();
+#endif
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
