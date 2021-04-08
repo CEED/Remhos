@@ -847,11 +847,6 @@ int main(int argc, char *argv[])
    ParGridFunction res = u;
    double residual;
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-   MFEM_VERIFY(mpi.WorldSize() == 1, "REMHOS_FCT_PRODUCT_DEBUG - run serial.");
-   const int NE = pmesh.GetNE();
-#endif
-
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    for (int ti = 0; !done;)
@@ -861,9 +856,12 @@ int main(int argc, char *argv[])
       adv.SetDt(dt_real);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-      if (myid == 0) { std::cout << "   --- Full time step" << std::endl; }
-      std::cout << "   in:  ";
-      ComputeMinMaxS(NE, us, u, myid);
+      if (myid == 0)
+      {
+         std::cout << "   --- Full time step" << std::endl; }
+         std::cout << "   in:  ";
+      }
+      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
 #endif
 
       ode_solver->Step(S, t, dt_real);
@@ -874,8 +872,8 @@ int main(int argc, char *argv[])
       if (product_sync) { us.SyncMemory(S); }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-      std::cout << "   out: ";
-      ComputeMinMaxS(NE, us, u, myid);
+      if (myid == 0) { std::cout << "   out: "; }
+      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
 #endif
 
       // Monotonicity check for debug purposes mainly.
