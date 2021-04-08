@@ -13,8 +13,8 @@ env:
   METIS_URL: http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/OLD
   METIS_ARCHIVE: metis-4.0.3.tar.gz
   METIS_TOP_DIR: metis-4.0.3
-  MFEM_BRANCH: master
   MFEM_TOP_DIR: mfem
+  MFEM_BRANCH: master
 
 jobs:
   build-and-test:
@@ -67,9 +67,9 @@ jobs:
         metis-archive: ${{ env.METIS_ARCHIVE }}
         metis-dir: ${{ env.METIS_TOP_DIR }}
 
-    - name: mfem master commit
+    - name: MFEM ${{ env.MFEM_BRANCH }} commit
       run: |
-        echo "MFEM_COMMIT=$(git ls-remote --heads https://github.com/mfem/mfem.git master | awk '{print $1;}')" >> $GITHUB_ENV
+        echo "MFEM_COMMIT=$(git ls-remote --heads https://github.com/mfem/mfem.git ${{ env.MFEM_BRANCH }} | awk '{print $1;}')" >> $GITHUB_ENV
 
     # Get mfem through cache, or build it.
     # Install will only run on cache miss.
@@ -88,6 +88,7 @@ jobs:
         hypre-dir: ${{ env.HYPRE_TOP_DIR }}
         metis-dir: ${{ env.METIS_TOP_DIR }}
         mfem-dir: ${{ env.MFEM_TOP_DIR }}
+        mfem-branch: ${{ env.MFEM_BRANCH }}
 
     - name: build Remhos
       run: |
