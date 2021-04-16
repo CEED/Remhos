@@ -129,6 +129,268 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
    }
 }
 
+void CorrectFCT(const Vector &x_min, const Vector &x_max, ParGridFunction &x)
+{
+   x.HostReadWrite();
+
+   ParFiniteElementSpace &pfes = *x.ParFESpace();
+   ConstantCoefficient one(1.0);
+   MassIntegrator m_integ(one);
+
+   const int NE = pfes.GetNE();
+   const int ndofs = x.Size() / NE;
+   int dof_id;
+
+   // Q0 solutions can't be adjusted conservatively. It's what it is.
+   if (ndofs == 1) { return; }
+
+   Vector x_loc, ML_loc(ndofs), m_loc(ndofs);
+   DenseMatrix M_loc;
+
+   for (int k = 0; k < NE; k++)
+   {
+      bool fix = false;
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_id = k * ndofs + j;
+         if (x(dof_id) < x_min(dof_id) ||
+             x(dof_id) > x_max(dof_id)) { fix = true; }
+      }
+
+      if (fix == false) { continue; }
+
+      x_loc.SetDataAndSize(x.GetData() + k*ndofs, ndofs);
+
+      const FiniteElement &fe = *pfes.GetFE(k);
+      m_integ.AssembleElementMatrix(fe, *pfes.GetElementTransformation(k), M_loc);
+      m_loc = 1.0;
+      M_loc.Mult(m_loc, ML_loc);
+      M_loc.Mult(x_loc, m_loc);
+
+      const double x_avg = m_loc.Sum() / ML_loc.Sum();
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_id = k * ndofs + j;
+         if (x_avg < x_min(dof_id) || x_avg > x_min(dof_id))
+         {
+            std::cout << x_avg << " " << x_min << " " << x_max << std::endl;
+            MFEM_ABORT("In correction: avg is not in bounds!");
+         }
+      }
+#endif
+
+      Vector z(ndofs);
+      Vector beta(ndofs);
+      for (int i = 0; i < ndofs; i++)
+      {
+         // Some different options for beta:
+         //beta(i) = 1.0;
+         beta(i) = ML_loc(i);
+
+         // The low order flux correction
+         z(i) = m_loc(i) - ML_loc(i) * x_avg;
+      }
+
+      // Make beta_i sum to 1
+      beta /= beta.Sum();
+
+      DenseMatrix F(ndofs);
+      for (int i = 1; i < ndofs; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            F(i, j) = M_loc(i, j) * (x(i) - x(j)) +
+                      (beta(j) * z(i) - beta(i) * z(j));
+         }
+      }
+
+      Vector gp(ndofs), gm(ndofs);
+      gp = 0.0; gm = 0.0;
+      for (int i = 1; i < ndofs; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j);
+            if (fij >= 0.0)
+            {
+               gp(i) += fij;
+               gm(j) -= fij;
+            }
+            else
+            {
+               gm(i) += fij;
+               gp(j) -= fij;
+            }
+         }
+      }
+
+      x_loc = x_avg;
+      for (int i = 0; i < ndofs; i++)
+      {
+         int dof_id = k*ndofs + i;
+         double mi = ML_loc(i);
+         double rp = std::max(mi * (x_max(dof_id) - x_loc(i)), 0.0);
+         double rm = std::min(mi * (x_min(dof_id) - x_loc(i)), 0.0);
+         double sp = gp(i), sm = gm(i);
+
+         gp(i) = (rp < sp) ? rp / sp : 1.0;
+         gm(i) = (rm > sm) ? rm / sm : 1.0;
+      }
+
+      for (int i = 1; i < ndofs; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j), aij;
+
+            if (fij >= 0.0)
+            {
+               aij = std::min(gp(i), gm(j));
+            }
+            else
+            {
+               aij = std::min(gm(i), gp(j));
+            }
+
+            fij *= aij;
+            x_loc(i) += fij / ML_loc(i);
+            x_loc(j) -= fij / ML_loc(j);
+         }
+      }
+   }
+}
+
+void FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
+                 Vector &m, Vector &x,
+                 double y_min, double y_max, Vector &xy)
+{
+   // [IN]  - M, M_inv, m, x, y_min, y_max
+   // [OUT] - xy
+
+   m.HostReadWrite();
+   x.HostReadWrite();
+   xy.HostReadWrite();
+   const int s = M.Size();
+
+   xy.SetSize(s);
+
+   // Compute the lumped mass matrix in ML
+   Vector ML(s);
+   M.GetRowSums(ML);
+
+   // Compute the high-order projection in xy
+   M_inv.Mult(m, xy);
+
+   // Q0 solutions can't be adjusted conservatively. It's what it is.
+   if (xy.Size() == 1) { return; }
+
+   // Ensure dot product is done on the CPU
+   double dMLX(0);
+   for (int i = 0; i < x.Size(); ++i)
+   {
+      dMLX += ML(i) * x(i);
+   }
+
+   const double y_avg = m.Sum() / dMLX;
+
+#ifdef DEBUG
+   EXO_WARNING_IF(!(y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12),
+                  "Average is out of bounds: "
+                     << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min << " " << y_avg
+                     << " " << y_max);
+#endif
+
+   Vector z(s);
+   Vector beta(s);
+   Vector Mxy(s);
+   M.Mult(xy, Mxy);
+   for (int i = 0; i < s; i++)
+   {
+      // Some different options for beta:
+      //beta(i) = 1.0;
+      beta(i) = ML(i) * x(i);
+      //beta(i) = ML(i)*(x(i) + 1e-14);
+      //beta(i) = ML(i);
+      //beta(i) = Mxy(i);
+
+      // The low order flux correction
+      z(i) = m(i) - ML(i) * x(i) * y_avg;
+   }
+
+   // Make beta_i sum to 1
+   beta /= beta.Sum();
+
+   DenseMatrix F(s);
+   for (int i = 1; i < s; i++)
+   {
+      for (int j = 0; j < i; j++)
+      {
+         F(i, j) = M(i, j) * (xy(i) - xy(j)) + (beta(j) * z(i) - beta(i) * z(j));
+      }
+   }
+
+   Vector gp(s), gm(s);
+   gp = 0.0;
+   gm = 0.0;
+   for (int i = 1; i < s; i++)
+   {
+      for (int j = 0; j < i; j++)
+      {
+         double fij = F(i, j);
+         if (fij >= 0.0)
+         {
+            gp(i) += fij;
+            gm(j) -= fij;
+         }
+         else
+         {
+            gm(i) += fij;
+            gp(j) -= fij;
+         }
+      }
+   }
+
+   for (int i = 0; i < s; i++)
+   {
+      xy(i) = x(i) * y_avg;
+   }
+
+   for (int i = 0; i < s; i++)
+   {
+      double mi = ML(i), xyLi = xy(i);
+      double rp = std::max(mi * (x(i) * y_max - xyLi), 0.0);
+      double rm = std::min(mi * (x(i) * y_min - xyLi), 0.0);
+      double sp = gp(i), sm = gm(i);
+
+      gp(i) = (rp < sp) ? rp / sp : 1.0;
+      gm(i) = (rm > sm) ? rm / sm : 1.0;
+   }
+
+   for (int i = 1; i < s; i++)
+   {
+      for (int j = 0; j < i; j++)
+      {
+         double fij = F(i, j), aij;
+
+         if (fij >= 0.0)
+         {
+            aij = std::min(gp(i), gm(j));
+         }
+         else
+         {
+            aij = std::min(gm(i), gp(j));
+         }
+
+         fij *= aij;
+         xy(i) += fij / ML(i);
+         xy(j) -= fij / ML(j);
+      }
+   }
+}
+
+
 void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
 {
    const int size = u.Size();
