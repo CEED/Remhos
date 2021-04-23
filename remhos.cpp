@@ -845,7 +845,7 @@ int main(int argc, char *argv[])
    }
 
    ParGridFunction res = u;
-   double residual;
+   double residual, s_min_glob, s_max_glob;
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -855,26 +855,52 @@ int main(int argc, char *argv[])
 
       adv.SetDt(dt_real);
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-      if (myid == 0)
+      if (product_sync)
       {
-         std::cout << "   --- Full time step" << std::endl; }
-         std::cout << "   in:  ";
-      }
-      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
+         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         if (myid == 0)
+         {
+            std::cout << "   --- Full time step" << std::endl; }
+            std::cout << "   in:  ";
+            std::cout << std::scientific << std::setprecision(5);
+            std::cout << "min_s: " << s_min_glob
+                      << "; max_s: " << s_max_glob << std::endl;
+         }
 #endif
+      }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
 
       // S has been modified, update the alias
       u.SyncMemory(S);
-      if (product_sync) { us.SyncMemory(S); }
+      if (product_sync)
+      {
+         us.SyncMemory(S);
+
+         // Correction can also be done with localized bounds for s, but for
+         // now we have implemented only global bounds for s.
+         const int s = u.Size();
+         Vector us_min(s), us_max(s);
+         for (int i = 0; i < s; i++)
+         {
+            us_min(i) = u(i) * s_min_glob;
+            us_max(i) = u(i) * s_max_glob;
+         }
+         CorrectFCT(us_min, us_max, us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-      if (myid == 0) { std::cout << "   out: "; }
-      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
+         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
+         if (myid == 0)
+         {
+            std::cout << "   out: ";
+            std::cout << std::scientific << std::setprecision(5);
+            std::cout << "min_s: " << s_min_glob
+                      << "; max_s: " << s_max_glob << std::endl;
+         }
 #endif
+      }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)

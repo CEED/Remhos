@@ -36,7 +36,8 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
 void CorrectFCT(const Vector &x_min, const Vector &x_max, ParGridFunction &x);
 
 // Set of functions that are used for debug calls.
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid);
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+                    double &s_min_glob, double &s_max_glob);
 void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid);
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg);
 

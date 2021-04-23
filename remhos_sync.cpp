@@ -86,10 +86,7 @@ void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
 
       for (int j = 0; j < ndof; j++)
       {
-         if (u_el[j] <= 0.0)
-         {
-            s_el[j] = s_avg;
-         }
+         if (u_el[j] <= 0.0) { s_el[j] = s_avg; }
          else
          {
             const double s_j = us_el[j] / u_el[j];
@@ -391,7 +388,8 @@ void FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 }
 
 
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
+void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+                    double &s_min_glob, double &s_max_glob)
 {
    const int size = u.Size();
    Vector s(size);
@@ -410,16 +408,8 @@ void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u, int myid)
       min_s = min(s(i), min_s);
       max_s = max(s(i), max_s);
    }
-   double min_s_glob, max_s_glob;
-   MPI_Allreduce(&min_s, &min_s_glob, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
-   MPI_Allreduce(&max_s, &max_s_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-
-   if (myid == 0)
-   {
-      std::cout << std::scientific << std::setprecision(5);
-      std::cout << "min_s: " << min_s_glob
-                << "; max_s: " << max_s_glob << std::endl;
-   }
+   MPI_Allreduce(&min_s, &s_min_glob, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   MPI_Allreduce(&max_s, &s_max_glob, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 }
 
 void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid)
