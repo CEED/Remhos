@@ -126,7 +126,8 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
    }
 }
 
-void CorrectFCT(const Vector &x_min, const Vector &x_max, ParGridFunction &x)
+void CorrectFCT(const Array<bool> &bool_el, const Array<bool> &active_dofs,
+                const Vector &x_min, const Vector &x_max, ParGridFunction &x)
 {
    x.HostReadWrite();
 
@@ -144,14 +145,25 @@ void CorrectFCT(const Vector &x_min, const Vector &x_max, ParGridFunction &x)
    Vector x_loc, ML_loc(ndofs), m_loc(ndofs);
    DenseMatrix M_loc;
 
+   const double eps = 1e-12;
+
    for (int k = 0; k < NE; k++)
    {
+      if (bool_el[k] == false) { continue; }
+
       bool fix = false;
       for (int j = 0; j < ndofs; j++)
       {
          dof_id = k * ndofs + j;
-         if (x(dof_id) < x_min(dof_id) ||
-             x(dof_id) > x_max(dof_id)) { fix = true; }
+         if (active_dofs[dof_id] == false) { continue; }
+
+         if (x(dof_id) + eps < x_min(dof_id) ||
+             x(dof_id) - eps > x_max(dof_id))
+         {
+            std::cout << x(dof_id) << " " << x_min(dof_id) << " " << x_max(dof_id) << std::endl;
+            MFEM_ABORT("here");
+            fix = true;
+         }
       }
 
       if (fix == false) { continue; }

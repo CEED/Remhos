@@ -33,7 +33,8 @@ void ComputeRatio(int NE, const Vector &u_s, const Vector &u, Vector &s,
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
 
-void CorrectFCT(const Vector &x_min, const Vector &x_max, ParGridFunction &x);
+void CorrectFCT(const Array<bool> &bool_el, const Array<bool> &active_dofs,
+                const Vector &x_min, const Vector &x_max, ParGridFunction &x);
 
 // Set of functions that are used for debug calls.
 void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,

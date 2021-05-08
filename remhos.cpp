@@ -846,6 +846,7 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual, s_min_glob, s_max_glob;
+   const int NE = pmesh.GetNE();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -882,13 +883,26 @@ int main(int argc, char *argv[])
          // Correction can also be done with localized bounds for s, but for
          // now we have implemented only global bounds for s.
          const int s = u.Size();
+         const int ndofs = u.Size() / NE;
          Vector us_min(s), us_max(s);
-         for (int i = 0; i < s; i++)
+         us_min = 0.0; us_max = 0.0;
+         Array<bool> active_elem, active_dofs;
+         ComputeBoolIndicators(pmesh.GetNE(), u, active_elem, active_dofs);
+         for (int i = 0; i < NE; i++)
          {
-            us_min(i) = u(i) * s_min_glob;
-            us_max(i) = u(i) * s_max_glob;
+            if (active_elem[i] == false) { continue; }
+
+            for (int j = 0; j < ndofs; j++)
+            {
+               const int dof_id = i*ndofs + j;
+               if (active_dofs[dof_id] == false) { continue; }
+
+               us_min(dof_id) = u(dof_id) * s_min_glob;
+               us_max(dof_id) = u(dof_id) * s_max_glob;
+            }
          }
-         CorrectFCT(us_min, us_max, us);
+         std::cout << s_min_glob << " " << s_max_glob << std::endl;
+         CorrectFCT(active_elem, active_dofs, us_min, us_max, us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
