@@ -27,8 +27,12 @@ namespace mfem
 void ComputeBoolIndicators(int NE, const Vector &u,
                            Array<bool> &ind_elem, Array<bool> &ind_dofs);
 
-void ComputeRatio(int NE, const Vector &u_s, const Vector &u, Vector &s,
-                  Array<bool> &bool_el, Array<bool> &bool_dof);
+void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
+                  Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof);
+
+void ComputeRatioB(int NE, const Vector &u_s, const Vector &u,
+                   double s_min_glob, double s_max_glob,
+                   Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof);
 
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
@@ -37,7 +41,7 @@ void CorrectFCT(const Array<bool> &bool_el, const Array<bool> &active_dofs,
                 const Vector &x_min, const Vector &x_max, ParGridFunction &x);
 
 // Set of functions that are used for debug calls.
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+void ComputeMinMaxS(int NE, const Vector &us, const Vector &u,
                     double &s_min_glob, double &s_max_glob);
 void ComputeMinMaxS(const Vector &s, const Array<bool> &bool_dofs, int myid);
 void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg);

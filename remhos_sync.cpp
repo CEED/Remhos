@@ -47,8 +47,8 @@ void ComputeBoolIndicators(int NE, const Vector &u,
 }
 
 // This function assumes a DG space.
-void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
-                  Array<bool> &bool_el, Array<bool> &bool_dof)
+void ComputeRatio(int NE, const Vector &us, const Vector &u,
+                  Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof)
 {
    ComputeBoolIndicators(NE, u, bool_el, bool_dof);
 
@@ -70,12 +70,14 @@ void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
       const double *u_el = &u(i*ndof), *us_el = &us(i*ndof);
       double *s_el = &s(i*ndof);
 
-      // Average of the existing values.
+      // Average of the existing ratios. This does not target any kind of
+      // conservation. The only goal is to have s_avg between the max and min
+      // of us/u, over the active dofs.
       int n = 0;
       double sum = 0.0;
       for (int j = 0; j < ndof; j++)
       {
-         if (u_el[j] > EMPTY_ZONE_TOL)
+         if (bool_dof[i*ndof + j])
          {
             sum += us_el[j] / u_el[j];
             n++;
@@ -86,22 +88,63 @@ void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
 
       for (int j = 0; j < ndof; j++)
       {
-         if (u_el[j] <= 0.0) { s_el[j] = s_avg; }
-         else
-         {
-            const double s_j = us_el[j] / u_el[j];
-            if (u_el[j] > EMPTY_ZONE_TOL) { s_el[j] = s_j; }
-            else
-            {
-               // Continuous transition between s_avg and s for u in [0, tol].
-               s_el[j] = u_el[j] * (s_j - s_avg) / EMPTY_ZONE_TOL + s_avg;
-            }
+         s_el[j] = (bool_dof[i*ndof + j]) ? us_el[j] / u_el[j] : s_avg;
+      }
+   }
+}
 
-            // NOTE: the above transition alters slightly the values of
-            // s = us / u, near u = EMPTY_ZONE_TOL. This might break the theorem
-            // stating that s_min <= us_LO / u_LO <= s_max, as s_min and s_max
-            // are different, due to s not being exactly us / u.
+// This function assumes a DG space.
+void ComputeRatioB(int NE, const Vector &us, const Vector &u,
+                   double s_min_glob, double s_max_glob,
+                   Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof)
+{
+   ComputeBoolIndicators(NE, u, bool_el, bool_dof);
+
+   us.HostRead();
+   u.HostRead();
+   s.HostWrite();
+   bool_el.HostRead();
+   bool_dof.HostRead();
+
+   const int ndof = u.Size() / NE;
+   for (int i = 0; i < NE; i++)
+   {
+      if (bool_el[i] == false)
+      {
+         for (int j = 0; j < ndof; j++) { s(i*ndof + j) = 0.0; }
+         continue;
+      }
+
+      const double *u_el = &u(i*ndof), *us_el = &us(i*ndof);
+      double *s_el = &s(i*ndof);
+
+      // Average of the existing ratios. This does not target any kind of
+      // conservation. The only goal is to have s_avg between the max and min
+      // of us/u, over the active dofs.
+      int n = 0;
+      double sum = 0.0;
+      for (int j = 0; j < ndof; j++)
+      {
+         if (bool_dof[i*ndof + j])
+         {
+            sum += us_el[j] / u_el[j];
+            n++;
          }
+      }
+      MFEM_VERIFY(n > 0, "Major error that makes no sense");
+      const double s_avg = sum / n;
+
+      for (int j = 0; j < ndof; j++)
+      {
+         s_el[j] = (bool_dof[i*ndof + j]) ? us_el[j] / u_el[j] : s_avg;
+
+         const double eps = 1e-12;
+         // Check if there's a violation, s_avg < s_min, due to round-offs in
+         // division (the 2nd check means s_avg = mass_us / mass_u > s_min).
+         if (s_el[j]  + eps < s_min_glob &&
+             us_el[j] + eps > s_min_glob * u_el[j]) { s_el[j] = s_min_glob; }
+         if (s_el[j]  - eps > s_max_glob &&
+             us_el[j] - eps < s_max_glob * u_el[j]) { s_el[j] = s_max_glob; }
       }
    }
 }
@@ -400,14 +443,13 @@ void FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 }
 
 
-void ComputeMinMaxS(int NE, const Vector &u_s, const Vector &u,
+void ComputeMinMaxS(int NE, const Vector &us, const Vector &u,
                     double &s_min_glob, double &s_max_glob)
 {
    const int size = u.Size();
    Vector s(size);
    Array<bool> bool_el, bool_dofs;
-   ComputeBoolIndicators(NE, u, bool_el, bool_dofs);
-   ComputeRatio(NE, u_s, u, s, bool_el, bool_dofs);
+   ComputeRatioB(NE, us, u, s_min_glob, s_max_glob, s, bool_el, bool_dofs);
 
    bool_dofs.HostRead();
 
