@@ -890,6 +890,8 @@ int main(int argc, char *argv[])
          us_max = -numeric_limits<double>::infinity();
          Array<bool> active_elem, active_dofs;
          ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+         std::cout << "----" << std::endl;
+         std::cout << s_min_glob << " " << s_max_glob << std::endl;
          for (int i = 0; i < s; i++)
          {
             if (active_dofs[i] == false) { continue; }
@@ -899,10 +901,13 @@ int main(int argc, char *argv[])
 
             const double eps = 1e-12;
             if (us(i) + eps < us_min(i) ||
-                us(i) - eps > us_max(i)) { MFEM_ABORT("got it"); }
+                us(i) - eps > us_max(i))
+            {
+               cout << us_min(i) <<  " " << us(i) << " " << us_max(i) << endl;
+               cout << s_min_glob <<  " " << us(i)/u(i) << " " << s_max_glob << endl;
+               MFEM_ABORT("got it");
+            }
          }
-         std::cout << "----" << std::endl;
-         std::cout << s_min_glob << " " << s_max_glob << std::endl;
          ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
          std::cout << s_min_glob << " " << s_max_glob << std::endl;
          std::cout << "----" << std::endl;
