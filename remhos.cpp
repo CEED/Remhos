@@ -882,36 +882,23 @@ int main(int argc, char *argv[])
       {
          us.SyncMemory(S);
 
+         // It is known that RK time integrators with more than 1 stage may
+         // cause violation of the lower bounds for us.
+         // The lower bound is corrected, causing small conservation error.
          // Correction can also be done with localized bounds for s, but for
-         // now we have implemented only global bounds for s.
+         // now we have implemented only the minimum global bound.
+         u.HostRead();
+         us.HostReadWrite();
          const int s = u.Size();
-         Vector us_min(s), us_max(s);
-         us_min = numeric_limits<double>::infinity();
-         us_max = -numeric_limits<double>::infinity();
          Array<bool> active_elem, active_dofs;
          ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         std::cout << "----" << std::endl;
-         std::cout << s_min_glob << " " << s_max_glob << std::endl;
          for (int i = 0; i < s; i++)
          {
             if (active_dofs[i] == false) { continue; }
 
-            us_min(i) = u(i) * s_min_glob;
-            us_max(i) = u(i) * s_max_glob;
-
-            const double eps = 1e-12;
-            if (us(i) + eps < us_min(i) ||
-                us(i) - eps > us_max(i))
-            {
-               cout << us_min(i) <<  " " << us(i) << " " << us_max(i) << endl;
-               cout << s_min_glob <<  " " << us(i)/u(i) << " " << s_max_glob << endl;
-               MFEM_ABORT("got it");
-            }
+            double us_min = u(i) * s_min_glob;
+            if (us(i) < us_min) { us(i) = us_min; }
          }
-         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
-         std::cout << s_min_glob << " " << s_max_glob << std::endl;
-         std::cout << "----" << std::endl;
-         CorrectFCT(active_elem, active_dofs, us_min, us_max, us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
