@@ -190,9 +190,9 @@ Final mass us: 0.1796082878
 Mass loss us:  4.15262e-07
 
 --- Product remap 2D (ClipScale)
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 2 -ps
-Final mass us: 0.179608164
-Mass loss us:  2.91405e-07
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.004 -tf 0.75 -ho 3 -lo 1 -fct 2 -ps
+Final mass us: 0.1796084829
+Mass loss us:  6.10346e-07
 
 --- Steady monolithic 2 2D
 mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2
