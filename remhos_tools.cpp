@@ -412,6 +412,19 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
    const int ndofs = dof_map.Size();
    for (int i = 0; i < NE; i++)
    {
+      // Comment about the case when active_el != null, i.e., when this function
+      // is used to compute the bounds of s:
+      //
+      // Note that this loop goes over all elements, including inactive ones.
+      // The following happens in an inactive element:
+      // - If a DOF is on the boundary with an active element, it will get the
+      //   value that's propagated by the continuous functions x_min and x_max.
+      // - Otherwise, the DOF would get the inf values.
+      // This is the mechanism that allows new elements, that switch from
+      // inactive to active, to get some valid bounds. More specifically, this
+      // function is called on the old state, but the result from it is used
+      // to limit the new state, which has different active elements.
+
       pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {

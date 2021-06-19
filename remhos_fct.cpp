@@ -72,13 +72,13 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
       {
          if (active_dofs[k*ndofs + j] == false) { continue; }
 
-         // Check if there's a violation, s_avg < s_min, due to round-offs in
-         // division (the 2nd check means s_avg = mass_us / mass_u > s_min).
-         if (s_avg + eps < smin &&
+         // Check if there's a violation, s_avg < s_min, due to round-offs that
+         // are inflated by the division of a small number (the 2nd check means
+         // s_avg = mass_us / mass_u > s_min up to round-off in mass_us).
+         if (s_avg < smin &&
              mass_us + eps > smin * mass_u) { s_avg = smin; }
-         // Check if there's a violation, s_avg > s_max, due to round-offs in
-         // division (the 2nd check means s_avg = mass_us / mass_u < s_max).
-         if (s_avg - eps > smax &&
+         // As above for the s_max.
+         if (s_avg > smax &&
              mass_us - eps < smax * mass_u) { s_avg = smax; }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG

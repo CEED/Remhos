@@ -846,6 +846,9 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual;
+   double s_min_glob = numeric_limits<double>::infinity(),
+          s_max_glob = -numeric_limits<double>::infinity();
+   const int NE = pmesh.GetNE();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -855,26 +858,59 @@ int main(int argc, char *argv[])
 
       adv.SetDt(dt_real);
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-      if (myid == 0)
+      if (product_sync)
       {
-         std::cout << "   --- Full time step" << std::endl; }
-         std::cout << "   in:  ";
-      }
-      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
+         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         if (myid == 0)
+         {
+            std::cout << "   --- Full time step" << std::endl; }
+            std::cout << "   in:  ";
+            std::cout << std::scientific << std::setprecision(5);
+            std::cout << "min_s: " << s_min_glob
+                      << "; max_s: " << s_max_glob << std::endl;
+         }
 #endif
+      }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-      //S has been modified, update the alias
+      // S has been modified, update the alias
       u.SyncMemory(S);
-      if (product_sync) { us.SyncMemory(S); }
+      if (product_sync)
+      {
+         us.SyncMemory(S);
+
+         // It is known that RK time integrators with more than 1 stage may
+         // cause violation of the lower bounds for us.
+         // The lower bound is corrected, causing small conservation error.
+         // Correction can also be done with localized bounds for s, but for
+         // now we have implemented only the minimum global bound.
+         u.HostRead();
+         us.HostReadWrite();
+         const int s = u.Size();
+         Array<bool> active_elem, active_dofs;
+         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+         for (int i = 0; i < s; i++)
+         {
+            if (active_dofs[i] == false) { continue; }
+
+            double us_min = u(i) * s_min_glob;
+            if (us(i) < us_min) { us(i) = us_min; }
+         }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-      if (myid == 0) { std::cout << "   out: "; }
-      ComputeMinMaxS(pmesh.GetNE(), us, u, myid);
+         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
+         if (myid == 0)
+         {
+            std::cout << "   out: ";
+            std::cout << std::scientific << std::setprecision(5);
+            std::cout << "min_s: " << s_min_glob
+                      << "; max_s: " << s_max_glob << std::endl;
+         }
 #endif
+      }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
