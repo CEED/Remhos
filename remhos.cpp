@@ -82,6 +82,7 @@ private:
    mutable ParGridFunction x_gf;
 
    double dt;
+   mutable double dt_est;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -105,12 +106,18 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
-   virtual void SetDt(double _dt) { dt = _dt; }
+   virtual void SetDt(double _dt) { dt = _dt; dt_est = dt; }
+   double GetTimeStepEstimate() { return dt_est; }
+
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
+
+   double TimeStepControl(const Vector &x, const Vector &dx,
+                          const Vector &x_min,
+                          const Vector &x_max) const;
 
    virtual ~AdvectionOperator() { }
 };
@@ -852,6 +859,7 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
+   BlockVector Sold(S);
    for (int ti = 0; !done;)
    {
       double dt_real = min(dt, t_final - t);
@@ -873,8 +881,26 @@ int main(int argc, char *argv[])
 #endif
       }
 
+      Sold = S;
       ode_solver->Step(S, t, dt_real);
       ti++;
+
+      double dt_est = adv.GetTimeStepEstimate();
+      if (dt_real > dt_est)
+      {
+         // Repeat with the proper time step.
+         if (myid == 0)
+         {
+            cout << "Repeat / decrease dt: "
+                 << dt_real << " --> " << dt_est << endl;
+         }
+         ti--;
+         t -= dt_real;
+         S = Sold;
+         dt = dt_est;
+         continue;
+      }
+
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1248,6 +1274,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      double dt_est_loc =
+            min(dt_est, TimeStepControl(u, du_LO, dofs.xi_min, dofs.xi_max));
+      MPI_Allreduce(&dt_est_loc, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
+                    x_gf.ParFESpace()->GetComm());
+
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
@@ -1323,6 +1355,33 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       d_us.SyncAliasMemory(Y);
    }
+}
+
+double AdvectionOperator::TimeStepControl(const Vector &x, const Vector &dx,
+                                          const Vector &x_min,
+                                          const Vector &x_max) const
+{
+   // x_min <= x + dt * dx <= x_max.
+   int n = x.Size();
+   const double cfl = 0.5, eps = 1e-15, dt_min = 1e-10;
+   double dt = numeric_limits<double>::infinity();
+
+   // TODO logic to increase the time step.
+   for (int i = 0; i < n; i++)
+   {
+      if (dx(i) > eps)
+      {
+         dt = min(dt, (x_max(i) - x(i)) / dx(i) );
+      }
+      else if (dx(i) < -eps)
+      {
+         dt = min(dt, (x_min(i) - x(i)) / dx(i) );
+      }
+
+      if (dt < dt_min) { MFEM_ABORT("Time step too small."); }
+   }
+
+   return cfl * dt;
 }
 
 // Velocity coefficient
