@@ -97,6 +97,9 @@ struct LowOrderMethod
 class DofInfo
 {
 private:
+   // 0 is overlap, see ComputeOverlapBounds().
+   // 1 is sparcity, see ComputeMatrixSparcityBounds().
+   int bounds_type;
    ParMesh *pmesh;
    ParFiniteElementSpace &pfes;
 
@@ -119,6 +122,19 @@ private:
    // NOTE: The mesh is assumed to consist of segments, quads or hexes.
    void FillSubcell2CellDof();
 
+   // Computes the admissible interval of values for each DG dof from the values
+   // of all elements that feature the dof at its physical location.
+   // A given DOF gets bounds from the elements it touches (in Gauss-Lobatto
+   // sense, i.e., a face dof touches two elements, vertex dofs can touch many).
+   void ComputeOverlapBounds(const Vector &el_min, const Vector &el_max,
+                             Vector &dof_min, Vector &dof_max,
+                             Array<bool> *active_el = NULL);
+
+   // A given DOF gets bounds from its own element and its face-neighbors.
+   void ComputeMatrixSparcityBounds(const Vector &el_min, const Vector &el_max,
+                                    Vector &dof_min, Vector &dof_max,
+                                    Array<bool> *active_el = NULL);
+
 public:
    Vector xi_min, xi_max; // min/max values for each dof
    Vector xe_min, xe_max; // min/max values for each element
@@ -128,13 +144,25 @@ public:
 
    int numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
-   DofInfo(ParFiniteElementSpace &pfes_sltn);
+   DofInfo(ParFiniteElementSpace &pfes_sltn, int btype = 0);
 
    // Computes the admissible interval of values for each DG dof from the values
    // of all elements that feature the dof at its physical location.
    void ComputeBounds(const Vector &el_min, const Vector &el_max,
                       Vector &dof_min, Vector &dof_max,
-                      Array<bool> *active_el = NULL);
+                      Array<bool> *active_el = NULL)
+   {
+      if (bounds_type == 0)
+      {
+         ComputeOverlapBounds(el_min, el_max, dof_min, dof_max, active_el);
+      }
+      else if (bounds_type == 1)
+      {
+         ComputeMatrixSparcityBounds(el_min, el_max,
+                                     dof_min, dof_max, active_el);
+      }
+      else { MFEM_ABORT("Wrong option for bounds computation."); }
+   }
 
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,
