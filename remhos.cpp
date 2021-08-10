@@ -185,7 +185,7 @@ int main(int argc, char *argv[])
                   "                   2 - Subcell Residual Distribution.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
-                  "                     1 - matrix sparcity pattern.");
+                  "                     1 - matrix sparsity pattern.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");

@@ -374,7 +374,7 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    FillSubcell2CellDof(); // Fill Sub2Ind.
 }
 
-void DofInfo::ComputeMatrixSparcityBounds(const Vector &el_min,
+void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
                                           const Vector &el_max,
                                           Vector &dof_min, Vector &dof_max,
                                           Array<bool> *active_el)
