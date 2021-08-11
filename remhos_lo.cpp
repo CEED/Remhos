@@ -540,7 +540,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    const int Q1D = quad1D;
    const int D1D = dofs1D;
    const int nf = pfes.GetNFbyType(type);
-   const Operator * face_restrict_lex = nullptr;
+   const FaceRestriction * face_restrict_lex = nullptr;
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
@@ -611,7 +611,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
          }
       });
 
-      face_restrict_lex->MultTranspose(y_loc,y);
+      face_restrict_lex->AddMultTranspose(y_loc,y);
    }
 
 
@@ -671,7 +671,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
          }
       });
 
-      face_restrict_lex->MultTranspose(y_loc,y);
+      face_restrict_lex->AddMultTranspose(y_loc,y);
    }
 }
 
@@ -681,7 +681,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
    const int Q1D = quad1D;
    const int D1D = dofs1D;
    const int nf = pfes.GetNFbyType(type);
-   const Operator * face_restrict_lex = nullptr;
+   const FaceRestriction * face_restrict_lex = nullptr;
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
@@ -785,7 +785,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       });
 
-      face_restrict_lex->MultTranspose(y_loc,y);
+      face_restrict_lex->AddMultTranspose(y_loc,y);
    }
 
 
@@ -875,7 +875,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       });
 
-      face_restrict_lex->MultTranspose(y_loc,y);
+      face_restrict_lex->AddMultTranspose(y_loc,y);
    }
 }
 
