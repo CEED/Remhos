@@ -131,6 +131,7 @@ int main(int argc, char *argv[])
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
+   int bounds_type = 0;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -182,6 +183,9 @@ int main(int argc, char *argv[])
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
                   "                   1 - Residual Distribution,\n\t"
                   "                   2 - Subcell Residual Distribution.");
+   args.AddOption(&bounds_type, "-bt", "--bounds-type",
+                  "Bounds stencil type: 0 - overlapping elements,\n\t"
+                  "                     1 - matrix sparsity pattern.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -455,7 +459,7 @@ int main(int argc, char *argv[])
    k.Finalize(skip_zeros);
 
    // Store topological dof data.
-   DofInfo dofs(pfes);
+   DofInfo dofs(pfes, bounds_type);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
