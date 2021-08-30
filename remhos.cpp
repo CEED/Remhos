@@ -854,6 +854,30 @@ int main(int argc, char *argv[])
           s_max_glob = -numeric_limits<double>::infinity();
    const int NE = pmesh.GetNE();
 
+   const FiniteElement *dummy = pfes.GetFE(0);
+   const int nd = dummy->GetDof();
+
+   DenseMatrix DistMat, MassMatLOR;
+   GetDistOps(dummy, DistMat, MassMatLOR);
+
+   Vector elem_vec(nd), elem_vec_dist(nd);
+   elem_vec.Randomize();
+   double aux = elem_vec.Sum() / nd;
+   elem_vec -= aux; // sum of vector entries must be zero
+
+   ApplyDistOp(DistMat, elem_vec, elem_vec_dist);
+
+   // Testing
+   for (int i = 0; i < nd; i++)
+   {
+      for (int j = 0; j < nd; j++)
+      {
+         double f_ij = GetAntiDiffFlux(MassMatLOR, elem_vec_dist, i, j);
+         cout << f_ij << endl;
+      }
+      cout << endl;
+   }
+
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    for (int ti = 0; !done;)
