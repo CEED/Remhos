@@ -134,8 +134,8 @@ class ClipScaleSolver : public FCTSolver
 {
 public:
    ClipScaleSolver(ParFiniteElementSpace &space,
-                   SmoothnessIndicator *si, double dt_)
-      : FCTSolver(space, si, dt_, false) { }
+                   SmoothnessIndicator *si, double dt)
+      : FCTSolver(space, si, dt, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
@@ -148,6 +148,18 @@ public:
                                const Vector &u_new,
                                const Array<bool> &active_el,
                                const Array<bool> &active_dofs, Vector &d_us);
+};
+
+class ElementFCTProjection : public FCTSolver
+{
+public:
+   ElementFCTProjection(ParFiniteElementSpace &space, double dt)
+      : FCTSolver(space, NULL, dt, false) { }
+
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+                                const Vector &du_ho, const Vector &du_lo,
+                                const Vector &u_min, const Vector &u_max,
+                                Vector &du) const;
 };
 
 // TODO doesn't conserve mass exactly for some reason.

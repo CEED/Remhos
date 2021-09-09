@@ -623,6 +623,127 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 #endif
 }
 
+void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
+                                           const Vector &m,
+                                           const Vector &du_HO,
+                                           const Vector &du_LO,
+                                           const Vector &u_min,
+                                           const Vector &u_max,
+                                           Vector &du) const
+{
+   const int NE = pfes.GetMesh()->GetNE();
+   const int s  = pfes.GetFE(0)->GetDof();
+   int dof_id;
+
+   DenseMatrix M(s);
+   Vector ML(s), rhs(s), beta(s), z(s), u_loc, du_HO_loc, du_LO_loc, du_loc,
+          du_max_loc(s), du_min_loc(s);
+   MassIntegrator mass_integ;
+
+   for (int k = 0; k < NE; k++)
+   {
+      int counter = 0;
+      u_loc.SetDataAndSize(u.GetData() + k*s, s);
+      du_HO_loc.SetDataAndSize(du_HO.GetData() + k*s, s);
+      du_LO_loc.SetDataAndSize(du_LO.GetData() + k*s, s);
+      du_loc.SetDataAndSize(du.GetData() + k*s, s);
+
+      // Local max/min increments.
+      for (int i = 0; i < s; i++)
+      {
+         dof_id = k*s + i;
+         du_max_loc(i) = (u_max(dof_id) - u(dof_id)) / dt; // positive
+         du_min_loc(i) = (u_min(dof_id) - u(dof_id)) / dt; // negative
+      }
+
+      // Construct the local mass matrix.
+      ElementTransformation *T = pfes.GetMesh()->GetElementTransformation(k);
+      const FiniteElement *el = pfes.GetFE(k);
+      mass_integ.AssembleElementMatrix(*el, *T, M);
+
+      M.Mult(du_HO_loc, rhs);
+      M.GetRowSums(ML);
+
+      for (int i = 0; i < s; i++)
+      {
+         // Some different options for beta:
+         //beta(i) = 1.0;
+         beta(i) = ML(i);
+         //beta(i) = Mxy(i);
+
+         // The low order flux correction
+         z(i) = rhs(i) - ML(i) * du_LO_loc(i);
+      }
+
+      // Make beta_i sum to 1.
+      beta /= beta.Sum();
+
+      DenseMatrix F(s);
+      for (int i = 1; i < s; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            F(i, j) = M(i, j) * (du_HO_loc(i) - du_HO_loc(j)) +
+                      (beta(j) * z(i) - beta(i) * z(j));
+         }
+      }
+
+      Vector gp(s), gm(s);
+      gp = 0.0;
+      gm = 0.0;
+      for (int i = 1; i < s; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j);
+            if (fij >= 0.0)
+            {
+               gp(i) += fij;
+               gm(j) -= fij;
+            }
+            else
+            {
+               gm(i) += fij;
+               gp(j) -= fij;
+            }
+         }
+      }
+
+      du_loc = du_LO_loc;
+
+      for (int i = 0; i < s; i++)
+      {
+         double rp = std::max(ML(i) * (du_max_loc(i) - du_loc(i)), 0.0);
+         double rm = std::min(ML(i) * (du_min_loc(i) - du_loc(i)), 0.0);
+         double sp = gp(i), sm = gm(i);
+
+         gp(i) = (rp < sp) ? rp / sp : 1.0;
+         gm(i) = (rm > sm) ? rm / sm : 1.0;
+      }
+
+      for (int i = 1; i < s; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j), aij;
+
+            if (fij >= 0.0)
+            {
+               aij = std::min(gp(i), gm(j));
+            }
+            else
+            {
+               aij = std::min(gm(i), gp(j));
+            }
+
+            fij *= aij;
+            du_loc(i) += fij / ML(i);
+            du_loc(j) -= fij / ML(j);
+         }
+      }
+   } // element loop
+}
+
 void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
                                              const Vector &m,
                                              const Vector &du_ho,
