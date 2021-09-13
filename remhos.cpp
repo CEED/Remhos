@@ -868,7 +868,7 @@ int main(int argc, char *argv[])
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          if (myid == 0)
          {
-            std::cout << "   --- Full time step" << std::endl; }
+            std::cout << "   --- Full time step" << std::endl;
             std::cout << "   in:  ";
             std::cout << std::scientific << std::setprecision(5);
             std::cout << "min_s: " << s_min_glob
