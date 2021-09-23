@@ -642,7 +642,6 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
 
    for (int k = 0; k < NE; k++)
    {
-      int counter = 0;
       u_loc.SetDataAndSize(u.GetData() + k*s, s);
       du_HO_loc.SetDataAndSize(du_HO.GetData() + k*s, s);
       du_LO_loc.SetDataAndSize(du_LO.GetData() + k*s, s);
@@ -742,6 +741,32 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
          }
       }
    } // element loop
+}
+
+void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                                     const Vector &d_us_HO, const Vector &d_us_LO,
+                                     Vector &s_min, Vector &s_max,
+                                     const Vector &u_new,
+                                     const Array<bool> &active_el,
+                                     const Array<bool> &active_dofs, Vector &d_us)
+{
+   us.HostRead();
+   s_min.HostReadWrite();
+   s_max.HostReadWrite();
+   u_new.HostRead();
+   active_el.HostRead();
+   active_dofs.HostRead();
+
+   // Compute a compatible low-order solution.
+   Vector dus_lo_fct(us.Size()), us_min(us.Size()), us_max(us.Size());
+   CalcCompatibleLOProduct(us, m, d_us_HO, s_min, s_max, u_new,
+                           active_el, active_dofs, dus_lo_fct);
+   ScaleProductBounds(s_min, s_max, u_new, active_el, active_dofs,
+                      us_min, us_max);
+
+   // ClipScale solve for d_us.
+   CalcFCTSolution(us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
+   ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 }
 
 void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
