@@ -169,6 +169,8 @@ public:
                               Vector &u_min, Vector &u_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
+   void ComputeElementMaxSparcityBound(const ParGridFunction &u,
+                                       int nbr_level, Vector &el_max);
 };
 
 class Assembly

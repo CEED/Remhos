@@ -25,6 +25,7 @@ namespace mfem
 {
 
 class SmoothnessIndicator;
+class DofInfo;
 
 // Monotone, High-order, Conservative Solver.
 class FCTSolver
@@ -132,10 +133,13 @@ public:
 
 class ClipScaleSolver : public FCTSolver
 {
+protected:
+   DofInfo &dof_info;
+
 public:
-   ClipScaleSolver(ParFiniteElementSpace &space,
+   ClipScaleSolver(ParFiniteElementSpace &space, DofInfo &di,
                    SmoothnessIndicator *si, double dt)
-      : FCTSolver(space, si, dt, false) { }
+      : FCTSolver(space, si, dt, false), dof_info(di) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,

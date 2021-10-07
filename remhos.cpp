@@ -459,7 +459,7 @@ int main(int argc, char *argv[])
    k.Finalize(skip_zeros);
 
    // Store topological dof data.
-   DofInfo dofs(pfes, bounds_type);
+   DofInfo dof_info(pfes, bounds_type);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -605,7 +605,7 @@ int main(int argc, char *argv[])
    }
    else { subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
+   Assembly asmbl(dof_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
    LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
@@ -704,7 +704,7 @@ int main(int argc, char *argv[])
    if (smth_ind_type)
    {
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
+                                               pfes, u, dof_info);
    }
 
    // Setup of the high-order solver (if any).
@@ -822,7 +822,7 @@ int main(int argc, char *argv[])
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      fct_solver = new ClipScaleSolver(pfes, dof_info, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
@@ -834,7 +834,7 @@ int main(int argc, char *argv[])
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
@@ -881,8 +881,21 @@ int main(int argc, char *argv[])
 #endif
       }
 
+      const double interface_value = 1.0;
+      const int nd = pfes.GetFE(0)->GetDof();
+      Vector el_max;
+      dof_info.ComputeElementMaxSparcityBound(u, 4, el_max);
+
       ode_solver->Step(S, t, dt_real);
       ti++;
+
+      for (int k = 0; k < NE; k++)
+      {
+         if (el_max(k) + 0.2 < interface_value)
+         {
+            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
+         }
+      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1356,7 +1369,7 @@ void velocity_function(const Vector &x, Vector &v)
          switch (dim)
          {
             case 1: v(0) = 1.0; break;
-            case 2: v(0) = sqrt(2./3.); v(1) = sqrt(1./3.); break;
+            case 2: v(0) = 1.0, v(1) = 1.0; break;
             case 3: v(0) = sqrt(3./6.); v(1) = sqrt(2./6.); v(2) = sqrt(1./6.);
                break;
          }
@@ -1533,7 +1546,7 @@ double ring(double rin, double rout, Vector c, Vector y)
    }
 }
 
-// Initial condition: lua function or hard-coded functions
+// Initial condition: hard-coded functions
 double u0_function(const Vector &x)
 {
    int dim = x.Size();
@@ -1556,8 +1569,12 @@ double u0_function(const Vector &x)
          switch (dim)
          {
             case 1:
-               return exp(-40.*pow(X(0)-0.5,2));
+               return (x(0) > 0.4 && x(0) < 0.6) ? 1.0 : 0.0;
             case 2:
+            {
+               return (x(0) > -0.2 && x(0) < 0.2 &&
+                       x(1) > -0.2 && x(1) < 0.2) ? 1.0 : 0.0;
+            }
             case 3:
             {
                double rx = 0.45, ry = 0.25, cx = 0., cy = -0.2, w = 10.;
