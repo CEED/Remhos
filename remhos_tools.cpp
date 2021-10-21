@@ -435,6 +435,8 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
    const int NE = pfes.GetNE();
 
    // Form min/max at each CG dof, considering element overlaps.
+   x_min.HostReadWrite();
+   x_max.HostReadWrite();
    x_min =   std::numeric_limits<double>::infinity();
    x_max = - std::numeric_limits<double>::infinity();
    for (int i = 0; i < NE; i++)
@@ -442,8 +444,6 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       // Inactive elements don't affect the bounds.
       if (active_el && (*active_el)[i] == false) { continue; }
 
-      x_min.HostReadWrite();
-      x_max.HostReadWrite();
       pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
@@ -488,17 +488,17 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
 }
 
 void DofInfo::ComputeElementsMinMax(const Vector &u,
-                                    Vector &u_min, Vector &u_max,
+                                    Vector &el_min, Vector &el_max,
                                     Array<bool> *active_el,
                                     Array<bool> *active_dof) const
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
-   u.HostRead(); u_min.HostReadWrite(); u_max.HostReadWrite();
+   u.HostRead(); el_min.HostReadWrite(); el_max.HostReadWrite();
    for (int k = 0; k < NE; k++)
    {
-      u_min(k) = numeric_limits<double>::infinity();
-      u_max(k) = -numeric_limits<double>::infinity();
+      el_min(k) = numeric_limits<double>::infinity();
+      el_max(k) = -numeric_limits<double>::infinity();
 
       // Inactive elements don't affect the bounds.
       if (active_el && (*active_el)[k] == false) { continue; }
@@ -509,8 +509,8 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
          // Inactive dofs don't affect the bounds.
          if (active_dof && (*active_dof)[dof_id] == false) { continue; }
 
-         u_min(k) = min(u_min(k), u(dof_id));
-         u_max(k) = max(u_max(k), u(dof_id));
+         el_min(k) = min(el_min(k), u(dof_id));
+         el_max(k) = max(el_max(k), u(dof_id));
       }
    }
 }
@@ -562,6 +562,44 @@ void DofInfo::ComputeElementMaxSparcityBound(const ParGridFunction &u,
          }
       }
    }
+}
+
+void DofInfo::ComputeLinMaxBound(const ParGridFunction &u,
+                                 ParGridFunction &u_lin_max)
+{
+   ParFiniteElementSpace *pfes_lin = u_lin_max.ParFESpace();
+   const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
+   int dof_id;
+   Vector el_max(NE);
+   u.HostRead(); el_max.HostReadWrite();
+   for (int k = 0; k < NE; k++)
+   {
+      el_max(k) = -numeric_limits<double>::infinity();
+
+      for (int i = 0; i < ndof; i++)
+      {
+         dof_id = k*ndof + i;
+         el_max(k) = max(el_max(k), u(dof_id));
+      }
+   }
+
+   // Form min/max at each CG dof, considering element overlaps.
+   u_lin_max.HostReadWrite();
+   u_lin_max = -std::numeric_limits<double>::infinity();
+   Array<int> dofs;
+   for (int i = 0; i < NE; i++)
+   {
+      u_lin_max.HostReadWrite();
+      pfes_lin->GetElementDofs(i, dofs);
+      for (int j = 0; j < dofs.Size(); j++)
+      {
+         u_lin_max(dofs[j]) = std::max(u_lin_max(dofs[j]), el_max(i));
+      }
+   }
+   GroupCommunicator &gcomm = pfes_lin->GroupComm();
+   Array<double> maxvals(u_lin_max.GetData(), u_lin_max.Size());
+   gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
+   gcomm.Bcast(maxvals);
 }
 
 void DofInfo::FillNeighborDofs()
@@ -1115,6 +1153,42 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
    }
 }
 
+void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
+                               const IntegrationPoint &ip)
+{
+   Vector grad(vdim);
+   double um = u_max.GetValue(T, ip);
+   u_max.GetGradient(T, grad);
+   v_coeff.Eval(V, T, ip);
+
+   // front
+   if (grad * V + 1e-12 < 0.0)
+   {
+      if (um < interface_val)
+      {
+         // um = 0.0   -> 0.
+         // um = i_val -> v
+         for (int d = 0; d < vdim; d++)
+         {
+            V(d) = um / interface_val * V(d);
+         }
+      }
+   }
+   // tail
+//   if (grad * V - 1e-12 > 0.0)
+//   {
+//      if (um < interface_val)
+//      {
+//         // um = 0.0   -> 1.2 v.
+//         // um = i_val -> v
+//         for (int d = 0; d < vdim; d++)
+//         {
+//            V(d) = (-0.2 * um / interface_val + 1.2) * V(d);
+//         }
+//      }
+//   }
+}
+
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
@@ -1522,7 +1596,7 @@ void ComputeDiscreteUpwindingMatrix(const SparseMatrix &K,
          Dp[smap[k]] = kji + dij;
          if (i != j) { rowsum += dij; }
       }
-      D(i,i) = K(i,i) -rowsum;
+      D(i,i) = K(i,i) - rowsum;
    }
 }
 

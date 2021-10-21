@@ -313,8 +313,7 @@ int main(int argc, char *argv[])
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
-      VectorFunctionCoefficient vcoeff(dim, velocity_function);
-      v.ProjectCoefficient(vcoeff);
+      v.ProjectCoefficient(velocity);
 
       double t = 0.0;
       while (t < t_final)
@@ -323,7 +322,7 @@ int main(int argc, char *argv[])
          // Move the mesh nodes.
          x.Add(std::min(dt, t_final-t), v);
          // Update the node velocities.
-         v.ProjectCoefficient(vcoeff);
+         v.ProjectCoefficient(velocity);
       }
 
       // Pseudotime velocity.
@@ -332,6 +331,15 @@ int main(int argc, char *argv[])
       // Return the mesh to the initial configuration.
       x = x0;
    }
+
+   H1_FECollection lin_fec(1, dim);
+   ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec);
+   ParGridFunction u_max_bounds(&lin_pfes);
+   u_max_bounds = 1.0;
+
+   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 1.0);
+   ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
+   ParGridFunction v_new_vis(&lin_vec_pfes);
 
    // Define the discontinuous DG finite element space of the given
    // polynomial order on the refined mesh.
@@ -389,12 +397,15 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
+   VectorCoefficient *used_v = &velocity;
+   used_v = &v_new_coeff;
+
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      k.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
    }
    else if (exec_mode == 1)
    {
@@ -408,8 +419,8 @@ int main(int argc, char *argv[])
    {
       if (exec_mode == 0)
       {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(velocity, 1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(velocity, 1.0, -0.5);
+         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
+         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
@@ -503,7 +514,7 @@ int main(int argc, char *argv[])
       }
    }
    if (exec_mode == 1) { lom.coef = &v_coef; }
-   else                { lom.coef = &velocity; }
+   else                { lom.coef = used_v; }
 
    // Face integration rule.
    const FaceElementTransformations *ft =
@@ -594,8 +605,8 @@ int main(int argc, char *argv[])
       // Integrator on the submesh.
       if (exec_mode == 0)
       {
-         lom.subcellCoeff = &velocity;
-         lom.VolumeTerms = new MixedConvectionIntegrator(velocity, -1.0);
+         lom.subcellCoeff = used_v;
+         lom.VolumeTerms = new MixedConvectionIntegrator(*used_v, -1.0);
       }
       else if (exec_mode == 1)
       {
@@ -767,7 +778,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_s, vis_us;
+   socketstream sout, vis_b, vis_v_new, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -883,19 +894,22 @@ int main(int argc, char *argv[])
 
       const double interface_value = 1.0;
       const int nd = pfes.GetFE(0)->GetDof();
-      Vector el_max;
+      Vector el_min(NE), el_max(NE);
       dof_info.ComputeElementMaxSparcityBound(u, 4, el_max);
+      dof_info.ComputeElementsMinMax(u, el_min, el_max, NULL, NULL);
+      dof_info.ComputeLinMaxBound(u, u_max_bounds);
+      v_new_vis.ProjectCoefficient(v_new_coeff);
 
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-      for (int k = 0; k < NE; k++)
-      {
-         if (el_max(k) + 0.2 < interface_value)
-         {
-            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
-         }
-      }
+//      for (int k = 0; k < NE; k++)
+//      {
+//         if (el_max(k) + 0.2 < interface_value)
+//         {
+//            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
+//         }
+//      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1008,6 +1022,10 @@ int main(int argc, char *argv[])
             int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution",
                            Wx, Wy, Ww, Wh);
+            VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
+                           Wx+400, Wy, Ww, Wh);
+            VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
+                           Wx+800, Wy, Ww, Wh);
             if (product_sync)
             {
                // Recompute s = u_s / u.
@@ -1085,6 +1103,10 @@ int main(int argc, char *argv[])
               << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
       }
    }
+
+   ConstantCoefficient zero(0.0);
+   double norm = u.ComputeL2Error(zero);
+   if (myid == 0) { cout << setprecision(12) << "L2-norm: " << norm << endl; }
 
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
@@ -1219,7 +1241,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       const int dim = mesh->Dimension(), ne = mesh->GetNE();
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
-
       if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
       {
          RD_ptr->SampleVelocity(FaceType::Interior);
@@ -1243,6 +1264,29 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          }
       }
    }
+
+   // sharpening.
+   K_HO.BilinearForm::operator=(0.0);
+   K_HO.Assemble(0);
+   // Face contributions.
+   asmbl.bdrInt = 0.;
+   Mesh *mesh = M_HO.FESpace()->GetMesh();
+   const int dim = mesh->Dimension(), ne = mesh->GetNE();
+   Array<int> bdrs, orientation;
+   FaceElementTransformations *Trans;
+   for (int k = 0; k < ne; k++)
+   {
+      if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+      else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+      else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+
+      for (int i = 0; i < dofs.numBdrs; i++)
+      {
+         Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+         asmbl.ComputeFluxTerms(k, i, Trans, lom);
+      }
+   }
+
 
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();

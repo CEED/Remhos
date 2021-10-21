@@ -166,11 +166,13 @@ public:
 
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,
-                              Vector &u_min, Vector &u_max,
+                              Vector &el_min, Vector &el_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
    void ComputeElementMaxSparcityBound(const ParGridFunction &u,
                                        int nbr_level, Vector &el_max);
+   void ComputeLinMaxBound(const ParGridFunction &u,
+                           ParGridFunction &u_lin_max);
 };
 
 class Assembly
@@ -258,6 +260,23 @@ public:
                                        const FiniteElement &te_el,
                                        ElementTransformation &Trans,
                                        DenseMatrix &elmat);
+};
+
+class VelocityCoefficient : public VectorCoefficient
+{
+private:
+   const ParGridFunction &u_max;
+   VectorCoefficient &v_coeff;
+   const double interface_val;
+
+public:
+   VelocityCoefficient(VectorCoefficient &vc, const ParGridFunction &umax,
+                       double interface)
+      : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
+        v_coeff(vc), u_max(umax), interface_val(interface) { }
+
+   virtual void Eval(Vector &V, ElementTransformation &T,
+                     const IntegrationPoint &ip);
 };
 
 } // namespace mfem
