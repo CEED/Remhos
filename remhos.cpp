@@ -337,7 +337,7 @@ int main(int argc, char *argv[])
    ParGridFunction u_max_bounds(&lin_pfes);
    u_max_bounds = 1.0;
 
-   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 1.0);
+   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 0.1);
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
 
