@@ -1161,8 +1161,10 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
    u_max.GetGradient(T, grad);
    v_coeff.Eval(V, T, ip);
 
+   const double grad_eps = 1e-15;
+
    // Front.
-   if (grad * V < 0.0 && um < interface_val)
+   if (grad * V + grad_eps < 0.0 && um < interface_val)
    {
       // um = 0.0   -> 0.
       // um = i_val -> v
@@ -1171,11 +1173,13 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
          V(d) = um / interface_val * V(d);
       }
    }
+
+   return;
    // Tail.
    double tail_value = 1.0;
-   if (grad * V > 0.0 && um < tail_value)
+   if (grad * V - grad_eps > 0.0 && um < tail_value)
    {
-      const double v_factor = 10.0;
+      const double v_factor = 2.0;
 
       // 1. map linearly um from [0, i_val] to [0, 1].
       // 2. compute velocity: um = 0 -> v = 0

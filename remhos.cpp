@@ -337,7 +337,7 @@ int main(int argc, char *argv[])
    ParGridFunction u_max_bounds(&lin_pfes);
    u_max_bounds = 1.0;
 
-   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 0.1);
+   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 1e-2);
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
 
@@ -892,24 +892,26 @@ int main(int argc, char *argv[])
 #endif
       }
 
-      const double interface_value = 1.0;
+      const double interface_value = 1e-2;
       const int nd = pfes.GetFE(0)->GetDof();
-      Vector el_min(NE), el_max(NE);
-      dof_info.ComputeElementMaxSparcityBound(u, 4, el_max);
-      dof_info.ComputeElementsMinMax(u, el_min, el_max, NULL, NULL);
+      Vector el_max(NE);
+      // needed for cutting.
+      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
+      // needed for velocity modifications.
       dof_info.ComputeLinMaxBound(u, u_max_bounds);
+      // needed for velocity visualization.
       v_new_vis.ProjectCoefficient(v_new_coeff);
 
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-//      for (int k = 0; k < NE; k++)
-//      {
-//         if (el_max(k) + 0.2 < interface_value)
-//         {
-//            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
-//         }
-//      }
+      for (int k = 0; k < NE; k++)
+      {
+         if (el_max(k) < interface_value)
+         {
+            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
+         }
+      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
