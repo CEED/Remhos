@@ -268,12 +268,14 @@ private:
    const ParGridFunction &u_max;
    VectorCoefficient &v_coeff;
    const double interface_val;
+   int exec_mode;
 
 public:
    VelocityCoefficient(VectorCoefficient &vc, const ParGridFunction &umax,
-                       double interface)
+                       double interface, int mode)
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
-        v_coeff(vc), u_max(umax), interface_val(interface) { }
+        v_coeff(vc), u_max(umax),
+        interface_val(interface), exec_mode(mode) { }
 
    virtual void Eval(Vector &V, ElementTransformation &T,
                      const IntegrationPoint &ip);

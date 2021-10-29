@@ -1157,27 +1157,35 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
    Vector grad(vdim);
-   double um = u_max.GetValue(T, ip), f;
-   u_max.GetGradient(T, grad);
+   const double umax = u_max.GetValue(T, ip);
    v_coeff.Eval(V, T, ip);
 
-   const double grad_eps = 1e-15;
+   // No moidfications.
+   if (umax >= interface_val) { return; }
 
-   // Front.
-   if (grad * V + grad_eps < 0.0 && um < interface_val)
+   const double grad_eps = 1e-15;
+   u_max.GetGradient(T, grad);
+
+   bool at_front = false;
+   if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
+   if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
+
+   // Front - slowdown the propagation into new cells.
+   if (at_front)
    {
       // um = 0.0   -> 0.
       // um = i_val -> v
       for (int d = 0; d < vdim; d++)
       {
-         V(d) = um / interface_val * V(d);
+         V(d) = umax / interface_val * V(d);
       }
    }
 
    return;
+
    // Tail.
    double tail_value = 1.0;
-   if (grad * V - grad_eps > 0.0 && um < tail_value)
+   if (grad * V - grad_eps > 0.0 && umax < tail_value)
    {
       const double v_factor = 2.0;
 
@@ -1187,10 +1195,10 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
       // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
 
       // linear map x: um -> [0, 1].
-      double x = um / tail_value;
+      double x = umax / tail_value;
 
       // compute f : x -> [0, 1].
-      f = x;
+      double f = x;
       //f = x * x * x * x * x;
 
       // linear map V(d) : f -> [v_factor * v, v].

@@ -337,7 +337,8 @@ int main(int argc, char *argv[])
    ParGridFunction u_max_bounds(&lin_pfes);
    u_max_bounds = 1.0;
 
-   VelocityCoefficient v_new_coeff(velocity, u_max_bounds, 1e-2);
+   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, 1e-2, 0);
+   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, 1e-2, 1);
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
 
@@ -397,8 +398,9 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
-   VectorCoefficient *used_v = &velocity;
-   used_v = &v_new_coeff;
+   VectorCoefficient *used_v;
+   if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
+   if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -409,8 +411,8 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      k.AddDomainIntegrator(new ConvectionIntegrator(*used_v));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(*used_v));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -426,8 +428,8 @@ int main(int argc, char *argv[])
       }
       else if (exec_mode == 1)
       {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
+         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
@@ -513,7 +515,7 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_coef; }
+   if (exec_mode == 1) { lom.coef = used_v; }
    else                { lom.coef = used_v; }
 
    // Face integration rule.
@@ -900,7 +902,11 @@ int main(int argc, char *argv[])
       // needed for velocity modifications.
       dof_info.ComputeLinMaxBound(u, u_max_bounds);
       // needed for velocity visualization.
-      v_new_vis.ProjectCoefficient(v_new_coeff);
+      if (exec_mode == 0)
+      {
+         v_new_vis.ProjectCoefficient(v_new_coeff_adv);
+      }
+      else { v_new_vis.ProjectCoefficient(v_new_coeff_rem); }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -1500,14 +1506,20 @@ void velocity_function(const Vector &x, Vector &v)
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
 
-         if (dim == 1) { MFEM_ABORT("Not implemented."); }
-         v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
-         v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
-         if (dim == 3)
+         if (dim == 1)
          {
-            v(0) *= cos(M_PI*X(2));
-            v(1) *= cos(M_PI*X(2));
-            v(2) = 0.0;
+            v(0) =  sin(M_PI*X(0));
+         }
+         else
+         {
+            v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
+            v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
+            if (dim == 3)
+            {
+               v(0) *= cos(M_PI*X(2));
+               v(1) *= cos(M_PI*X(2));
+               v(2) = 0.0;
+            }
          }
          break;
       }
@@ -1618,6 +1630,11 @@ double u0_function(const Vector &x)
                return (x(0) > 0.4 && x(0) < 0.6) ? 1.0 : 0.0;
             case 2:
             {
+               if (problem_num == 10)
+               {
+                  return (x(0) > 0.4 && x(0) < 0.6 &&
+                          x(1) > 0.4 && x(1) < 0.6) ? 1.0 : 0.0;
+               }
                return (x(0) > -0.2 && x(0) < 0.2 &&
                        x(1) > -0.2 && x(1) < 0.2) ? 1.0 : 0.0;
             }
