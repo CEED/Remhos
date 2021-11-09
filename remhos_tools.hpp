@@ -265,16 +265,21 @@ public:
 class VelocityCoefficient : public VectorCoefficient
 {
 private:
-   const ParGridFunction &u_max;
+   const ParGridFunction &u_max, &w_max;
    VectorCoefficient &v_coeff;
    const double interface_val;
    int exec_mode;
 
 public:
-   VelocityCoefficient(VectorCoefficient &vc, const ParGridFunction &umax,
+   // dynamic options.
+   bool slow_front_v = false,
+        slow_front_w = false;
+
+   VelocityCoefficient(VectorCoefficient &vc,
+                       const ParGridFunction &umax, const ParGridFunction &wmax,
                        double interface, int mode)
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
-        v_coeff(vc), u_max(umax),
+        v_coeff(vc), u_max(umax), w_max(wmax),
         interface_val(interface), exec_mode(mode) { }
 
    virtual void Eval(Vector &V, ElementTransformation &T,

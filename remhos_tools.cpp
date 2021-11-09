@@ -1156,57 +1156,86 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
-   Vector grad(vdim);
-   const double umax = u_max.GetValue(T, ip);
    v_coeff.Eval(V, T, ip);
 
-   // No moidfications.
-   if (umax >= interface_val) { return; }
-
    const double grad_eps = 1e-15;
-   u_max.GetGradient(T, grad);
-
-   bool at_front = false;
-   if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
-   if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
-
-   // Front - slowdown the propagation into new cells.
-   if (at_front)
+   Vector grad(vdim);
+   if (slow_front_v)
    {
-      // um = 0.0   -> 0.
-      // um = i_val -> v
-      for (int d = 0; d < vdim; d++)
+      const double max = u_max.GetValue(T, ip);
+
+      // No modifications.
+      if (max < interface_val)
       {
-         V(d) = umax / interface_val * V(d);
+         u_max.GetGradient(T, grad);
+
+         bool at_front = false;
+         if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
+         if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
+
+         // Front - slowdown the propagation into new cells.
+         if (at_front)
+         {
+            // um = 0.0   -> 0.
+            // um = i_val -> v
+            for (int d = 0; d < vdim; d++)
+            {
+               V(d) = max / interface_val * V(d);
+            }
+         }
       }
    }
 
-   return;
+   if (slow_front_w)
+   {
+      const double max = w_max.GetValue(T, ip);
+
+      // No modifications.
+      if (max < interface_val)
+      {
+         w_max.GetGradient(T, grad);
+
+         bool at_front = false;
+         if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
+         if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
+
+         // Front - slowdown the propagation into new cells.
+         if (at_front)
+         {
+            // um = 0.0   -> 0.
+            // um = i_val -> v
+            for (int d = 0; d < vdim; d++)
+            {
+               V(d) = max / interface_val * V(d);
+            }
+         }
+      }
+   }
 
    // Tail.
-   double tail_value = 1.0;
-   if (grad * V - grad_eps > 0.0 && umax < tail_value)
-   {
-      const double v_factor = 2.0;
+//   double tail_value = 1.0;
+//   if (grad * V - grad_eps > 0.0 && umax < tail_value)
+//   {
+//      const double v_factor = 2.0;
 
-      // 1. map linearly um from [0, i_val] to [0, 1].
-      // 2. compute velocity: um = 0 -> v = 0
-      //                      um = 1 -> v = 1
-      // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
+//      // 1. map linearly um from [0, i_val] to [0, 1].
+//      // 2. compute velocity: um = 0 -> v = 0
+//      //                      um = 1 -> v = 1
+//      // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
 
-      // linear map x: um -> [0, 1].
-      double x = umax / tail_value;
+//      // linear map x: um -> [0, 1].
+//      double x = umax / tail_value;
 
-      // compute f : x -> [0, 1].
-      double f = x;
-      //f = x * x * x * x * x;
+//      // compute f : x -> [0, 1].
+//      double f = x;
+//      //f = x * x * x * x * x;
 
-      // linear map V(d) : f -> [v_factor * v, v].
-      for (int d = 0; d < vdim; d++)
-      {
-         V(d) = (1.0 - v_factor) * V(d) * f + v_factor * V(d);
-      }
-   }
+//      // linear map V(d) : f -> [v_factor * v, v].
+//      for (int d = 0; d < vdim; d++)
+//      {
+//         V(d) = (1.0 - v_factor) * V(d) * f + v_factor * V(d);
+//      }
+//   }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,

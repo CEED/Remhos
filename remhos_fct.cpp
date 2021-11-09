@@ -680,7 +680,7 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
          beta(i) = ML(i);
          //beta(i) = Mxy(i);
 
-         // The low order flux correction
+         // The low order flux correction.
          z(i) = rhs(i) - ML(i) * du_LO_loc(i);
       }
 

@@ -60,6 +60,7 @@ void velocity_function(const Vector &x, Vector &v);
 
 // Initial condition
 double u0_function(const Vector &x);
+double w0_function(const Vector &x);
 double s0_function(const Vector &x);
 
 // Inflow boundary condition
@@ -74,6 +75,7 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
+   VelocityCoefficient &v_coeff;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -97,6 +99,7 @@ public:
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                     VelocityCoefficient &vcoeff,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
@@ -334,11 +337,12 @@ int main(int argc, char *argv[])
 
    H1_FECollection lin_fec(1, dim);
    ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec);
-   ParGridFunction u_max_bounds(&lin_pfes);
+   ParGridFunction u_max_bounds(&lin_pfes), w_max_bounds(&lin_pfes);
    u_max_bounds = 1.0;
+   w_max_bounds = 1.0;
 
-   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, 1e-2, 0);
-   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, 1e-2, 1);
+   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds, 1e-2, 0);
+   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds, 1e-2, 1);
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
 
@@ -398,7 +402,7 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
-   VectorCoefficient *used_v;
+   VelocityCoefficient *used_v;
    if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
    if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
@@ -684,7 +688,7 @@ int main(int argc, char *argv[])
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? 3 : 2);
+   Array<int> offset((product_sync) ? 4 : 3);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
@@ -693,6 +697,11 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
+   ParGridFunction w(&pfes);
+   w.MakeRef(&pfes, S, offset[1]);
+   FunctionCoefficient w0(w0_function);
+   w.ProjectCoefficient(w0);
+   w.SyncAliasMemory(S);
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -703,7 +712,7 @@ int main(int argc, char *argv[])
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
 
-      us.MakeRef(&pfes, S, offset[1]);
+      us.MakeRef(&pfes, S, offset[2]);
       double *h_us = us.HostWrite();
       const double *h_u = u.HostRead();
       const double *h_s = s.HostRead();
@@ -780,7 +789,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_b, vis_v_new, vis_s, vis_us;
+   socketstream sout, vis_b, vis_v_new, vis_s, vis_us, vis_w;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -792,12 +801,14 @@ int main(int argc, char *argv[])
       sout.precision(8);
       vis_s.precision(8);
       vis_us.precision(8);
+      vis_w.precision(8);
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 400, Wh = 400; // window size
       u.HostRead();
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -846,7 +857,7 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO, *used_v,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -894,13 +905,9 @@ int main(int argc, char *argv[])
 #endif
       }
 
-      const double interface_value = 1e-2;
-      const int nd = pfes.GetFE(0)->GetDof();
-      Vector el_max(NE);
-      // needed for cutting.
-      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
       // needed for velocity modifications.
       dof_info.ComputeLinMaxBound(u, u_max_bounds);
+      dof_info.ComputeLinMaxBound(w, w_max_bounds);
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
@@ -911,13 +918,18 @@ int main(int argc, char *argv[])
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-      for (int k = 0; k < NE; k++)
-      {
-         if (el_max(k) < interface_value)
-         {
-            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
-         }
-      }
+      // Perform cutting.
+//      Vector el_max(NE);
+//      const double interface_value = 1e-2;
+//      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
+//      const int nd = pfes.GetFE(0)->GetDof();
+//      for (int k = 0; k < NE; k++)
+//      {
+//         if (el_max(k) < interface_value)
+//         {
+//            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
+//         }
+//      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1028,8 +1040,10 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
-            VisualizeField(sout, vishost, visport, u, "Solution",
+            VisualizeField(sout, vishost, visport, u, "Solution u",
                            Wx, Wy, Ww, Wh);
+            VisualizeField(vis_w, vishost, visport, w, "Solution w",
+                           Wx, 400, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
             VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
@@ -1191,6 +1205,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     VelocityCoefficient &vcoeff,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
                                      Assembly &_asmbl,
@@ -1198,7 +1213,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_),
+   M_HO(M_HO_), K_HO(K_HO_), v_coeff(vcoeff),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
@@ -1273,62 +1288,75 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
    }
 
-   // sharpening.
-   K_HO.BilinearForm::operator=(0.0);
-   K_HO.Assemble(0);
-   // Face contributions.
-   asmbl.bdrInt = 0.;
    Mesh *mesh = M_HO.FESpace()->GetMesh();
-   const int dim = mesh->Dimension(), ne = mesh->GetNE();
-   Array<int> bdrs, orientation;
-   FaceElementTransformations *Trans;
-   for (int k = 0; k < ne; k++)
-   {
-      if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-      else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-      else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-      for (int i = 0; i < dofs.numBdrs; i++)
-      {
-         Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-         asmbl.ComputeFluxTerms(k, i, Trans, lom);
-      }
-   }
-
-
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();
+   const int dim  = mesh->Dimension();
 
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
    Vector u, d_u;
-   Vector* xptr = const_cast<Vector*>(&X);
-   u.MakeRef(*xptr, 0, size);
-   d_u.MakeRef(Y, 0, size);
-   Vector du_HO(u.Size()), du_LO(u.Size());
-
-   x_gf = u;
-   x_gf.ExchangeFaceNbrData();
-
-   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
-   else if (fct_solver)
+   Vector* xptr;
+   for (int m = 0; m < 2; m++)
    {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+      // sharpening - recompute for each material.
+      if (m == 0)
+      {
+         v_coeff.slow_front_v = true;
+         v_coeff.slow_front_w = false;
+      }
+      if (m == 1)
+      {
+         v_coeff.slow_front_v = false;
+         v_coeff.slow_front_w = true;
+      }
+      K_HO.BilinearForm::operator=(0.0);
+      K_HO.Assemble(0);
+      // Face contributions.
+      asmbl.bdrInt = 0.;
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+      for (int k = 0; k < NE; k++)
+      {
+         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
+         for (int i = 0; i < dofs.numBdrs; i++)
+         {
+            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+            asmbl.ComputeFluxTerms(k, i, Trans, lom);
+         }
+      }
 
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
+      xptr = const_cast<Vector*>(&X);
+      u.MakeRef(*xptr, m*size, size);
+      d_u.MakeRef(Y, m*size, size);
+      Vector du_HO(u.Size()), du_LO(u.Size());
+
+      x_gf = u;
+      x_gf.ExchangeFaceNbrData();
+
+      if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
+      else if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         lo_solver->CalcLOSolution(u, du_LO);
+         ho_solver->CalcHOSolution(u, du_HO);
+
+         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                     dofs.xi_min, dofs.xi_max, d_u);
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      d_u.SyncAliasMemory(Y);
    }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
-   else { MFEM_ABORT("No solver was chosen."); }
-
-   d_u.SyncAliasMemory(Y);
 
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
@@ -1627,7 +1655,7 @@ double u0_function(const Vector &x)
          switch (dim)
          {
             case 1:
-               return (x(0) > 0.4 && x(0) < 0.6) ? 1.0 : 0.0;
+               return (x(0) > 0.3 && x(0) < 0.5) ? 1.0 : 0.0;
             case 2:
             {
                if (problem_num == 10)
@@ -1768,6 +1796,11 @@ double u0_function(const Vector &x)
       }
    }
    return 0.0;
+}
+
+double w0_function(const Vector &x)
+{
+   return (x(0) > 0.5 && x(0) < 0.7) ? 1.0 : 0.0;
 }
 
 double s0_function(const Vector &x)
