@@ -94,6 +94,8 @@ private:
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
 
+   void AssembleAndEvolve(Vector &u, Vector &du) const;
+
 public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
@@ -697,11 +699,12 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
-   ParGridFunction w(&pfes);
+   ParGridFunction w(&pfes), u_plus_w(&pfes);
    w.MakeRef(&pfes, S, offset[1]);
    FunctionCoefficient w0(w0_function);
    w.ProjectCoefficient(w0);
    w.SyncAliasMemory(S);
+   for (int i = 0; i < vsize; i++) { u_plus_w(i) = u(i) + w(i); }
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -789,7 +792,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_b, vis_v_new, vis_s, vis_us, vis_w;
+   socketstream sout, vis_b, vis_v_new, vis_s, vis_us, vis_w, vis_upw;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -802,6 +805,7 @@ int main(int argc, char *argv[])
       vis_s.precision(8);
       vis_us.precision(8);
       vis_w.precision(8);
+      vis_upw.precision(8);
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 400, Wh = 400; // window size
@@ -809,6 +813,7 @@ int main(int argc, char *argv[])
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
+      VisualizeField(vis_upw, vishost, visport, w, "Solution u+w", Wx, 800, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -911,9 +916,16 @@ int main(int argc, char *argv[])
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
+         v_new_coeff_adv.slow_front_v = true;
+         v_new_coeff_adv.slow_front_w = true;
          v_new_vis.ProjectCoefficient(v_new_coeff_adv);
       }
-      else { v_new_vis.ProjectCoefficient(v_new_coeff_rem); }
+      else
+      {
+         v_new_coeff_rem.slow_front_v = true;
+         v_new_coeff_rem.slow_front_w = true;
+         v_new_vis.ProjectCoefficient(v_new_coeff_rem);
+      }
 
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -1036,6 +1048,7 @@ int main(int argc, char *argv[])
                  << residual << endl;
          }
 
+         for (int i = 0; i < vsize; i++) { u_plus_w(i) = u(i) + w(i); }
          if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
@@ -1044,6 +1057,8 @@ int main(int argc, char *argv[])
                            Wx, Wy, Ww, Wh);
             VisualizeField(vis_w, vishost, visport, w, "Solution w",
                            Wx, 400, Ww, Wh);
+            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution u+w",
+                           Wx, 800, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
             VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
@@ -1127,8 +1142,12 @@ int main(int argc, char *argv[])
    }
 
    ConstantCoefficient zero(0.0);
-   double norm = u.ComputeL2Error(zero);
-   if (myid == 0) { cout << setprecision(12) << "L2-norm: " << norm << endl; }
+   double norm_u = u.ComputeL2Error(zero), norm_w = w.ComputeL2Error(zero);
+   if (myid == 0)
+   {
+      cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
+      cout << setprecision(12) << "L2-norm w: " << norm_w << endl;
+   }
 
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
@@ -1288,78 +1307,84 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
    }
 
-   Mesh *mesh = M_HO.FESpace()->GetMesh();
    const int size = Kbf.ParFESpace()->GetVSize();
    const int NE   = Kbf.ParFESpace()->GetNE();
-   const int dim  = mesh->Dimension();
 
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector u, d_u;
-   Vector* xptr;
-   for (int m = 0; m < 2; m++)
+   Vector delta_u(size), delta_w(size);
+
+   Vector u, w, d_u, d_w;
+   Vector *xptr = const_cast<Vector*>(&X);
+
+   // Compute du with modification.
+   v_coeff.slow_front_v = true;
+   v_coeff.slow_front_w = false;
+   u.MakeRef(*xptr, 0, size);
+   d_u.MakeRef(Y, 0, size);
+   AssembleAndEvolve(u, d_u);
+
+   // Compute du without modification.
+   Vector d_u_unmod(size);
+   v_coeff.slow_front_v = false;
+   v_coeff.slow_front_w = false;
+   AssembleAndEvolve(u, d_u_unmod);
+
+   for (int i = 0; i < size; i++)
    {
-      // sharpening - recompute for each material.
-      if (m == 0)
-      {
-         v_coeff.slow_front_v = true;
-         v_coeff.slow_front_w = false;
-      }
-      if (m == 1)
-      {
-         v_coeff.slow_front_v = false;
-         v_coeff.slow_front_w = true;
-      }
-      K_HO.BilinearForm::operator=(0.0);
-      K_HO.Assemble(0);
-      // Face contributions.
-      asmbl.bdrInt = 0.;
-      Array<int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-      for (int k = 0; k < NE; k++)
-      {
-         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-         for (int i = 0; i < dofs.numBdrs; i++)
-         {
-            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.ComputeFluxTerms(k, i, Trans, lom);
-         }
-      }
-
-      xptr = const_cast<Vector*>(&X);
-      u.MakeRef(*xptr, m*size, size);
-      d_u.MakeRef(Y, m*size, size);
-      Vector du_HO(u.Size()), du_LO(u.Size());
-
-      x_gf = u;
-      x_gf.ExchangeFaceNbrData();
-
-      if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
-      else if (fct_solver)
-      {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-         lo_solver->CalcLOSolution(u, du_LO);
-         ho_solver->CalcHOSolution(u, du_HO);
-
-         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                     dofs.xi_min, dofs.xi_max, d_u);
-      }
-      else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
-      else { MFEM_ABORT("No solver was chosen."); }
-
-      d_u.SyncAliasMemory(Y);
+      delta_u(i) = d_u(i) - d_u_unmod(i);
    }
 
+   // Compute dw with modification.
+   v_coeff.slow_front_v = false;
+   v_coeff.slow_front_w = true;
+   w.MakeRef(*xptr, size, size);
+   d_w.MakeRef(Y, size, size);
+   AssembleAndEvolve(w, d_w);
+
+   // Compute dw without modification.
+   Vector d_w_unmod(size);
+   v_coeff.slow_front_v = false;
+   v_coeff.slow_front_w = false;
+   AssembleAndEvolve(w, d_w_unmod);
+
+   for (int i = 0; i < size; i++)
+   {
+      delta_w(i) = d_w(i) - d_w_unmod(i);
+   }
+
+//   for (int i = 0; i < size; i++)
+//   {
+//      if (delta_u(i) > 1e-15)
+//      {
+//         // d_w(i) -= delta_u(i);
+//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
+//      }
+//      if (delta_u(i) < -1e-15)
+//      {
+//         // d_w(i) += delta_u(i);
+//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
+//      }
+//      if (delta_w(i) > 1e-15)
+//      {
+//         //d_u(i) -= delta_w(i);
+//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
+//      }
+//      if (delta_w(i) < -1e-15)
+//      {
+//         //d_u(i) += delta_w(i);
+//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
+//      }
+//   }
+   d_u = d_u_unmod;
+   d_w = d_w_unmod;
+
+   d_u.SyncAliasMemory(Y);
+   d_w.SyncAliasMemory(Y);
+
    // Remap the product field, if there is a product field.
-   if (X.Size() > size)
+   if (X.Size() > 2*size)
    {
       Vector us, d_us;
       us.MakeRef(*xptr, size, size);
@@ -1424,6 +1449,56 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       d_us.SyncAliasMemory(Y);
    }
+}
+
+void AdvectionOperator::AssembleAndEvolve(Vector &u, Vector &du) const
+{
+   Mesh *mesh = M_HO.FESpace()->GetMesh();
+   const int dim  = mesh->Dimension();
+   const int NE   = Kbf.ParFESpace()->GetNE();
+
+   // Assemble.
+   Kbf.BilinearForm::operator=(0.0);
+   Kbf.Assemble(0);
+   K_HO.BilinearForm::operator=(0.0);
+   K_HO.Assemble(0);
+   // Face contributions.
+   asmbl.bdrInt = 0.;
+   Array<int> bdrs, orientation;
+   FaceElementTransformations *Trans;
+   for (int k = 0; k < NE; k++)
+   {
+      if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+      else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+      else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+
+      for (int i = 0; i < dofs.numBdrs; i++)
+      {
+         Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+         asmbl.ComputeFluxTerms(k, i, Trans, lom);
+      }
+   }
+
+   // Evolve.
+   Vector du_HO(u.Size()), du_LO(u.Size());
+   x_gf = u;
+   x_gf.ExchangeFaceNbrData();
+   if (mono_solver) { mono_solver->CalcSolution(u, du); }
+   else if (fct_solver)
+   {
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      lo_solver->CalcLOSolution(u, du_LO);
+      ho_solver->CalcHOSolution(u, du_HO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, du);
+   }
+   else if (lo_solver) { lo_solver->CalcLOSolution(u, du); }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, du); }
+   else { MFEM_ABORT("No solver was chosen."); }
 }
 
 // Velocity coefficient
@@ -1655,7 +1730,7 @@ double u0_function(const Vector &x)
          switch (dim)
          {
             case 1:
-               return (x(0) > 0.3 && x(0) < 0.5) ? 1.0 : 0.0;
+               return (x(0) > 0.3 && x(0) < 0.7) ? 1.0 : 0.0;
             case 2:
             {
                if (problem_num == 10)
@@ -1800,7 +1875,7 @@ double u0_function(const Vector &x)
 
 double w0_function(const Vector &x)
 {
-   return (x(0) > 0.5 && x(0) < 0.7) ? 1.0 : 0.0;
+   return (x(0) > 0.3 && x(0) < 0.7) ? 0.0 : 1.0;
 }
 
 double s0_function(const Vector &x)
