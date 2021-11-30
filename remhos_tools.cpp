@@ -1153,25 +1153,26 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
    }
 }
 
-void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
+void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
-   v_coeff.Eval(V, T, ip);
+   v_coeff.Eval(v, T, ip);
+   Vector v_new(v);
 
-   const double grad_eps = 1e-15;
+   const double eps = 1e-15;
    Vector grad(vdim);
-   if (slow_front_v)
+   if (slow_front_u)
    {
       const double max = u_max.GetValue(T, ip);
 
       // No modifications.
-      if (max < interface_val)
+      if (max + eps < interface_val)
       {
          u_max.GetGradient(T, grad);
 
          bool at_front = false;
-         if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
-         if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
+         if (exec_mode == 0 && grad * v + eps < 0.0) { at_front = true; }
+         if (exec_mode == 1 && grad * v - eps > 0.0) { at_front = true; }
 
          // Front - slowdown the propagation into new cells.
          if (at_front)
@@ -1180,7 +1181,7 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
             // um = i_val -> v
             for (int d = 0; d < vdim; d++)
             {
-               V(d) = max / interface_val * V(d);
+               v_new(d) = max / interface_val * v(d);
             }
          }
       }
@@ -1191,13 +1192,13 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
       const double max = w_max.GetValue(T, ip);
 
       // No modifications.
-      if (max < interface_val)
+      if (max + eps < interface_val)
       {
          w_max.GetGradient(T, grad);
 
          bool at_front = false;
-         if (exec_mode == 0 && grad * V + grad_eps < 0.0) { at_front = true; }
-         if (exec_mode == 1 && grad * V - grad_eps > 0.0) { at_front = true; }
+         if (exec_mode == 0 && grad * v + eps < 0.0) { at_front = true; }
+         if (exec_mode == 1 && grad * v - eps > 0.0) { at_front = true; }
 
          // Front - slowdown the propagation into new cells.
          if (at_front)
@@ -1206,36 +1207,44 @@ void VelocityCoefficient::Eval(Vector &V, ElementTransformation &T,
             // um = i_val -> v
             for (int d = 0; d < vdim; d++)
             {
-               V(d) = max / interface_val * V(d);
+               v_new(d) = max / interface_val * v(d);
             }
          }
       }
    }
 
-   // Tail.
-//   double tail_value = 1.0;
-//   if (grad * V - grad_eps > 0.0 && umax < tail_value)
-//   {
-//      const double v_factor = 2.0;
+   if (push_tail_u)
+   {
+      const double max = u_max.GetValue(T, ip);
+      const double v_factor = 3.0;
 
-//      // 1. map linearly um from [0, i_val] to [0, 1].
-//      // 2. compute velocity: um = 0 -> v = 0
-//      //                      um = 1 -> v = 1
-//      // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
+      if (grad * v + eps < 0.0 && max + eps < interface_val)
+      {
+         // 1. map linearly um from [0, i_val] to [0, 1].
+         // 2. compute velocity: um = 0 -> v = 0
+         //                      um = 1 -> v = 1
+         // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
 
-//      // linear map x: um -> [0, 1].
-//      double x = umax / tail_value;
+         // linear map x: um -> [0, 1].
+         double x = max / interface_val;
 
-//      // compute f : x -> [0, 1].
-//      double f = x;
-//      //f = x * x * x * x * x;
+         // compute f : x -> [0, 1].
+         double f = x;
+         //f = x * x * x * x * x;
 
-//      // linear map V(d) : f -> [v_factor * v, v].
-//      for (int d = 0; d < vdim; d++)
-//      {
-//         V(d) = (1.0 - v_factor) * V(d) * f + v_factor * V(d);
-//      }
-//   }
+         // linear map V(d) : f -> [v_factor * v, v].
+         for (int d = 0; d < vdim; d++)
+         {
+            v_new(d) = (1.0 - v_factor) * v(d) * f + v_factor * v(d);
+         }
+      }
+   }
+
+   if (take_v_difference)
+   {
+      for (int d = 0; d < vdim; d++) { v(d) = v_new(d) - v(d); }
+   }
+   else { v = v_new; }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,

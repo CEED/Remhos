@@ -49,6 +49,7 @@ protected:
    const bool update_D;
 
    void ComputeDiscreteUpwindMatrix() const;
+   void ApplyDiscreteUpwindMatrix(ParGridFunction &u, Vector &du) const;
 
 public:
    DiscreteUpwind(ParFiniteElementSpace &space, const SparseMatrix &adv,

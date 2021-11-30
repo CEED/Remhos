@@ -343,8 +343,6 @@ int main(int argc, char *argv[])
    u_max_bounds = 1.0;
    w_max_bounds = 1.0;
 
-   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds, 1e-2, 0);
-   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds, 1e-2, 1);
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
 
@@ -404,21 +402,42 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
+   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds,
+                                       1e-2, 0, false);
+   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds,
+                                       1e-2, 1, false);
    VelocityCoefficient *used_v;
    if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
    if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
+
+   VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
+                                    1.0, 1, true);
+   v_diff_coeff.slow_front_u = true;
+   v_diff_coeff.push_tail_u = true;
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
+      MFEM_ABORT("only remap tests now");
       k.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(*used_v));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(*used_v));
+      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+
+      DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+      DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+      K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+      K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+      K_HO.KeepNbrBlock(true);
+
+      auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
+      auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
+      K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
+      K_HO.AddInteriorFaceIntegrator(dgt);
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -631,8 +650,8 @@ int main(int argc, char *argv[])
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(k.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+      lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
                                      lumpedM, asmbl, time_dep);
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
@@ -704,7 +723,7 @@ int main(int argc, char *argv[])
    FunctionCoefficient w0(w0_function);
    w.ProjectCoefficient(w0);
    w.SyncAliasMemory(S);
-   for (int i = 0; i < vsize; i++) { u_plus_w(i) = u(i) + w(i); }
+   for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -813,7 +832,7 @@ int main(int argc, char *argv[])
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
-      VisualizeField(vis_upw, vishost, visport, w, "Solution u+w", Wx, 800, Ww, Wh);
+      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -916,14 +935,15 @@ int main(int argc, char *argv[])
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
-         v_new_coeff_adv.slow_front_v = true;
+         v_new_coeff_adv.slow_front_u = true;
          v_new_coeff_adv.slow_front_w = true;
          v_new_vis.ProjectCoefficient(v_new_coeff_adv);
       }
       else
       {
-         v_new_coeff_rem.slow_front_v = true;
+         v_new_coeff_rem.slow_front_u = true;
          v_new_coeff_rem.slow_front_w = true;
+         v_new_coeff_rem.push_tail_u  = true;
          v_new_vis.ProjectCoefficient(v_new_coeff_rem);
       }
 
@@ -1048,7 +1068,7 @@ int main(int argc, char *argv[])
                  << residual << endl;
          }
 
-         for (int i = 0; i < vsize; i++) { u_plus_w(i) = u(i) + w(i); }
+         for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
          if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
@@ -1057,7 +1077,7 @@ int main(int argc, char *argv[])
                            Wx, Wy, Ww, Wh);
             VisualizeField(vis_w, vishost, visport, w, "Solution w",
                            Wx, 400, Ww, Wh);
-            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution u+w",
+            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
                            Wx, 800, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
@@ -1255,56 +1275,56 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       // Reset precomputed geometric data.
       Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
 
-      // Reassemble on the new mesh. Element contributions.
-      // Currently needed to have the sparse matrices used by the LO methods.
-      Mbf.BilinearForm::operator=(0.0);
-      Mbf.Assemble();
-      Kbf.BilinearForm::operator=(0.0);
-      Kbf.Assemble(0);
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostReadWrite();
-      ml.SpMat().GetDiag(lumpedM);
+//      // Reassemble on the new mesh. Element contributions.
+//      // Currently needed to have the sparse matrices used by the LO methods.
+//      Mbf.BilinearForm::operator=(0.0);
+//      Mbf.Assemble();
+//      Kbf.BilinearForm::operator=(0.0);
+//      Kbf.Assemble(0);
+//      ml.BilinearForm::operator=(0.0);
+//      ml.Assemble();
+//      lumpedM.HostReadWrite();
+//      ml.SpMat().GetDiag(lumpedM);
 
-      M_HO.BilinearForm::operator=(0.0);
-      M_HO.Assemble();
-      K_HO.BilinearForm::operator=(0.0);
-      K_HO.Assemble(0);
+//      M_HO.BilinearForm::operator=(0.0);
+//      M_HO.Assemble();
+//      K_HO.BilinearForm::operator=(0.0);
+//      K_HO.Assemble(0);
 
-      if (lom.pk)
-      {
-         lom.pk->BilinearForm::operator=(0.0);
-         lom.pk->Assemble();
-      }
+//      if (lom.pk)
+//      {
+//         lom.pk->BilinearForm::operator=(0.0);
+//         lom.pk->Assemble();
+//      }
 
-      // Face contributions.
-      asmbl.bdrInt = 0.;
-      Mesh *mesh = M_HO.FESpace()->GetMesh();
-      const int dim = mesh->Dimension(), ne = mesh->GetNE();
-      Array<int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
-      {
-         RD_ptr->SampleVelocity(FaceType::Interior);
-         RD_ptr->SampleVelocity(FaceType::Boundary);
-         RD_ptr->SetupPA(FaceType::Interior);
-         RD_ptr->SetupPA(FaceType::Boundary);
-      }
-      else
-      {
-         for (int k = 0; k < ne; k++)
-         {
-            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+//      // Face contributions.
+//      asmbl.bdrInt = 0.;
+//      Mesh *mesh = M_HO.FESpace()->GetMesh();
+//      const int dim = mesh->Dimension(), ne = mesh->GetNE();
+//      Array<int> bdrs, orientation;
+//      FaceElementTransformations *Trans;
+//      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
+//      {
+//         RD_ptr->SampleVelocity(FaceType::Interior);
+//         RD_ptr->SampleVelocity(FaceType::Boundary);
+//         RD_ptr->SetupPA(FaceType::Interior);
+//         RD_ptr->SetupPA(FaceType::Boundary);
+//      }
+//      else
+//      {
+//         for (int k = 0; k < ne; k++)
+//         {
+//            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+//            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+//            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-            for (int i = 0; i < dofs.numBdrs; i++)
-            {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-            }
-         }
-      }
+//            for (int i = 0; i < dofs.numBdrs; i++)
+//            {
+//               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+//               asmbl.ComputeFluxTerms(k, i, Trans, lom);
+//            }
+//         }
+//      }
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
@@ -1319,40 +1339,41 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    Vector *xptr = const_cast<Vector*>(&X);
 
    // Compute du with modification.
-   v_coeff.slow_front_v = true;
+   v_coeff.slow_front_u = false;
    v_coeff.slow_front_w = false;
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
    AssembleAndEvolve(u, d_u);
 
    // Compute du without modification.
-   Vector d_u_unmod(size);
-   v_coeff.slow_front_v = false;
-   v_coeff.slow_front_w = false;
-   AssembleAndEvolve(u, d_u_unmod);
+//   Vector d_u_unmod(size);
+//   v_coeff.slow_front_u = false;
+//   v_coeff.slow_front_w = false;
+//   AssembleAndEvolve(u, d_u_unmod);
 
-   for (int i = 0; i < size; i++)
-   {
-      delta_u(i) = d_u(i) - d_u_unmod(i);
-   }
+//   for (int i = 0; i < size; i++)
+//   {
+//      delta_u(i) = d_u(i) - d_u_unmod(i);
+//   }
 
    // Compute dw with modification.
-   v_coeff.slow_front_v = false;
+   v_coeff.slow_front_u = false;
    v_coeff.slow_front_w = true;
    w.MakeRef(*xptr, size, size);
    d_w.MakeRef(Y, size, size);
-   AssembleAndEvolve(w, d_w);
+   d_w = 0.0;
+//   AssembleAndEvolve(w, d_w);
 
-   // Compute dw without modification.
-   Vector d_w_unmod(size);
-   v_coeff.slow_front_v = false;
-   v_coeff.slow_front_w = false;
-   AssembleAndEvolve(w, d_w_unmod);
+//   // Compute dw without modification.
+//   Vector d_w_unmod(size);
+//   v_coeff.slow_front_u = false;
+//   v_coeff.slow_front_w = false;
+//   AssembleAndEvolve(w, d_w_unmod);
 
-   for (int i = 0; i < size; i++)
-   {
-      delta_w(i) = d_w(i) - d_w_unmod(i);
-   }
+//   for (int i = 0; i < size; i++)
+//   {
+//      delta_w(i) = d_w(i) - d_w_unmod(i);
+//   }
 
 //   for (int i = 0; i < size; i++)
 //   {
@@ -1377,11 +1398,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 //         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
 //      }
 //   }
-   d_u = d_u_unmod;
-   d_w = d_w_unmod;
-
-   d_u.SyncAliasMemory(Y);
-   d_w.SyncAliasMemory(Y);
 
    // Remap the product field, if there is a product field.
    if (X.Size() > 2*size)
@@ -1579,24 +1595,25 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 11:
-      {
-         // Gresho deformation used for mesh motion in remap tests.
-         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
-         if (r < 0.2)
-         {
-            v(0) =  5.0 * x(1);
-            v(1) = -5.0 * x(0);
-         }
-         else if (r < 0.4)
-         {
-            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
-            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
-         }
-         else { v = 0.0; }
-         break;
-      }
+//      case 11:
+//      {
+//         // Gresho deformation used for mesh motion in remap tests.
+//         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
+//         if (r < 0.2)
+//         {
+//            v(0) =  5.0 * x(1);
+//            v(1) = -5.0 * x(0);
+//         }
+//         else if (r < 0.4)
+//         {
+//            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
+//            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
+//         }
+//         else { v = 0.0; }
+//         break;
+//      }
       case 10:
+      case 11:
       case 12:
       case 13:
       case 14:
@@ -1615,6 +1632,18 @@ void velocity_function(const Vector &x, Vector &v)
          }
          else
          {
+            if (problem_num == 12)
+            {
+               v(0) = 0.25 * sin(M_PI*X(0));
+               v(1) = 0.0;
+               return;
+            }
+            if (problem_num == 11)
+            {
+               v(0) =  0.25 * sin(M_PI*X(0)) * cos(M_PI*X(1));
+               v(1) = -0.25 * cos(M_PI*X(0)) * sin(M_PI*X(1));
+               return;
+            }
             v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
             v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
             if (dim == 3)
@@ -1735,8 +1764,13 @@ double u0_function(const Vector &x)
             {
                if (problem_num == 10)
                {
-                  return (x(0) > 0.4 && x(0) < 0.6 &&
-                          x(1) > 0.4 && x(1) < 0.6) ? 1.0 : 0.0;
+                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) + x(1) * x(1));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
+               }
+               if (problem_num == 11)
+               {
+                  double rad = std::sqrt(x(0) * x(0) + x(1) * x(1));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
                }
                return (x(0) > -0.2 && x(0) < 0.2 &&
                        x(1) > -0.2 && x(1) < 0.2) ? 1.0 : 0.0;

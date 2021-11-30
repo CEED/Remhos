@@ -42,6 +42,11 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    // Recompute D due to mesh changes (K changes) in remap mode.
    if (update_D) { ComputeDiscreteUpwindMatrix(); }
 
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   ApplyDiscreteUpwindMatrix(u_gf, du);
+
+   /*
    // Discretization and monotonicity terms.
    D.Mult(u, du);
 
@@ -62,6 +67,7 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
+   */
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
@@ -92,6 +98,30 @@ void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
       D(i,i) = K(i,i) - rowsum;
    }
 }
+
+void DiscreteUpwind::ApplyDiscreteUpwindMatrix(ParGridFunction &u,
+                                               Vector &du) const
+{
+   const int s = u.Size();
+   const int *I = D.HostReadI(), *J = D.HostReadJ();
+   const double *D_data = D.HostReadData();
+
+   u.ExchangeFaceNbrData();
+   const Vector &u_np = u.FaceNbrData();
+
+   for (int i = 0; i < s; i++)
+   {
+      du(i) = 0.0;
+      for (int k = I[i]; k < I[i + 1]; k++)
+      {
+         int j = J[k];
+         double u_j  = (j < s) ? u(j) : u_np[j - s];
+         double d_ij = D_data[k];
+         du(i) += d_ij * u_j;
+      }
+   }
+}
+
 
 ResidualDistribution::ResidualDistribution(ParFiniteElementSpace &space,
                                            ParBilinearForm &Kbf,

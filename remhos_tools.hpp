@@ -269,20 +269,23 @@ private:
    VectorCoefficient &v_coeff;
    const double interface_val;
    int exec_mode;
+   bool take_v_difference;
 
 public:
    // dynamic options.
-   bool slow_front_v = false,
-        slow_front_w = false;
+   bool slow_front_u = false,
+        slow_front_w = false,
+        push_tail_u  = false;
 
    VelocityCoefficient(VectorCoefficient &vc,
                        const ParGridFunction &umax, const ParGridFunction &wmax,
-                       double interface, int mode)
+                       double interface, int mode, bool take_v_diff)
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
         v_coeff(vc), u_max(umax), w_max(wmax),
-        interface_val(interface), exec_mode(mode) { }
+        interface_val(interface), exec_mode(mode),
+        take_v_difference(take_v_diff) { }
 
-   virtual void Eval(Vector &V, ElementTransformation &T,
+   virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
 };
 
