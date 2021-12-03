@@ -1159,6 +1159,8 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    v_coeff.Eval(v, T, ip);
    Vector v_new(v);
 
+   const double transition_01_power = 4;
+
    const double eps = 1e-15;
    Vector grad(vdim);
    if (slow_front_u)
@@ -1181,7 +1183,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
             // um = i_val -> v
             for (int d = 0; d < vdim; d++)
             {
-               v_new(d) = max / interface_val * v(d);
+               v_new(d) = pow(max, transition_01_power) / interface_val * v(d);
             }
          }
       }
@@ -1207,7 +1209,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
             // um = i_val -> v
             for (int d = 0; d < vdim; d++)
             {
-               v_new(d) = max / interface_val * v(d);
+               v_new(d) = pow(max, transition_01_power) / interface_val * v(d);
             }
          }
       }
@@ -1229,8 +1231,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
          double x = max / interface_val;
 
          // compute f : x -> [0, 1].
-         double f = x;
-         //f = x * x * x * x * x;
+         double f = pow(x, transition_01_power);
 
          // linear map V(d) : f -> [v_factor * v, v].
          for (int d = 0; d < vdim; d++)

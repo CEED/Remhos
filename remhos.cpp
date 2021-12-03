@@ -412,8 +412,8 @@ int main(int argc, char *argv[])
 
    VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
                                     1.0, 1, true);
-   v_diff_coeff.slow_front_u = true;
-   v_diff_coeff.push_tail_u = true;
+   v_diff_coeff.slow_front_u = false;
+   v_diff_coeff.push_tail_u = false;
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -440,27 +440,27 @@ int main(int argc, char *argv[])
       K_HO.AddInteriorFaceIntegrator(dgt);
    }
 
-   if (ho_type == HOSolverType::CG ||
-       ho_type == HOSolverType::LocalInverse ||
-       fct_type == FCTSolverType::FluxBased)
-   {
-      if (exec_mode == 0)
-      {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-      }
-      else if (exec_mode == 1)
-      {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-      }
+//   if (ho_type == HOSolverType::CG ||
+//       ho_type == HOSolverType::LocalInverse ||
+//       fct_type == FCTSolverType::FluxBased)
+//   {
+//      if (exec_mode == 0)
+//      {
+//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
+//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
+//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+//      }
+//      else if (exec_mode == 1)
+//      {
+//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
+//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
+//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+//      }
 
-      K_HO.KeepNbrBlock(true);
-   }
+//      K_HO.KeepNbrBlock(true);
+//   }
 
    if (pa)
    {
