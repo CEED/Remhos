@@ -428,8 +428,8 @@ int main(int argc, char *argv[])
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
 
-      DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-      DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+      auto dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+      auto dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
       K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
       K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       K_HO.KeepNbrBlock(true);
@@ -1474,10 +1474,17 @@ void AdvectionOperator::AssembleAndEvolve(Vector &u, Vector &du) const
    const int NE   = Kbf.ParFESpace()->GetNE();
 
    // Assemble.
+   Mbf.BilinearForm::operator=(0.0);
+   Mbf.Assemble();
    Kbf.BilinearForm::operator=(0.0);
    Kbf.Assemble(0);
    K_HO.BilinearForm::operator=(0.0);
    K_HO.Assemble(0);
+   ml.BilinearForm::operator=(0.0);
+   ml.Assemble();
+   lumpedM.HostReadWrite();
+   ml.SpMat().GetDiag(lumpedM);
+
    // Face contributions.
    asmbl.bdrInt = 0.;
    Array<int> bdrs, orientation;
@@ -1628,11 +1635,11 @@ void velocity_function(const Vector &x, Vector &v)
 
          if (dim == 1)
          {
-            v(0) =  sin(M_PI*X(0));
+            v(0) = sin(M_PI*X(0));
          }
          else
          {
-            if (problem_num == 12)
+            if (problem_num == 10)
             {
                v(0) = 0.25 * sin(M_PI*X(0));
                v(1) = 0.0;
