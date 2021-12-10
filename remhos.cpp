@@ -75,7 +75,7 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
-   VelocityCoefficient &v_coeff;
+   VelocityCoefficient &v_coeff, &v_diff_coeff;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -101,7 +101,7 @@ public:
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                     VelocityCoefficient &vcoeff,
+                     VelocityCoefficient &vcoeff, VelocityCoefficient &vdcoeff,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
@@ -403,17 +403,17 @@ int main(int argc, char *argv[])
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
    VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds,
-                                       1e-2, 0, false);
+                                       1.0, 0, false);
    VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds,
-                                       1e-2, 1, false);
+                                       1.0, 1, false);
    VelocityCoefficient *used_v;
    if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
    if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
    VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
                                     1.0, 1, true);
-   v_diff_coeff.slow_front_u = false;
-   v_diff_coeff.push_tail_u = false;
+   v_diff_coeff.slow_front_u = true;
+   v_diff_coeff.push_tail_u = true;
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -831,8 +831,8 @@ int main(int argc, char *argv[])
       u.HostRead();
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
-      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
-      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
+//      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
+//      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -881,7 +881,8 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO, *used_v,
+   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+                         *used_v, v_diff_coeff,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -936,14 +937,12 @@ int main(int argc, char *argv[])
       if (exec_mode == 0)
       {
          v_new_coeff_adv.slow_front_u = true;
-         v_new_coeff_adv.slow_front_w = true;
          v_new_vis.ProjectCoefficient(v_new_coeff_adv);
       }
       else
       {
-         v_new_coeff_rem.slow_front_u = true;
-         v_new_coeff_rem.slow_front_w = true;
-         v_new_coeff_rem.push_tail_u  = true;
+         v_new_coeff_rem.slow_front_u = v_diff_coeff.slow_front_u;
+         v_new_coeff_rem.push_tail_u  = v_diff_coeff.push_tail_u;
          v_new_vis.ProjectCoefficient(v_new_coeff_rem);
       }
 
@@ -1075,10 +1074,10 @@ int main(int argc, char *argv[])
             int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution u",
                            Wx, Wy, Ww, Wh);
-            VisualizeField(vis_w, vishost, visport, w, "Solution w",
-                           Wx, 400, Ww, Wh);
-            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
-                           Wx, 800, Ww, Wh);
+//            VisualizeField(vis_w, vishost, visport, w, "Solution w",
+//                           Wx, 400, Ww, Wh);
+//            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
+//                           Wx, 800, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
             VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
@@ -1245,6 +1244,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                                      VelocityCoefficient &vcoeff,
+                                     VelocityCoefficient &vdcoeff,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
                                      Assembly &_asmbl,
@@ -1252,7 +1252,8 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_), v_coeff(vcoeff),
+   M_HO(M_HO_), K_HO(K_HO_),
+   v_coeff(vcoeff), v_diff_coeff(vdcoeff),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
@@ -1343,6 +1344,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    v_coeff.slow_front_w = false;
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
+   v_diff_coeff.DetectModificationCells();
    AssembleAndEvolve(u, d_u);
 
    // Compute du without modification.
@@ -1357,8 +1359,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 //   }
 
    // Compute dw with modification.
-   v_coeff.slow_front_u = false;
-   v_coeff.slow_front_w = true;
+//   v_coeff.slow_front_u = false;
+//   v_coeff.slow_front_w = true;
    w.MakeRef(*xptr, size, size);
    d_w.MakeRef(Y, size, size);
    d_w = 0.0;
@@ -1642,7 +1644,7 @@ void velocity_function(const Vector &x, Vector &v)
             if (problem_num == 10)
             {
                v(0) = 0.25 * sin(M_PI*X(0));
-               v(1) = 0.0;
+               v(1) = 0.25 * sin(M_PI*X(1));
                return;
             }
             if (problem_num == 11)
@@ -1771,7 +1773,8 @@ double u0_function(const Vector &x)
             {
                if (problem_num == 10)
                {
-                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) + x(1) * x(1));
+                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) +
+                                         (x(1)-0.3) * (x(1)-0.3));
                   return (rad <= 0.3) ? 1.0 : 0.0;
                }
                if (problem_num == 11)

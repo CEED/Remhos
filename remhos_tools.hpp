@@ -270,6 +270,7 @@ private:
    const double interface_val;
    int exec_mode;
    bool take_v_difference;
+   Array<bool> modify_cell;
 
 public:
    // dynamic options.
@@ -283,10 +284,13 @@ public:
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
         v_coeff(vc), u_max(umax), w_max(wmax),
         interface_val(interface), exec_mode(mode),
-        take_v_difference(take_v_diff) { }
+        take_v_difference(take_v_diff),
+        modify_cell(umax.ParFESpace()->GetNE()) { }
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
+
+   void DetectModificationCells();
 };
 
 } // namespace mfem

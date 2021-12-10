@@ -1156,20 +1156,30 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
+   T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
+
+//   if (modify_cell[T.ElementNo] == false)
+//   {
+//      if (take_v_difference) { v = 0.0; }
+//      return;
+//   }
+
    Vector v_new(v);
 
    const double transition_01_power = 4;
 
-   const double eps = 1e-15;
-   Vector grad(vdim);
+   const double eps = 1e-12;
    if (slow_front_u)
    {
+      Vector grad(vdim);
       const double max = u_max.GetValue(T, ip);
+      u_max.GetGradient(T, grad);
 
-      // No modifications.
-      if (max + eps < interface_val)
+
+      if (grad * grad > eps && max + eps < interface_val)
       {
+         Vector grad(vdim);
          u_max.GetGradient(T, grad);
 
          bool at_front = false;
@@ -1196,6 +1206,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
       // No modifications.
       if (max + eps < interface_val)
       {
+         Vector grad(vdim);
          w_max.GetGradient(T, grad);
 
          bool at_front = false;
@@ -1217,10 +1228,15 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
 
    if (push_tail_u)
    {
-      const double max = u_max.GetValue(T, ip);
+      MFEM_VERIFY(exec_mode == 1, "not implemented for transport");
+
       const double v_factor = 3.0;
 
-      if (grad * v + eps < 0.0 && max + eps < interface_val)
+      Vector grad(vdim);
+      const double max = u_max.GetValue(T, ip);
+      u_max.GetGradient(T, grad);
+
+      if (grad*grad > eps && grad * v + eps < 0.0 && max + eps < interface_val)
       {
          // 1. map linearly um from [0, i_val] to [0, 1].
          // 2. compute velocity: um = 0 -> v = 0
@@ -1246,6 +1262,41 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
       for (int d = 0; d < vdim; d++) { v(d) = v_new(d) - v(d); }
    }
    else { v = v_new; }
+}
+
+void VelocityCoefficient::DetectModificationCells()
+{
+   ParMesh &pmesh = *u_max.ParFESpace()->GetParMesh();
+   ElementTransformation &Tr = *pmesh.GetElementTransformation(0);
+   const FiniteElement *el = u_max.ParFESpace()->GetFE(0);
+   int order = Tr.OrderGrad(el) + Tr.Order() + el->GetOrder();
+   const IntegrationRule &ir = IntRules.Get(el->GetGeomType(), order);
+   const int nqp = ir.GetNPoints();
+
+   const double eps = 1e-12;
+   Vector grad(vdim), v(vdim);
+   const int NE = pmesh.GetNE();
+   for (int k = 0; k < NE; k++)
+   {
+      Tr = *pmesh.GetElementTransformation(k);
+      bool has_neg_dot = false, has_pos_dot = false;
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         u_max.GetGradient(Tr, grad);
+         v_coeff.Eval(v, Tr, ip);
+
+         if (grad * grad > eps)
+         {
+            if (grad * v < 0.0) { has_neg_dot = true; }
+            else                { has_pos_dot = true; }
+         }
+      }
+      // If both are positive, we should not mess it up.
+      // If both are negative, the gradient is zero; no need to modify.
+      modify_cell[k] = (has_neg_dot == has_pos_dot) ? false : true;
+   }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
