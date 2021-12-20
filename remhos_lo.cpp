@@ -22,6 +22,13 @@ using namespace std;
 namespace mfem
 {
 
+const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
+{
+   const FiniteElement *el_trace =
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
+}
+
 DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
@@ -29,6 +36,22 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
    : LOSolver(space),
      K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
      assembly(asmbly), update_D(updateD)
+{
+   D = K;
+   ComputeDiscreteUpwindMatrix();
+}
+
+PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
+                                   ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
+                                   const SparseMatrix &adv,
+                                   const Array<int> &adv_smap, const Vector &Mlump,
+                                   Assembly &asmbly, bool updateD)
+   : LOSolver(space),
+     k_pbilinear(Kbf), Conv(Conv_), K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
+     assembly(asmbly), update_D(updateD),
+     quad1D(get_maps(pfes, assembly)->nqpt),
+     dofs1D(get_maps(pfes, assembly)->ndof),
+     face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
 {
    D = K;
    ComputeDiscreteUpwindMatrix();
@@ -67,7 +90,166 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
 }
 
+void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
+{
+   //mfem_error("Here! \n");
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+   Vector alpha(ndof); alpha = 0.0;
+
+   // Recompute D due to mesh changes (K changes) in remap mode.
+   if (update_D) { ComputeDiscreteUpwindMatrix(); }
+
+   // Discretization and monotonicity terms.
+   D.Mult(u, du);
+   //K.Mult(u, du);
+
+   Vector y(du.Size()); y = 0.0;
+
+   //Clearly incorrect...
+   //k_pbilinear.Mult(u, y);
+
+   Vector ConvMats(ndof * ndof * NE);
+   Vector AlgDiffMats(ndof * ndof * NE); AlgDiffMats = 0.0;
+
+   //Given in row major format
+   Conv->AssembleEA(pfes, ConvMats, false);
+
+   ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
+
+   AddBlkMult(ConvMats, u, y);
+
+   AddBlkMult(AlgDiffMats, u, y);
+
+
+   y-=du;
+   double error = y.Norml2();
+   if (error > 1e-12)
+   {
+      std::cout<<"Error too high "<<error<<std::endl;
+      exit(-1);
+   }
+
+   // Lump fluxes (for PDU).
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+   Vector &u_nd = u_gf.FaceNbrData();
+   const int ne = pfes.GetNE();
+   u.HostRead();
+   du.HostReadWrite();
+   M_lumped.HostRead();
+   for (int k = 0; k < ne; k++)
+   {
+      // Face contributions.
+      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+      {
+         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+      }
+   }
+
+   const int s = du.Size();
+   for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+}
+
+void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
+                                                 Vector &AlgDiff) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+   auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
+   auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
+
+   //Matrices are assumed to be in row major format
+   for (int e=0; e<NE; ++e)
+   {
+
+      //Dij = max{0, -Kij, -Kji}
+      for (int c=0; c<ndof; ++c)
+      {
+         for (int r=0; r<ndof; ++r)
+         {
+
+            if (r == c) { continue; }
+
+            //for(int k=0; k<ndof; ++k){
+            //dij = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+            //}
+
+            alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+         }
+      }
+
+      for (int d=0; d<ndof; d++)
+      {
+
+         double dii = 0;
+         for (int k=0; k<ndof; ++k)
+         {
+            if (k==d) { continue; }
+            dii -= alg_blk(k,d,e);
+         }
+         alg_blk(d,d,e) = dii;
+      }
+   }
+
+}
+
+void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
+                                  const Vector &x, Vector &y) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+
+   auto X = Reshape(x.Read(), ndof, NE);
+   auto Y = Reshape(y.Write(), ndof, NE);
+   auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
+
+   //Takes row major format
+   for (int e=0; e<NE; ++e)
+   {
+      for (int c=0; c<ndof; ++c)
+      {
+         double dot=0;
+         for (int r=0; r<ndof; ++r)
+         {
+            dot += Me(r, c, e) * X(r, e);
+         }
+         Y(c, e) += dot;
+      }
+   }
+
+}
+
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
+{
+   const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
+
+   const double *Kp = K.HostReadData();
+
+   double *Dp = D.HostReadWriteData();
+   D.HostReadWriteI(); D.HostReadWriteJ();
+
+   for (int i = 0, k = 0; i < n; i++)
+   {
+      double rowsum = 0.;
+      for (int end = Ip[i+1]; k < end; k++)
+      {
+         int j = Jp[k];
+         double kij = Kp[k];
+         double kji = Kp[K_smap[k]];
+         double dij = fmax(fmax(0.0,-kij),-kji);
+         Dp[k] = kij + dij;
+         Dp[K_smap[k]] = kji + dij;
+         if (i != j) { rowsum += dij; }
+      }
+      D(i,i) = K(i,i) - rowsum;
+   }
+}
+
+void PADiscreteUpwind::ComputeDiscreteUpwindMatrix() const
 {
    const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
 
@@ -236,13 +418,6 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
                       M_lumped(dof_id);
       }
    }
-}
-
-const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
-{
-   const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
-   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
 //====

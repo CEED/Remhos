@@ -58,6 +58,53 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
+class PADiscreteUpwind : public LOSolver
+{
+protected:
+   ParBilinearForm &k_pbilinear;
+   ConvectionIntegrator *Conv;
+   const SparseMatrix &K;
+   mutable SparseMatrix D;
+   const Array<int> &K_smap;
+   const Vector &M_lumped;
+   Assembly &assembly;
+   const bool update_D;
+
+   void ComputeDiscreteUpwindMatrix() const;
+
+   // Data at quadrature points //for face terms
+   const int quad1D, dofs1D, face_dofs;
+   mutable Array<double> D_int, D_bdry;
+   mutable Array<double> IntVelocity, BdryVelocity;
+
+public:
+   PADiscreteUpwind(ParFiniteElementSpace &space,
+                    ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
+                    const SparseMatrix &adv,
+                    const Array<int> &adv_smap, const Vector &Mlump,
+                    Assembly &asmbly, bool updateD);
+
+   void SampleVelocity(FaceType type) const;
+
+   void SetupPA(FaceType type) const;
+
+   void SetupPA2D(FaceType) const;
+
+   void SetupPA3D(FaceType) const;
+
+   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
+
+   void ComputeAlgebraicDiffusion(Vector &ConvMats, Vector &AlgDiff) const;
+
+   void AddBlkMult(const Vector &Mat, const Vector &x, Vector &y) const;
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
 class ResidualDistribution : public LOSolver
 {
 protected:
