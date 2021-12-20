@@ -38,6 +38,38 @@ public:
 
 class Assembly;
 
+class PADGTraceLOSolver
+{
+protected:
+   // Data at quadrature points
+   ParFiniteElementSpace &trace_pfes;
+   const int quad1D, dofs1D, face_dofs;
+   mutable Array<double> D_int, D_bdry;
+   mutable Array<double> IntVelocity, BdryVelocity;
+   Assembly &trace_assembly;
+
+public:
+     PADGTraceLOSolver(ParFiniteElementSpace &pfes_, const int q1D,
+                       const int d1D, const int fdofs,
+                       Assembly &assembly_) :
+     trace_pfes(pfes_), quad1D(q1D), dofs1D(d1D), face_dofs(fdofs),
+     trace_assembly(assembly_) {}
+
+   void SampleVelocity(FaceType type) const;
+
+   void SetupPA(FaceType type) const;
+
+   void SetupPA2D(FaceType) const;
+
+   void SetupPA3D(FaceType) const;
+
+   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
+};
+
 class DiscreteUpwind : public LOSolver
 {
 protected:
@@ -84,20 +116,6 @@ public:
                     const Array<int> &adv_smap, const Vector &Mlump,
                     Assembly &asmbly, bool updateD);
 
-   void SampleVelocity(FaceType type) const;
-
-   void SetupPA(FaceType type) const;
-
-   void SetupPA2D(FaceType) const;
-
-   void SetupPA3D(FaceType) const;
-
-   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
-
-   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
-
-   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
-
    void ComputeAlgebraicDiffusion(Vector &ConvMats, Vector &AlgDiff) const;
 
    void AddBlkMult(const Vector &Mat, const Vector &x, Vector &y) const;
@@ -123,32 +141,14 @@ public:
 };
 
 //PA based Residual Distribution
-class PAResidualDistribution : public ResidualDistribution
+class PAResidualDistribution : public ResidualDistribution , public PADGTraceLOSolver
 {
 protected:
-   // Data at quadrature points
-   const int quad1D, dofs1D, face_dofs;
-   mutable Array<double> D_int, D_bdry;
-   mutable Array<double> IntVelocity, BdryVelocity;
 
 public:
    PAResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
                           Assembly &asmbly, const Vector &Mlump,
                           bool subcell, bool timedep);
-
-   void SampleVelocity(FaceType type) const;
-
-   void SetupPA(FaceType type) const;
-
-   void SetupPA2D(FaceType) const;
-
-   void SetupPA3D(FaceType) const;
-
-   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
-
-   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
-
-   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };

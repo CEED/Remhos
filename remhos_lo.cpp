@@ -429,21 +429,24 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                const Vector &Mlump,
                                                bool subcell, bool timedep)
    : ResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep),
-     quad1D(get_maps(pfes, assembly)->nqpt),
-     dofs1D(get_maps(pfes, assembly)->ndof),
-     face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
+     PADGTraceLOSolver(space, get_maps(pfes, trace_assembly)->nqpt,
+                get_maps(pfes, trace_assembly)->ndof,
+                (pfes.GetMesh()->Dimension() ==2) ?
+                get_maps(pfes, trace_assembly)->nqpt :
+                get_maps(pfes, trace_assembly)->nqpt * get_maps(pfes, trace_assembly)->nqpt,
+                assembly)
 {
 }
 
 // Taken from DGTraceIntegrator::SetupPA L:145
-void PAResidualDistribution::SampleVelocity(FaceType type) const
+void PADGTraceLOSolver::SampleVelocity(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    if (nf == 0) { return; }
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
-   Mesh *mesh = pfes.GetMesh();
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
    const int nq = ir->GetNPoints();
 
@@ -464,7 +467,7 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
    Vector Vq(dim);
 
    int f_idx = 0;
-   for (int f = 0; f < pfes.GetNF(); ++f)
+   for (int f = 0; f < trace_pfes.GetNF(); ++f)
    {
       int e1, e2;
       int inf1, inf2;
@@ -484,7 +487,7 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
             int iq = ToLexOrdering(dim, my_face_id, quad1D, q);
             T.SetAllIntPoints(&ir->IntPoint(q));
             const IntegrationPoint &eip1 = T.GetElement1IntPoint();
-            assembly.lom.coef->Eval(Vq, *T.Elem1, eip1);
+            trace_assembly.lom.coef->Eval(Vq, *T.Elem1, eip1);
             for (int i = 0; i < dim; ++i)
             {
                C(i,iq,f_idx) = Vq(i);
@@ -495,9 +498,9 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
    }
 }
 
-void PAResidualDistribution::SetupPA(FaceType type) const
+void PADGTraceLOSolver::SetupPA(FaceType type) const
 {
-   const FiniteElementSpace *fes = assembly.GetFes();
+   const FiniteElementSpace *fes = trace_assembly.GetFes();
    int nf = fes->GetNFbyType(type);
    if (nf == 0) {return;}
 
@@ -509,13 +512,13 @@ void PAResidualDistribution::SetupPA(FaceType type) const
    if (dim == 3) { return SetupPA3D(type); }
 }
 
-void PAResidualDistribution::SetupPA2D(FaceType type) const
+void PADGTraceLOSolver::SetupPA2D(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
-   Mesh *mesh = pfes.GetMesh();
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
    const FaceGeometricFactors *geom =
       mesh->GetFaceGeometricFactors(*ir,
@@ -532,7 +535,7 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
 
    auto vel = mfem::Reshape(vel_ptr, dim, ir->GetNPoints(), nf);
 
-   const int execMode = (int) assembly.GetExecMode();
+   const int execMode = (int) trace_assembly.GetExecMode();
 
    if (type == FaceType::Interior)
    {
@@ -600,13 +603,13 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
    }//boundary
 }
 
-void PAResidualDistribution::SetupPA3D(FaceType type) const
+void PADGTraceLOSolver::SetupPA3D(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
-   Mesh *mesh = pfes.GetMesh();
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
    const FaceGeometricFactors *geom =
       mesh->GetFaceGeometricFactors(*ir,
@@ -623,7 +626,7 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 
    auto vel = mfem::Reshape(vel_ptr, dim,  quad1D, quad1D, nf);
 
-   const int execMode = (int) assembly.GetExecMode();
+   const int execMode = (int) trace_assembly.GetExecMode();
 
    if (type == FaceType::Interior)
    {
@@ -699,27 +702,27 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
    }//bdry
 }
 
-void PAResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
+void PADGTraceLOSolver::ApplyFaceTerms(const Vector &x, Vector &y,
                                             FaceType type) const
 {
-   Mesh *mesh = pfes.GetMesh();
+   Mesh *mesh = trace_pfes.GetMesh();
    int dim = mesh->Dimension();
 
    if (dim == 2) { return ApplyFaceTerms2D(x, y, type); }
    if (dim == 3) { return ApplyFaceTerms3D(x, y, type); }
 }
 
-void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
+void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
                                               FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    const FaceRestriction * face_restrict_lex = nullptr;
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -727,7 +730,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    if (type == FaceType::Interior)
    {
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -794,7 +797,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    {
 
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
                                  L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
@@ -850,17 +853,17 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    }
 }
 
-void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
-                                              FaceType type) const
+void PADGTraceLOSolver::ApplyFaceTerms3D(const Vector &x, Vector &y,
+                                  FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    const FaceRestriction * face_restrict_lex = nullptr;
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -868,7 +871,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
    if (type == FaceType::Interior)
    {
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -968,7 +971,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
    {
 
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
                                  L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
