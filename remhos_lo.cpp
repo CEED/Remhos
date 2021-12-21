@@ -156,10 +156,6 @@ void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
 
             if (r == c) { continue; }
 
-            //for(int k=0; k<ndof; ++k){
-            //dij = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
-            //}
-
             alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
          }
       }
