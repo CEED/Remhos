@@ -401,8 +401,8 @@ int main(int argc, char *argv[])
    else if (exec_mode == 1)
    {
       conv_int = new ConvectionIntegrator(v_coef);
-      k.AddDomainIntegrator(conv_int);
-      K_HO.AddDomainIntegrator(conv_int);
+      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -1233,6 +1233,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
       else if (auto lo_ptr = dynamic_cast<const PADiscreteUpwind*>(lo_solver))
       {
+         //Construct K, D in K* = K + D
+         lo_ptr->AssembleBlkOperators();
          lo_ptr->SampleVelocity(FaceType::Interior);
          lo_ptr->SampleVelocity(FaceType::Boundary);
          lo_ptr->SetupPA(FaceType::Interior);

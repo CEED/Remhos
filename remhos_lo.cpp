@@ -93,12 +93,7 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 {
    du = 0.0;
 
-   //Construct K, D
-   if (false)
-   {
-      //Given in row major format
-      AssembleBlkOperators();
-   }
+
 
    //Apply K* = K + D
 
