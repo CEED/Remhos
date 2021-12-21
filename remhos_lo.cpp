@@ -42,9 +42,8 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
 }
 
 PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
-                                   /*ParBilinearForm &Kbf,*/ ConvectionIntegrator *Conv_,
-                                   /*const SparseMatrix &adv,*/
-                                   /*const Array<int> &adv_smap,*/ const Vector &Mlump,
+                                   ConvectionIntegrator *Conv_,
+                                   const Vector &Mlump,
                                    Assembly &asmbly, bool timedep)
    : LOSolver(space),
      PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
@@ -53,9 +52,7 @@ PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
                        get_maps(pfes, asmbly)->nqpt :
                        get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
                        asmbly),
-     /*k_pbilinear(Kbf),*/ Conv(Conv_), /*K(adv), D(), K_smap(adv_smap), */ M_lumped(
-        Mlump),
-     time_dep(timedep)
+     Conv(Conv_), M_lumped(Mlump), time_dep(timedep)
 {
 }
 

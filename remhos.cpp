@@ -390,21 +390,18 @@ int main(int argc, char *argv[])
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
    ParBilinearForm k(&pfes);
-   ParBilinearForm k_du(&pfes);
    ParBilinearForm K_HO(&pfes);
    ConvectionIntegrator *conv_int = nullptr;
    if (exec_mode == 0)
    {
       conv_int = new ConvectionIntegrator(velocity, -1.0);
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
-      k_du.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
       conv_int = new ConvectionIntegrator(v_coef);
       k.AddDomainIntegrator(conv_int);
-      k_du.AddDomainIntegrator(conv_int);
       K_HO.AddDomainIntegrator(conv_int);
    }
 
@@ -436,14 +433,11 @@ int main(int argc, char *argv[])
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
-   k_du.SetAssemblyLevel(AssemblyLevel::PARTIAL);
-
    if (next_gen_full)
    {
       K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
    }
 
-   k_du.Assemble();
    M_HO.Assemble();
    K_HO.Assemble(0);
 

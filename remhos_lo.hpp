@@ -93,11 +93,7 @@ public:
 class PADiscreteUpwind : public LOSolver, public PADGTraceLOSolver
 {
 protected:
-   //ParBilinearForm &k_pbilinear;
    ConvectionIntegrator *Conv = nullptr;
-   //const SparseMatrix &K;
-   //mutable SparseMatrix D;
-   //const Array<int> &K_smap;
    const Vector &M_lumped;
    const bool time_dep;
    mutable Vector ConvMats;
@@ -105,9 +101,8 @@ protected:
 
 public:
    PADiscreteUpwind(ParFiniteElementSpace &space,
-                    /*ParBilinearForm &Kbf,*/ ConvectionIntegrator *Conv_,
-                    /* const SparseMatrix &adv,*/
-                    /*const Array<int> &adv_smap, */ const Vector &Mlump,
+                    ConvectionIntegrator *Conv_,
+                    const Vector &Mlump,
                     Assembly &asmbly, bool timedep);
 
    /*Block Operators are in row major format*/
