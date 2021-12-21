@@ -49,11 +49,11 @@ protected:
    Assembly &trace_assembly;
 
 public:
-     PADGTraceLOSolver(ParFiniteElementSpace &pfes_, const int q1D,
-                       const int d1D, const int fdofs,
-                       Assembly &assembly_) :
-     trace_pfes(pfes_), quad1D(q1D), dofs1D(d1D), face_dofs(fdofs),
-     trace_assembly(assembly_) {}
+   PADGTraceLOSolver(ParFiniteElementSpace &pfes_, const int q1D,
+                     const int d1D, const int fdofs,
+                     Assembly &assembly_) :
+      trace_pfes(pfes_), quad1D(q1D), dofs1D(d1D), face_dofs(fdofs),
+      trace_assembly(assembly_) {}
 
    void SampleVelocity(FaceType type) const;
 
@@ -90,7 +90,7 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
-class PADiscreteUpwind : public LOSolver
+class PADiscreteUpwind : public LOSolver, public PADGTraceLOSolver
 {
 protected:
    ParBilinearForm &k_pbilinear;
@@ -99,22 +99,14 @@ protected:
    mutable SparseMatrix D;
    const Array<int> &K_smap;
    const Vector &M_lumped;
-   Assembly &assembly;
-   const bool update_D;
-
-   void ComputeDiscreteUpwindMatrix() const;
-
-   // Data at quadrature points //for face terms
-   const int quad1D, dofs1D, face_dofs;
-   mutable Array<double> D_int, D_bdry;
-   mutable Array<double> IntVelocity, BdryVelocity;
+   const bool time_dep;
 
 public:
    PADiscreteUpwind(ParFiniteElementSpace &space,
                     ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
                     const SparseMatrix &adv,
                     const Array<int> &adv_smap, const Vector &Mlump,
-                    Assembly &asmbly, bool updateD);
+                    Assembly &asmbly, bool timedep);
 
    void ComputeAlgebraicDiffusion(Vector &ConvMats, Vector &AlgDiff) const;
 
@@ -141,7 +133,8 @@ public:
 };
 
 //PA based Residual Distribution
-class PAResidualDistribution : public ResidualDistribution , public PADGTraceLOSolver
+class PAResidualDistribution : public ResidualDistribution,
+   public PADGTraceLOSolver
 {
 protected:
 

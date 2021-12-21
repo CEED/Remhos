@@ -45,16 +45,17 @@ PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
                                    ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
                                    const SparseMatrix &adv,
                                    const Array<int> &adv_smap, const Vector &Mlump,
-                                   Assembly &asmbly, bool updateD)
+                                   Assembly &asmbly, bool timedep)
    : LOSolver(space),
+     PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
+                       get_maps(pfes, asmbly)->ndof,
+                       (pfes.GetMesh()->Dimension() ==2) ?
+                       get_maps(pfes, asmbly)->nqpt :
+                       get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
+                       asmbly),
      k_pbilinear(Kbf), Conv(Conv_), K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
-     assembly(asmbly), update_D(updateD),
-     quad1D(get_maps(pfes, assembly)->nqpt),
-     dofs1D(get_maps(pfes, assembly)->ndof),
-     face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
+     time_dep(timedep)
 {
-   D = K;
-   ComputeDiscreteUpwindMatrix();
 }
 
 void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
@@ -93,18 +94,15 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 {
    //mfem_error("Here! \n");
-   const int ndof = pfes.GetFE(0)->GetDof();
-   const int NE     = pfes.GetMesh()->GetNE();
+   const int ndof = trace_pfes.GetFE(0)->GetDof();
+   const int NE     = trace_pfes.GetMesh()->GetNE();
    Vector alpha(ndof); alpha = 0.0;
-
-   // Recompute D due to mesh changes (K changes) in remap mode.
-   if (update_D) { ComputeDiscreteUpwindMatrix(); }
+   du = 0.0;
 
    // Discretization and monotonicity terms.
-   D.Mult(u, du);
-   //K.Mult(u, du);
+   //D.Mult(u, du);
 
-   Vector y(du.Size()); y = 0.0;
+   //Vector y(du.Size()); y = 0.0;
 
    //Clearly incorrect...
    //k_pbilinear.Mult(u, y);
@@ -117,11 +115,19 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
    ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
 
-   AddBlkMult(ConvMats, u, y);
+   //K* = K + D
 
-   AddBlkMult(AlgDiffMats, u, y);
+   //Mult K
+
+   AddBlkMult(ConvMats, u, du);
+
+   //Mult D
+   AddBlkMult(AlgDiffMats, u, du);
 
 
+   //std::cout<<du.Norml2()<<std::endl;
+
+   /*
    y-=du;
    double error = y.Norml2();
    if (error > 1e-12)
@@ -129,24 +135,32 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
       std::cout<<"Error too high "<<error<<std::endl;
       exit(-1);
    }
+   */
+
 
    // Lump fluxes (for PDU).
-   ParGridFunction u_gf(&pfes);
+   ParGridFunction u_gf(&trace_pfes);
    u_gf = u;
    u_gf.ExchangeFaceNbrData();
-   Vector &u_nd = u_gf.FaceNbrData();
-   const int ne = pfes.GetNE();
+
+   ApplyFaceTerms(u, du, FaceType::Interior);
+   ApplyFaceTerms(u, du, FaceType::Boundary);
+
+   //const int ne = pfes.GetNE();
    u.HostRead();
    du.HostReadWrite();
    M_lumped.HostRead();
-   for (int k = 0; k < ne; k++)
+
+   /*
+   for (int k = 0; k < NE; k++)
    {
       // Face contributions.
-      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+      for (int f = 0; f < trace_assembly.dofs.numBdrs; f++)
       {
-         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+        trace_assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
+   */
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
@@ -224,32 +238,6 @@ void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
-{
-   const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
-
-   const double *Kp = K.HostReadData();
-
-   double *Dp = D.HostReadWriteData();
-   D.HostReadWriteI(); D.HostReadWriteJ();
-
-   for (int i = 0, k = 0; i < n; i++)
-   {
-      double rowsum = 0.;
-      for (int end = Ip[i+1]; k < end; k++)
-      {
-         int j = Jp[k];
-         double kij = Kp[k];
-         double kji = Kp[K_smap[k]];
-         double dij = fmax(fmax(0.0,-kij),-kji);
-         Dp[k] = kij + dij;
-         Dp[K_smap[k]] = kji + dij;
-         if (i != j) { rowsum += dij; }
-      }
-      D(i,i) = K(i,i) - rowsum;
-   }
-}
-
-void PADiscreteUpwind::ComputeDiscreteUpwindMatrix() const
 {
    const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
 
@@ -430,11 +418,11 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                bool subcell, bool timedep)
    : ResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep),
      PADGTraceLOSolver(space, get_maps(pfes, trace_assembly)->nqpt,
-                get_maps(pfes, trace_assembly)->ndof,
-                (pfes.GetMesh()->Dimension() ==2) ?
-                get_maps(pfes, trace_assembly)->nqpt :
-                get_maps(pfes, trace_assembly)->nqpt * get_maps(pfes, trace_assembly)->nqpt,
-                assembly)
+                       get_maps(pfes, trace_assembly)->ndof,
+                       (pfes.GetMesh()->Dimension() ==2) ?
+                       get_maps(pfes, trace_assembly)->nqpt :
+                       get_maps(pfes, trace_assembly)->nqpt * get_maps(pfes, trace_assembly)->nqpt,
+                       assembly)
 {
 }
 
@@ -703,7 +691,7 @@ void PADGTraceLOSolver::SetupPA3D(FaceType type) const
 }
 
 void PADGTraceLOSolver::ApplyFaceTerms(const Vector &x, Vector &y,
-                                            FaceType type) const
+                                       FaceType type) const
 {
    Mesh *mesh = trace_pfes.GetMesh();
    int dim = mesh->Dimension();
@@ -713,7 +701,7 @@ void PADGTraceLOSolver::ApplyFaceTerms(const Vector &x, Vector &y,
 }
 
 void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
-                                              FaceType type) const
+                                         FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
@@ -798,7 +786,7 @@ void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
       face_restrict_lex =
          trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
-                                 L2FaceValues::SingleValued);
+                                       L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -854,7 +842,7 @@ void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
 }
 
 void PADGTraceLOSolver::ApplyFaceTerms3D(const Vector &x, Vector &y,
-                                  FaceType type) const
+                                         FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
@@ -972,7 +960,7 @@ void PADGTraceLOSolver::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       face_restrict_lex =
          trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
-                                 L2FaceValues::SingleValued);
+                                       L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
