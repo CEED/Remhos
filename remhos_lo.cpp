@@ -22,6 +22,13 @@ using namespace std;
 namespace mfem
 {
 
+const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
+{
+   const FiniteElement *el_trace =
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
+}
+
 DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
@@ -32,6 +39,21 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
 {
    D = K;
    ComputeDiscreteUpwindMatrix();
+}
+
+PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
+                                   ConvectionIntegrator *Conv_,
+                                   const Vector &Mlump,
+                                   Assembly &asmbly, bool timedep)
+   : LOSolver(space),
+     PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
+                       get_maps(pfes, asmbly)->ndof,
+                       (pfes.GetMesh()->Dimension() ==2) ?
+                       get_maps(pfes, asmbly)->nqpt :
+                       get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
+                       asmbly),
+     Conv(Conv_), M_lumped(Mlump), time_dep(timedep)
+{
 }
 
 void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
@@ -65,6 +87,114 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+}
+
+void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
+{
+   du = 0.0;
+
+
+
+   //Apply K* = K + D
+
+   //Mult K
+   AddBlkMult(ConvMats, u, du);
+
+   //Mult D
+   AddBlkMult(AlgDiffMats, u, du);
+
+   ApplyFaceTerms(u, du, FaceType::Interior);
+   ApplyFaceTerms(u, du, FaceType::Boundary);
+
+   u.HostRead();
+   du.HostReadWrite();
+   M_lumped.HostRead();
+
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+
+   const int s = du.Size();
+   for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+}
+
+void PADiscreteUpwind::AssembleBlkOperators() const
+{
+   const int ndof = trace_pfes.GetFE(0)->GetDof();
+   const int NE     = trace_pfes.GetMesh()->GetNE();
+
+   ConvMats.SetSize(ndof * ndof * NE);
+   AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
+
+   Conv->AssembleEA(pfes, ConvMats, false);
+   ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
+}
+
+void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
+                                                 Vector &AlgDiff) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+   auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
+   auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
+
+   //Matrices are assumed to be in row major format
+   for (int e=0; e<NE; ++e)
+   {
+
+      //Dij = max{0, -Kij, -Kji}
+      for (int c=0; c<ndof; ++c)
+      {
+         for (int r=0; r<ndof; ++r)
+         {
+
+            if (r == c) { continue; }
+
+            alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+         }
+      }
+
+      for (int d=0; d<ndof; d++)
+      {
+
+         double dii = 0;
+         for (int k=0; k<ndof; ++k)
+         {
+            if (k==d) { continue; }
+            dii -= alg_blk(k,d,e);
+         }
+         alg_blk(d,d,e) = dii;
+      }
+   }
+
+}
+
+void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
+                                  const Vector &x, Vector &y) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+
+   auto X = Reshape(x.Read(), ndof, NE);
+   auto Y = Reshape(y.Write(), ndof, NE);
+   auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
+
+   //Takes row major format
+   for (int e=0; e<NE; ++e)
+   {
+      for (int c=0; c<ndof; ++c)
+      {
+         double dot=0;
+         for (int r=0; r<ndof; ++r)
+         {
+            dot += Me(r, c, e) * X(r, e);
+         }
+         Y(c, e) += dot;
+      }
+   }
+
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
@@ -238,13 +368,6 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    }
 }
 
-const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
-{
-   const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
-   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
-}
-
 //====
 //Residual Distribution
 //
@@ -254,21 +377,24 @@ PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
                                                const Vector &Mlump,
                                                bool subcell, bool timedep)
    : ResidualDistribution(space, Kbf, asmbly, Mlump, subcell, timedep),
-     quad1D(get_maps(pfes, assembly)->nqpt),
-     dofs1D(get_maps(pfes, assembly)->ndof),
-     face_dofs((pfes.GetMesh()->Dimension() ==2) ? quad1D : quad1D * quad1D)
+     PADGTraceLOSolver(space, get_maps(pfes, trace_assembly)->nqpt,
+                       get_maps(pfes, trace_assembly)->ndof,
+                       (pfes.GetMesh()->Dimension() ==2) ?
+                       get_maps(pfes, trace_assembly)->nqpt :
+                       get_maps(pfes, trace_assembly)->nqpt * get_maps(pfes, trace_assembly)->nqpt,
+                       assembly)
 {
 }
 
 // Taken from DGTraceIntegrator::SetupPA L:145
-void PAResidualDistribution::SampleVelocity(FaceType type) const
+void PADGTraceLOSolver::SampleVelocity(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    if (nf == 0) { return; }
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
-   Mesh *mesh = pfes.GetMesh();
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
    const int nq = ir->GetNPoints();
 
@@ -289,7 +415,7 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
    Vector Vq(dim);
 
    int f_idx = 0;
-   for (int f = 0; f < pfes.GetNF(); ++f)
+   for (int f = 0; f < trace_pfes.GetNF(); ++f)
    {
       int e1, e2;
       int inf1, inf2;
@@ -309,7 +435,7 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
             int iq = ToLexOrdering(dim, my_face_id, quad1D, q);
             T.SetAllIntPoints(&ir->IntPoint(q));
             const IntegrationPoint &eip1 = T.GetElement1IntPoint();
-            assembly.lom.coef->Eval(Vq, *T.Elem1, eip1);
+            trace_assembly.lom.coef->Eval(Vq, *T.Elem1, eip1);
             for (int i = 0; i < dim; ++i)
             {
                C(i,iq,f_idx) = Vq(i);
@@ -320,9 +446,9 @@ void PAResidualDistribution::SampleVelocity(FaceType type) const
    }
 }
 
-void PAResidualDistribution::SetupPA(FaceType type) const
+void PADGTraceLOSolver::SetupPA(FaceType type) const
 {
-   const FiniteElementSpace *fes = assembly.GetFes();
+   const FiniteElementSpace *fes = trace_assembly.GetFes();
    int nf = fes->GetNFbyType(type);
    if (nf == 0) {return;}
 
@@ -334,13 +460,13 @@ void PAResidualDistribution::SetupPA(FaceType type) const
    if (dim == 3) { return SetupPA3D(type); }
 }
 
-void PAResidualDistribution::SetupPA2D(FaceType type) const
+void PADGTraceLOSolver::SetupPA2D(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
-   Mesh *mesh = pfes.GetMesh();
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
    const FaceGeometricFactors *geom =
       mesh->GetFaceGeometricFactors(*ir,
@@ -357,7 +483,7 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
 
    auto vel = mfem::Reshape(vel_ptr, dim, ir->GetNPoints(), nf);
 
-   const int execMode = (int) assembly.GetExecMode();
+   const int execMode = (int) trace_assembly.GetExecMode();
 
    if (type == FaceType::Interior)
    {
@@ -425,13 +551,13 @@ void PAResidualDistribution::SetupPA2D(FaceType type) const
    }//boundary
 }
 
-void PAResidualDistribution::SetupPA3D(FaceType type) const
+void PADGTraceLOSolver::SetupPA3D(FaceType type) const
 {
-   const int nf = pfes.GetNFbyType(type);
-   Mesh *mesh = pfes.GetMesh();
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
    const int dim = mesh->Dimension();
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
 
    const FaceGeometricFactors *geom =
       mesh->GetFaceGeometricFactors(*ir,
@@ -448,7 +574,7 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
 
    auto vel = mfem::Reshape(vel_ptr, dim,  quad1D, quad1D, nf);
 
-   const int execMode = (int) assembly.GetExecMode();
+   const int execMode = (int) trace_assembly.GetExecMode();
 
    if (type == FaceType::Interior)
    {
@@ -524,27 +650,27 @@ void PAResidualDistribution::SetupPA3D(FaceType type) const
    }//bdry
 }
 
-void PAResidualDistribution::ApplyFaceTerms(const Vector &x, Vector &y,
-                                            FaceType type) const
+void PADGTraceLOSolver::ApplyFaceTerms(const Vector &x, Vector &y,
+                                       FaceType type) const
 {
-   Mesh *mesh = pfes.GetMesh();
+   Mesh *mesh = trace_pfes.GetMesh();
    int dim = mesh->Dimension();
 
    if (dim == 2) { return ApplyFaceTerms2D(x, y, type); }
    if (dim == 3) { return ApplyFaceTerms3D(x, y, type); }
 }
 
-void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
-                                              FaceType type) const
+void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
+                                         FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    const FaceRestriction * face_restrict_lex = nullptr;
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -552,7 +678,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    if (type == FaceType::Interior)
    {
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -619,8 +745,8 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    {
 
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
-                                 L2FaceValues::SingleValued);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                                       L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -675,17 +801,17 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
    }
 }
 
-void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
-                                              FaceType type) const
+void PADGTraceLOSolver::ApplyFaceTerms3D(const Vector &x, Vector &y,
+                                         FaceType type) const
 {
    const int Q1D = quad1D;
    const int D1D = dofs1D;
-   const int nf = pfes.GetNFbyType(type);
+   const int nf = trace_pfes.GetNFbyType(type);
    const FaceRestriction * face_restrict_lex = nullptr;
 
-   const IntegrationRule *ir = assembly.lom.irF;
+   const IntegrationRule *ir = trace_assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -693,7 +819,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
    if (type == FaceType::Interior)
    {
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());
@@ -793,8 +919,8 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
    {
 
       face_restrict_lex =
-         pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
-                                 L2FaceValues::SingleValued);
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                                       L2FaceValues::SingleValued);
 
       Vector x_loc(face_restrict_lex->Height());
       Vector y_loc(face_restrict_lex->Height());

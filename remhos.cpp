@@ -391,13 +391,16 @@ int main(int argc, char *argv[])
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
+   ConvectionIntegrator *conv_int = nullptr;
    if (exec_mode == 0)
    {
+      conv_int = new ConvectionIntegrator(velocity, -1.0);
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
+      conv_int = new ConvectionIntegrator(v_coef);
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
    }
@@ -612,9 +615,27 @@ int main(int argc, char *argv[])
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(k.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+      if (pa)
+      {
+         lo_solver = new PADiscreteUpwind(pfes, conv_int,
+                                          lumpedM, asmbl, time_dep);
+         if (exec_mode == 0)
+         {
+            const PADiscreteUpwind *lo_ptr =
+               dynamic_cast<const PADiscreteUpwind*>(lo_solver);
+            lo_ptr->AssembleBlkOperators();
+            lo_ptr->SampleVelocity(FaceType::Interior);
+            lo_ptr->SampleVelocity(FaceType::Boundary);
+            lo_ptr->SetupPA(FaceType::Interior);
+            lo_ptr->SetupPA(FaceType::Boundary);
+         }
+      }
+      else
+      {
+         lo_smap = SparseMatrix_Build_smap(k.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep);
+      }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
@@ -1209,6 +1230,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          RD_ptr->SampleVelocity(FaceType::Boundary);
          RD_ptr->SetupPA(FaceType::Interior);
          RD_ptr->SetupPA(FaceType::Boundary);
+      }
+      else if (auto lo_ptr = dynamic_cast<const PADiscreteUpwind*>(lo_solver))
+      {
+         //Construct K, D in K* = K + D
+         lo_ptr->AssembleBlkOperators();
+         lo_ptr->SampleVelocity(FaceType::Interior);
+         lo_ptr->SampleVelocity(FaceType::Boundary);
+         lo_ptr->SetupPA(FaceType::Interior);
+         lo_ptr->SetupPA(FaceType::Boundary);
       }
       else
       {
