@@ -93,20 +93,25 @@ public:
 class PADiscreteUpwind : public LOSolver, public PADGTraceLOSolver
 {
 protected:
-   ParBilinearForm &k_pbilinear;
-   ConvectionIntegrator *Conv;
-   const SparseMatrix &K;
-   mutable SparseMatrix D;
-   const Array<int> &K_smap;
+   //ParBilinearForm &k_pbilinear;
+   ConvectionIntegrator *Conv = nullptr;
+   //const SparseMatrix &K;
+   //mutable SparseMatrix D;
+   //const Array<int> &K_smap;
    const Vector &M_lumped;
    const bool time_dep;
+   mutable Vector ConvMats;
+   mutable Vector AlgDiffMats;
 
 public:
    PADiscreteUpwind(ParFiniteElementSpace &space,
-                    ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
-                    const SparseMatrix &adv,
-                    const Array<int> &adv_smap, const Vector &Mlump,
+                    /*ParBilinearForm &Kbf,*/ ConvectionIntegrator *Conv_,
+                    /* const SparseMatrix &adv,*/
+                    /*const Array<int> &adv_smap, */ const Vector &Mlump,
                     Assembly &asmbly, bool timedep);
+
+   /*Block Operators are in row major format*/
+   void AssembleBlkOperators() const;
 
    void ComputeAlgebraicDiffusion(Vector &ConvMats, Vector &AlgDiff) const;
 

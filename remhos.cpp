@@ -621,18 +621,26 @@ int main(int argc, char *argv[])
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(k.SpMat());
-      lo_solver = new PADiscreteUpwind(pfes, k_du, conv_int, k.SpMat(), lo_smap,
-                                       lumpedM, asmbl, time_dep);
-
-      if (exec_mode == 0)
+      if (pa)
       {
-         const PADiscreteUpwind *lo_ptr =
-            dynamic_cast<const PADiscreteUpwind*>(lo_solver);
-         lo_ptr->SampleVelocity(FaceType::Interior);
-         lo_ptr->SampleVelocity(FaceType::Boundary);
-         lo_ptr->SetupPA(FaceType::Interior);
-         lo_ptr->SetupPA(FaceType::Boundary);
+         lo_solver = new PADiscreteUpwind(pfes, conv_int,
+                                          lumpedM, asmbl, time_dep);
+         if (exec_mode == 0)
+         {
+            const PADiscreteUpwind *lo_ptr =
+               dynamic_cast<const PADiscreteUpwind*>(lo_solver);
+            lo_ptr->AssembleBlkOperators();
+            lo_ptr->SampleVelocity(FaceType::Interior);
+            lo_ptr->SampleVelocity(FaceType::Boundary);
+            lo_ptr->SetupPA(FaceType::Interior);
+            lo_ptr->SetupPA(FaceType::Boundary);
+         }
+      }
+      else
+      {
+         lo_smap = SparseMatrix_Build_smap(k.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep);
       }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)

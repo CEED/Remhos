@@ -42,9 +42,9 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
 }
 
 PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
-                                   ParBilinearForm &Kbf, ConvectionIntegrator *Conv_,
-                                   const SparseMatrix &adv,
-                                   const Array<int> &adv_smap, const Vector &Mlump,
+                                   /*ParBilinearForm &Kbf,*/ ConvectionIntegrator *Conv_,
+                                   /*const SparseMatrix &adv,*/
+                                   /*const Array<int> &adv_smap,*/ const Vector &Mlump,
                                    Assembly &asmbly, bool timedep)
    : LOSolver(space),
      PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
@@ -53,7 +53,8 @@ PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
                        get_maps(pfes, asmbly)->nqpt :
                        get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
                        asmbly),
-     k_pbilinear(Kbf), Conv(Conv_), K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
+     /*k_pbilinear(Kbf),*/ Conv(Conv_), /*K(adv), D(), K_smap(adv_smap), */ M_lumped(
+        Mlump),
      time_dep(timedep)
 {
 }
@@ -93,77 +94,48 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
 void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 {
-   //mfem_error("Here! \n");
-   const int ndof = trace_pfes.GetFE(0)->GetDof();
-   const int NE     = trace_pfes.GetMesh()->GetNE();
-   Vector alpha(ndof); alpha = 0.0;
    du = 0.0;
 
-   // Discretization and monotonicity terms.
-   //D.Mult(u, du);
+   //Construct K, D
+   if (false)
+   {
+      //Given in row major format
+      AssembleBlkOperators();
+   }
 
-   //Vector y(du.Size()); y = 0.0;
-
-   //Clearly incorrect...
-   //k_pbilinear.Mult(u, y);
-
-   Vector ConvMats(ndof * ndof * NE);
-   Vector AlgDiffMats(ndof * ndof * NE); AlgDiffMats = 0.0;
-
-   //Given in row major format
-   Conv->AssembleEA(pfes, ConvMats, false);
-
-   ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
-
-   //K* = K + D
+   //Apply K* = K + D
 
    //Mult K
-
    AddBlkMult(ConvMats, u, du);
 
    //Mult D
    AddBlkMult(AlgDiffMats, u, du);
 
-
-   //std::cout<<du.Norml2()<<std::endl;
-
-   /*
-   y-=du;
-   double error = y.Norml2();
-   if (error > 1e-12)
-   {
-      std::cout<<"Error too high "<<error<<std::endl;
-      exit(-1);
-   }
-   */
-
-
-   // Lump fluxes (for PDU).
-   ParGridFunction u_gf(&trace_pfes);
-   u_gf = u;
-   u_gf.ExchangeFaceNbrData();
-
    ApplyFaceTerms(u, du, FaceType::Interior);
    ApplyFaceTerms(u, du, FaceType::Boundary);
 
-   //const int ne = pfes.GetNE();
    u.HostRead();
    du.HostReadWrite();
    M_lumped.HostRead();
 
-   /*
-   for (int k = 0; k < NE; k++)
-   {
-      // Face contributions.
-      for (int f = 0; f < trace_assembly.dofs.numBdrs; f++)
-      {
-        trace_assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
-      }
-   }
-   */
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+}
+
+void PADiscreteUpwind::AssembleBlkOperators() const
+{
+   const int ndof = trace_pfes.GetFE(0)->GetDof();
+   const int NE     = trace_pfes.GetMesh()->GetNE();
+
+   ConvMats.SetSize(ndof * ndof * NE);
+   AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
+
+   Conv->AssembleEA(pfes, ConvMats, false);
+   ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
 }
 
 void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
