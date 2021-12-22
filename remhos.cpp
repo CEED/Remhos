@@ -417,6 +417,8 @@ int main(int argc, char *argv[])
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
+   ConvectionIntegrator *conv = nullptr;
+   ConvectionIntegrator *trconv = nullptr;
    if (exec_mode == 0)
    {
       MFEM_ABORT("only remap tests now");
@@ -425,6 +427,7 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
+      conv = new ConvectionIntegrator(v_coef);
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
 
@@ -432,12 +435,17 @@ int main(int argc, char *argv[])
       auto dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
       K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
       K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-      K_HO.KeepNbrBlock(true);
+      //K_HO.KeepNbrBlock(true);
+
+      //Will tranpose when we actually compute with it
+      trconv = new ConvectionIntegrator(v_diff_coeff, -1.0);
 
       auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
-      auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
-      K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-      K_HO.AddInteriorFaceIntegrator(dgt);
+      //auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5); use this one
+
+      //auto dgt = new DGTraceIntegrator(v_coef, -1.0, -0.5); //holder
+      //K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
+      //K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt));
    }
 
 //   if (ho_type == HOSolverType::CG ||
@@ -540,8 +548,9 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = used_v; }
-   else                { lom.coef = used_v; }
+   lom.coef = &v_coef;
+   //   if (exec_mode == 1) { lom.coef = used_v; }
+   //else                { lom.coef = used_v; }
 
    // Face integration rule.
    const FaceElementTransformations *ft =
@@ -651,8 +660,10 @@ int main(int argc, char *argv[])
    if (lo_type == LOSolverType::DiscrUpwind)
    {
       lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+
+      lo_solver = new PADiscreteUpwind(pfes, conv, trconv,
+                                       K_HO.SpMat(), lo_smap,
+                                       lumpedM, asmbl, time_dep);
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
