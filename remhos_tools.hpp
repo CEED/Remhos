@@ -289,6 +289,7 @@ public:
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
+   void EvalGD(Vector &v, ElementTransformation &T, const IntegrationPoint &ip);
 
    void DetectModificationCells();
 };

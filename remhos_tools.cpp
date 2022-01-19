@@ -1156,6 +1156,9 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
+   EvalGD(v, T, ip);
+   return;
+
    T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
 
@@ -1175,7 +1178,6 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
       Vector grad(vdim);
       const double max = u_max.GetValue(T, ip);
       u_max.GetGradient(T, grad);
-
 
       if (grad * grad > eps && max + eps < interface_val)
       {
@@ -1254,6 +1256,44 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
          {
             v_new(d) = (1.0 - v_factor) * v(d) * f + v_factor * v(d);
          }
+      }
+   }
+
+   if (take_v_difference)
+   {
+      for (int d = 0; d < vdim; d++) { v(d) = v_new(d) - v(d); }
+   }
+   else { v = v_new; }
+}
+
+void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
+                                 const IntegrationPoint &ip)
+{
+   T.SetIntPoint(&ip);
+   v_coeff.Eval(v, T, ip);
+
+   Vector v_new(v);
+   const double trans_01_power = 3;
+
+   const double max = u_max.GetValue(T, ip);
+
+   Vector grad_dir(vdim);
+   u_max.GetGradient(T, grad_dir);
+   grad_dir /= sqrt(grad_dir * grad_dir + 1e-12);
+
+   const double eps = 1e-12;
+
+   if (max + eps < interface_val)
+   {
+      for (int d = 0; d < vdim; d++)
+      {
+         // max = 0.0   -> modify v in the direction of grad_u.
+         //                decreases to 0 in the front (grad_u*v > 0).
+         //                increases up to 2v in the tail (grad_u*v < 0).
+         // max = i_val -> keep the same v.
+         v_new(d) = v(d) - (1.0 - pow(max / interface_val, trans_01_power)) *
+                           v(d) * grad_dir(d);
+         //v_new(d) = v(d);
       }
    }
 
