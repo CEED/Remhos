@@ -172,7 +172,8 @@ public:
    void ComputeElementMaxSparcityBound(const ParGridFunction &u,
                                        int nbr_level, Vector &el_max);
    void ComputeLinMaxBound(const ParGridFunction &u,
-                           ParGridFunction &u_lin_max);
+                           ParGridFunction &u_lin_max,
+                           ParGridFunction &u_lin_max_grad);
 };
 
 class Assembly
@@ -266,11 +267,11 @@ class VelocityCoefficient : public VectorCoefficient
 {
 private:
    const ParGridFunction &u_max, &w_max;
+   const ParGridFunction &u_max_grad_dir;
    VectorCoefficient &v_coeff;
    const double interface_val;
    int exec_mode;
    bool take_v_difference;
-   Array<bool> modify_cell;
 
 public:
    // dynamic options.
@@ -280,18 +281,34 @@ public:
 
    VelocityCoefficient(VectorCoefficient &vc,
                        const ParGridFunction &umax, const ParGridFunction &wmax,
+                       const ParGridFunction &umgd,
                        double interface, int mode, bool take_v_diff)
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
-        v_coeff(vc), u_max(umax), w_max(wmax),
+        v_coeff(vc), u_max(umax), w_max(wmax), u_max_grad_dir(umgd),
         interface_val(interface), exec_mode(mode),
-        take_v_difference(take_v_diff),
-        modify_cell(umax.ParFESpace()->GetNE()) { }
+        take_v_difference(take_v_diff) { }
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
    void EvalGD(Vector &v, ElementTransformation &T, const IntegrationPoint &ip);
+};
 
-   void DetectModificationCells();
+class NormalGradCoeff : public VectorCoefficient
+{
+private:
+   const ParGridFunction &u;
+
+public:
+   NormalGradCoeff(const ParGridFunction &u_gf) :
+      VectorCoefficient(u_gf.ParFESpace()->GetMesh()->Dimension()), u(u_gf) { }
+
+   virtual void Eval(Vector &V, ElementTransformation &T,
+                     const IntegrationPoint &ip)
+   {
+      u.GetGradient(T, V);
+      const double norm_grad = V.Norml2();
+      if (norm_grad > 0.0) { V /= norm_grad; }
+   }
 };
 
 } // namespace mfem

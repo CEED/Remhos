@@ -565,7 +565,8 @@ void DofInfo::ComputeElementMaxSparcityBound(const ParGridFunction &u,
 }
 
 void DofInfo::ComputeLinMaxBound(const ParGridFunction &u,
-                                 ParGridFunction &u_lin_max)
+                                 ParGridFunction &u_lin_max,
+                                 ParGridFunction &u_lin_max_grad)
 {
    ParFiniteElementSpace *pfes_lin = u_lin_max.ParFESpace();
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
@@ -600,6 +601,11 @@ void DofInfo::ComputeLinMaxBound(const ParGridFunction &u,
    Array<double> maxvals(u_lin_max.GetData(), u_lin_max.Size());
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
    gcomm.Bcast(maxvals);
+
+   NormalGradCoeff grad_u_coeff_L2(u_lin_max);
+   u_lin_max.ExchangeFaceNbrData();
+   u_lin_max_grad.ProjectDiscCoefficient(grad_u_coeff_L2,
+                                         GridFunction::ARITHMETIC);
 }
 
 void DofInfo::FillNeighborDofs()
@@ -1276,10 +1282,8 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
    const double trans_01_power = 3;
 
    const double max = u_max.GetValue(T, ip);
-
    Vector grad_dir(vdim);
-   u_max.GetGradient(T, grad_dir);
-   grad_dir /= sqrt(grad_dir * grad_dir + 1e-12);
+   u_max_grad_dir.GetVectorValue(T, ip, grad_dir);
 
    const double eps = 1e-12;
 
@@ -1302,41 +1306,6 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
       for (int d = 0; d < vdim; d++) { v(d) = v_new(d) - v(d); }
    }
    else { v = v_new; }
-}
-
-void VelocityCoefficient::DetectModificationCells()
-{
-   ParMesh &pmesh = *u_max.ParFESpace()->GetParMesh();
-   ElementTransformation &Tr = *pmesh.GetElementTransformation(0);
-   const FiniteElement *el = u_max.ParFESpace()->GetFE(0);
-   int order = Tr.OrderGrad(el) + Tr.Order() + el->GetOrder();
-   const IntegrationRule &ir = IntRules.Get(el->GetGeomType(), order);
-   const int nqp = ir.GetNPoints();
-
-   const double eps = 1e-12;
-   Vector grad(vdim), v(vdim);
-   const int NE = pmesh.GetNE();
-   for (int k = 0; k < NE; k++)
-   {
-      Tr = *pmesh.GetElementTransformation(k);
-      bool has_neg_dot = false, has_pos_dot = false;
-      for (int q = 0; q < nqp; q++)
-      {
-         const IntegrationPoint &ip = ir.IntPoint(q);
-         Tr.SetIntPoint(&ip);
-         u_max.GetGradient(Tr, grad);
-         v_coeff.Eval(v, Tr, ip);
-
-         if (grad * grad > eps)
-         {
-            if (grad * v < 0.0) { has_neg_dot = true; }
-            else                { has_pos_dot = true; }
-         }
-      }
-      // If both are positive, we should not mess it up.
-      // If both are negative, the gradient is zero; no need to modify.
-      modify_cell[k] = (has_neg_dot == has_pos_dot) ? false : true;
-   }
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,

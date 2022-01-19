@@ -338,8 +338,10 @@ int main(int argc, char *argv[])
    }
 
    H1_FECollection lin_fec(1, dim);
-   ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec);
+   ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec),
+                         lin_pfes_grad(&pmesh, &lin_fec, dim);
    ParGridFunction u_max_bounds(&lin_pfes), w_max_bounds(&lin_pfes);
+   ParGridFunction u_max_bounds_grad_dir(&lin_pfes_grad);
    u_max_bounds = 1.0;
    w_max_bounds = 1.0;
 
@@ -403,15 +405,15 @@ int main(int argc, char *argv[])
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
    VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds,
-                                       1.0, 0, false);
+                                       u_max_bounds_grad_dir, 1.0, 0, false);
    VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds,
-                                       1.0, 1, false);
+                                       u_max_bounds_grad_dir, 1.0, 1, false);
    VelocityCoefficient *used_v;
    if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
    if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
    VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
-                                    1.0, 1, true);
+                                    u_max_bounds_grad_dir, 1.0, 1, true);
    v_diff_coeff.slow_front_u = true;
    v_diff_coeff.push_tail_u = true;
 
@@ -931,8 +933,8 @@ int main(int argc, char *argv[])
       }
 
       // needed for velocity modifications.
-      dof_info.ComputeLinMaxBound(u, u_max_bounds);
-      dof_info.ComputeLinMaxBound(w, w_max_bounds);
+      dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
+      //dof_info.ComputeLinMaxBound(w, w_max_bounds);
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
@@ -1344,7 +1346,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    v_coeff.slow_front_w = false;
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
-   v_diff_coeff.DetectModificationCells();
    AssembleAndEvolve(u, d_u);
 
    // Compute du without modification.
