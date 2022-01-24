@@ -1285,6 +1285,8 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
    Vector grad_dir(vdim);
    u_max_grad_dir.GetVectorValue(T, ip, grad_dir);
 
+   const double v_magn = sqrt(v*v);
+
    const double eps = 1e-12;
 
    if (max + eps < interface_val)
@@ -1296,7 +1298,7 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
          //                increases up to 2v in the tail (grad_u*v < 0).
          // max = i_val -> keep the same v.
          v_new(d) = v(d) - (1.0 - pow(max / interface_val, trans_01_power)) *
-                           v(d) * grad_dir(d);
+                           v_magn * grad_dir(d);
          //v_new(d) = v(d);
       }
    }

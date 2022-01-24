@@ -306,8 +306,7 @@ public:
                      const IntegrationPoint &ip)
    {
       u.GetGradient(T, V);
-      const double norm_grad = V.Norml2();
-      if (norm_grad > 0.0) { V /= norm_grad; }
+      V /= sqrt(V*V + 1e-12);
    }
 };
 
