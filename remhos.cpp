@@ -113,7 +113,15 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
-   void SetTimeStepControl(TimeStepControl tsc) { dt_control = tsc; }
+   void SetTimeStepControl(TimeStepControl tsc)
+   {
+      if (tsc == TimeStepControl::LOBoundsError)
+      {
+         MFEM_VERIFY(lo_solver,
+                     "The selected time step control requires a LO solver.");
+      }
+      dt_control = tsc;
+   }
    void SetDt(double _dt) { dt = _dt; dt_est = dt; }
    double GetTimeStepEstimate() { return dt_est; }
 
@@ -869,7 +877,8 @@ int main(int argc, char *argv[])
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    BlockVector Sold(S);
-   for (int ti = 0; !done;)
+   int ti_total = 0, ti = 0;
+   while (done == false)
    {
       double dt_real = min(dt, t_final - t);
 
@@ -893,17 +902,18 @@ int main(int argc, char *argv[])
       Sold = S;
       ode_solver->Step(S, t, dt_real);
       ti++;
+      ti_total++;
 
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
-         if (dt_real > dt_est)
+         if (dt_est < dt_real)
          {
             // Repeat with the proper time step.
             if (myid == 0)
             {
                cout << "Repeat / decrease dt: "
-                 << dt_real << " --> " << dt_est << endl;
+                    << dt_real << " --> " << dt_est << endl;
             }
             ti--;
             t -= dt_real;
@@ -911,6 +921,7 @@ int main(int argc, char *argv[])
             dt = dt_est;
             continue;
          }
+         else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
       }
 
       // S has been modified, update the alias
@@ -1014,8 +1025,8 @@ int main(int argc, char *argv[])
       {
          if (myid == 0)
          {
-            cout << "time step: " << ti << ", time: " << t << ", residual: "
-                 << residual << endl;
+            cout << "time step: " << ti << ", time: " << t
+                 << ", dt: " << dt << ", residual: " << residual << endl;
          }
 
          if (visualization)
@@ -1042,6 +1053,12 @@ int main(int argc, char *argv[])
             dc->Save();
          }
       }
+   }
+
+   if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
+   {
+      cout << "Total time steps: " << ti_total
+           << " (" << ti_total-ti << " repeated)." << endl;
    }
 
    // Print the final meshes and solution.
@@ -1286,16 +1303,21 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
-      double new_dt_est_loc =
-         ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      dt_est = fmin(dt_est, new_dt_est_loc);
+      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
       MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
                     x_gf.ParFESpace()->GetComm());
 
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (lo_solver)
+   {
+      lo_solver->CalcLOSolution(u, d_u);
+
+      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
+                    x_gf.ParFESpace()->GetComm());
+   }
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
@@ -1381,7 +1403,6 @@ double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
    const double cfl = 0.5, eps = 1e-15, dt_min = 1e-10;
    double dt = numeric_limits<double>::infinity();
 
-   // TODO logic to increase the time step.
    for (int i = 0; i < n; i++)
    {
       if (dx(i) > eps)
