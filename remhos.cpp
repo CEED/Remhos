@@ -47,6 +47,8 @@ enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSub
 enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
+enum class TimeStepControl {FixedTimeStep, LOBoundsError};
+
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
@@ -82,6 +84,7 @@ private:
    mutable ParGridFunction x_gf;
 
    double dt;
+   TimeStepControl dt_control;
    mutable double dt_est;
    Assembly &asmbl;
 
@@ -92,6 +95,10 @@ private:
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
+
+   double ComputeTimeStepEstimate(const Vector &x, const Vector &dx,
+                                  const Vector &x_min,
+                                  const Vector &x_max) const;
 
 public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
@@ -106,7 +113,8 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
-   virtual void SetDt(double _dt) { dt = _dt; dt_est = dt; }
+   void SetTimeStepControl(TimeStepControl tsc) { dt_control = tsc; }
+   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
    double GetTimeStepEstimate() { return dt_est; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
@@ -114,10 +122,6 @@ public:
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
-
-   double TimeStepControl(const Vector &x, const Vector &dx,
-                          const Vector &x_min,
-                          const Vector &x_max) const;
 
    virtual ~AdvectionOperator() { }
 };
@@ -142,6 +146,7 @@ int main(int argc, char *argv[])
    bool next_gen_full = false;
    int smth_ind_type = 0;
    double t_final = 4.0;
+   TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
@@ -203,8 +208,11 @@ int main(int argc, char *argv[])
                   "                      2 - exact_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
+   args.AddOption((int*)(&dt_control), "-dtc", "--dt-control",
+                  "Time Step Control: 0 - Fixed time step, set with -dt,\n\t"
+                  "                   1 - Bounds violation of the LO sltn.");
    args.AddOption(&dt, "-dt", "--time-step",
-                  "Time step.");
+                  "Initial time step size (dt might change based on -dtc).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -838,6 +846,7 @@ int main(int argc, char *argv[])
 
    double t = 0.0;
    adv.SetTime(t);
+   adv.SetTimeStepControl(dt_control);
    ode_solver->Init(adv);
 
    double umin, umax;
@@ -885,22 +894,24 @@ int main(int argc, char *argv[])
       ode_solver->Step(S, t, dt_real);
       ti++;
 
-      double dt_est = adv.GetTimeStepEstimate();
-      if (dt_real > dt_est)
+      if (dt_control != TimeStepControl::FixedTimeStep)
       {
-         // Repeat with the proper time step.
-         if (myid == 0)
+         double dt_est = adv.GetTimeStepEstimate();
+         if (dt_real > dt_est)
          {
-            cout << "Repeat / decrease dt: "
+            // Repeat with the proper time step.
+            if (myid == 0)
+            {
+               cout << "Repeat / decrease dt: "
                  << dt_real << " --> " << dt_est << endl;
+            }
+            ti--;
+            t -= dt_real;
+            S  = Sold;
+            dt = dt_est;
+            continue;
          }
-         ti--;
-         t -= dt_real;
-         S = Sold;
-         dt = dt_est;
-         continue;
       }
-
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1275,9 +1286,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
-      double dt_est_loc =
-            min(dt_est, TimeStepControl(u, du_LO, dofs.xi_min, dofs.xi_max));
-      MPI_Allreduce(&dt_est_loc, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
+      double new_dt_est_loc =
+         ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      dt_est = fmin(dt_est, new_dt_est_loc);
+      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
                     x_gf.ParFESpace()->GetComm());
 
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
@@ -1357,10 +1369,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 }
 
-double AdvectionOperator::TimeStepControl(const Vector &x, const Vector &dx,
-                                          const Vector &x_min,
-                                          const Vector &x_max) const
+double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
+                                                  const Vector &dx,
+                                                  const Vector &x_min,
+                                                  const Vector &x_max) const
 {
+   if (dt_control == TimeStepControl::FixedTimeStep) { return dt; }
+
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
    const double cfl = 0.5, eps = 1e-15, dt_min = 1e-10;
