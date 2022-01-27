@@ -22,6 +22,13 @@ using namespace std;
 namespace mfem
 {
 
+const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
+{
+   const FiniteElement *el_trace =
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
+}
+
 DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
@@ -32,6 +39,21 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
 {
    D = K;
    ComputeDiscreteUpwindMatrix();
+}
+
+PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
+                                   ConvectionIntegrator *Conv_,
+                                   const Vector &Mlump,
+                                   Assembly &asmbly, bool timedep)
+  : LOSolver(space),
+    PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
+                      get_maps(pfes, asmbly)->ndof,
+                      (pfes.GetMesh()->Dimension() ==2) ?
+                      get_maps(pfes, asmbly)->nqpt :
+                      get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
+                      asmbly),
+  Conv(Conv_), M_lumped(Mlump), time_dep(timedep)
+{
 }
 
 void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
@@ -71,6 +93,33 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+}
+
+void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
+{
+  du = 0.0;
+
+  //Apply K* = K + D
+
+  //Mult K
+  AddBlkMult(ConvMats, u, du);
+
+  //Mult D
+  AddBlkMult(AlgDiffMats, u, du);
+
+  ApplyFaceTerms(u, du, FaceType::Interior);
+  ApplyFaceTerms(u, du, FaceType::Boundary);
+
+  u.HostRead();
+  du.HostReadWrite();
+  M_lumped.HostRead();
+
+  ParGridFunction u_gf(&pfes);
+  u_gf = u;
+  u_gf.ExchangeFaceNbrData();
+
+  const int s = du.Size();
+  for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
@@ -119,6 +168,705 @@ void DiscreteUpwind::ApplyDiscreteUpwindMatrix(ParGridFunction &u,
          double d_ij = D_data[k];
          du(i) += d_ij * u_j;
       }
+   }
+}
+
+void PADiscreteUpwind::AssembleBlkOperators() const
+{
+  const int ndof = trace_pfes.GetFE(0)->GetDof();
+  const int NE     = trace_pfes.GetMesh()->GetNE();
+
+  ConvMats.SetSize(ndof * ndof * NE);
+  AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
+
+  Conv->AssembleEA(pfes, ConvMats, false);
+  ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
+}
+
+void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
+                                                 Vector &AlgDiff) const
+{
+
+  const int ndof = pfes.GetFE(0)->GetDof();
+  const int NE     = pfes.GetMesh()->GetNE();
+  auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
+  auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
+
+  //Matrices are assumed to be in row major format
+  for (int e=0; e<NE; ++e)
+  {
+
+    //Dij = max{0, -Kij, -Kji}
+    for (int c=0; c<ndof; ++c)
+    {
+      for (int r=0; r<ndof; ++r)
+      {
+
+        if (r == c) { continue; }
+
+        alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+      }
+    }
+
+    for (int d=0; d<ndof; d++)
+    {
+
+      double dii = 0;
+      for (int k=0; k<ndof; ++k)
+      {
+        if (k==d) { continue; }
+        dii -= alg_blk(k,d,e);
+      }
+      alg_blk(d,d,e) = dii;
+    }
+  }
+
+}
+
+void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
+                                  const Vector &x, Vector &y) const
+{
+  
+  const int ndof = pfes.GetFE(0)->GetDof();
+  const int NE     = pfes.GetMesh()->GetNE();
+  
+  auto X = Reshape(x.Read(), ndof, NE);
+  auto Y = Reshape(y.Write(), ndof, NE);
+  auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
+  
+  //Takes row major format
+  for (int e=0; e<NE; ++e)
+  {
+    for (int c=0; c<ndof; ++c)
+      {
+        double dot=0;
+        for (int r=0; r<ndof; ++r)
+          {
+                dot += Me(r, c, e) * X(r, e);
+          }
+        Y(c, e) += dot;
+      }
+  }
+  
+}
+
+//=====DG Trace solvers=====
+// Taken from DGTraceIntegrator::SetupPA L:145
+void PADGTraceLOSolver::SampleVelocity(FaceType type) const
+{
+   const int nf = trace_pfes.GetNFbyType(type);
+   if (nf == 0) { return; }
+
+   const IntegrationRule *ir = trace_assembly.lom.irF;
+
+   Mesh *mesh = trace_pfes.GetMesh();
+   const int dim = mesh->Dimension();
+   const int nq = ir->GetNPoints();
+
+   double *vel_ptr = nullptr;
+   if (type == FaceType::Interior)
+   {
+      IntVelocity.SetSize(dim * nq * nf);
+      vel_ptr = IntVelocity.HostWrite();
+   }
+
+   if (type == FaceType::Boundary)
+   {
+      BdryVelocity.SetSize(dim * nq * nf);
+      vel_ptr = BdryVelocity.HostWrite();
+   }
+
+   auto C = mfem::Reshape(vel_ptr, dim, nq, nf);
+   Vector Vq(dim);
+
+   int f_idx = 0;
+   for (int f = 0; f < trace_pfes.GetNF(); ++f)
+   {
+      int e1, e2;
+      int inf1, inf2;
+      mesh->GetFaceElements(f, &e1, &e2);
+      mesh->GetFaceInfos(f, &inf1, &inf2);
+      int my_face_id = inf1 / 64;
+
+      if ((type==FaceType::Interior && (e2>=0 || (e2<0 && inf2>=0))) ||
+          (type==FaceType::Boundary && e2<0 && inf2<0) )
+      {
+
+         FaceElementTransformations &T =
+            *mesh->GetFaceElementTransformations(f);
+         for (int q = 0; q < nq; ++q)
+         {
+            // Convert to lexicographic ordering
+            int iq = ToLexOrdering(dim, my_face_id, quad1D, q);
+            T.SetAllIntPoints(&ir->IntPoint(q));
+            const IntegrationPoint &eip1 = T.GetElement1IntPoint();
+            trace_assembly.lom.coef->Eval(Vq, *T.Elem1, eip1);
+            for (int i = 0; i < dim; ++i)
+            {
+               C(i,iq,f_idx) = Vq(i);
+            }
+         }
+         f_idx++;
+      }
+   }
+}
+
+void PADGTraceLOSolver::SetupPA(FaceType type) const
+{
+   const FiniteElementSpace *fes = trace_assembly.GetFes();
+   int nf = fes->GetNFbyType(type);
+   if (nf == 0) {return;}
+
+   Mesh *mesh = fes->GetMesh();
+   int dim = mesh->Dimension();
+   mesh->DeleteGeometricFactors();
+
+   if (dim == 2) { return SetupPA2D(type); }
+   if (dim == 3) { return SetupPA3D(type); }
+}
+
+void PADGTraceLOSolver::SetupPA2D(FaceType type) const
+{
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
+   const int dim = mesh->Dimension();
+
+   const IntegrationRule *ir = trace_assembly.lom.irF;
+
+   const FaceGeometricFactors *geom =
+      mesh->GetFaceGeometricFactors(*ir,
+                                    FaceGeometricFactors::DETERMINANTS |
+                                    FaceGeometricFactors::NORMALS, type);
+
+   auto n = mfem::Reshape(geom->normal.Read(), quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.Read(), quad1D, nf);
+   const double *w = ir->GetWeights().Read();
+
+   const double *vel_ptr;
+   if (type == FaceType::Interior) { vel_ptr = IntVelocity.Read(); }
+   if (type == FaceType::Boundary) { vel_ptr = BdryVelocity.Read(); }
+
+   auto vel = mfem::Reshape(vel_ptr, dim, ir->GetNPoints(), nf);
+
+   const int execMode = (int) trace_assembly.GetExecMode();
+
+   if (type == FaceType::Interior)
+   {
+      //two sides per face
+      D_int.SetSize(quad1D*2*nf);
+      auto D = mfem::Reshape(D_int.Write(), quad1D, 2, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         for (int f_side=0; f_side<2; ++f_side)
+         {
+            for (int k1 = 0; k1 < quad1D; ++k1)
+            {
+               int direction = 1 - 2*f_side;
+
+               double vvalnor =
+               vel(0,k1,f)*direction*n(k1, 0, f) +
+               vel(1,k1,f)*direction*n(k1, 1, f);
+
+               if (execMode == 0)
+               {
+                  vvalnor = fmin(0., vvalnor); //advection
+               }
+               else
+               {
+                  vvalnor = -fmax(0., vvalnor);
+               }
+
+               double t_vn = vvalnor* w[k1] * detJ(k1, f);
+               D(k1, f_side, f) = - t_vn;
+            }
+
+         }//f_side
+
+      });
+   }//Interior
+
+   if (type == FaceType::Boundary)
+   {
+      //Only one side per face on the boundary
+      D_bdry.SetSize(quad1D*nf);
+      auto D = mfem::Reshape(D_bdry.Write(), quad1D, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         for (int k1 = 0; k1 < quad1D; ++k1)
+         {
+            double vvalnor =
+            vel(0,k1,f)*n(k1, 0, f) +
+            vel(1,k1,f)*n(k1, 1, f);
+
+            if (execMode == 0)
+            {
+               vvalnor = fmin(0., vvalnor);
+            }
+            else
+            {
+               vvalnor = -fmax(0., vvalnor);
+            }
+
+            double t_vn = vvalnor* w[k1] * detJ(k1, f);
+            D(k1, f) = - t_vn;
+         }
+      });
+   }//boundary
+}
+
+void PADGTraceLOSolver::SetupPA3D(FaceType type) const
+{
+   const int nf = trace_pfes.GetNFbyType(type);
+   Mesh *mesh = trace_pfes.GetMesh();
+   const int dim = mesh->Dimension();
+
+   const IntegrationRule *ir = trace_assembly.lom.irF;
+
+   const FaceGeometricFactors *geom =
+      mesh->GetFaceGeometricFactors(*ir,
+                                    FaceGeometricFactors::DETERMINANTS |
+                                    FaceGeometricFactors::NORMALS, type);
+
+   auto n = mfem::Reshape(geom->normal.Read(), quad1D, quad1D, dim, nf);
+   auto detJ = mfem::Reshape(geom->detJ.Read(), quad1D, quad1D, nf);
+   const double *w = ir->GetWeights().Read();
+
+   const double *vel_ptr;
+   if (type == FaceType::Interior) { vel_ptr = IntVelocity.Read(); }
+   if (type == FaceType::Boundary) { vel_ptr = BdryVelocity.Read(); }
+
+   auto vel = mfem::Reshape(vel_ptr, dim,  quad1D, quad1D, nf);
+
+   const int execMode = (int) trace_assembly.GetExecMode();
+
+   if (type == FaceType::Interior)
+   {
+      D_int.SetSize(quad1D*quad1D*2*nf);
+      auto D = mfem::Reshape(D_int.Write(), quad1D, quad1D, 2, nf);
+      auto int_weights = mfem::Reshape(w, quad1D, quad1D);
+
+      MFEM_FORALL(f, nf,
+      {
+         for (int f_side=0; f_side<2; ++f_side)
+         {
+            for (int k2 = 0; k2 < quad1D; ++k2)
+            {
+               for (int k1 = 0; k1 < quad1D; ++k1)
+               {
+
+                  int direction = 1 - 2*f_side;
+
+                  double vvalnor =
+                  vel(0, k1, k2, f)*direction*n(k1, k2, 0, f) +
+                  vel(1, k1, k2, f)*direction*n(k1, k2, 1, f) +
+                  vel(2, k1, k2, f)*direction*n(k1, k2, 2, f);
+
+                  if (execMode == 0)
+                  {
+                     vvalnor = fmin(0., vvalnor); //advection
+                  }
+                  else
+                  {
+                     vvalnor = -fmax(0., vvalnor);
+                  }
+
+                  double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
+                  D(k1, k2, f_side, f) = -t_vn;
+               }//k1
+            }//k2
+         }//f_side
+      });
+   }//interior
+
+   //boundary
+   if (type == FaceType::Boundary)
+   {
+      D_bdry.SetSize(quad1D*quad1D*nf);
+      auto D = mfem::Reshape(D_bdry.Write(), quad1D, quad1D, nf);
+      auto int_weights = mfem::Reshape(w, quad1D, quad1D);
+
+      MFEM_FORALL(f, nf,
+      {
+         for (int k2 = 0; k2 < quad1D; ++k2)
+         {
+            for (int k1 = 0; k1 < quad1D; ++k1)
+            {
+               double vvalnor =
+               vel(0, k1, k2, f)*n(k1, k2, 0, f) +
+               vel(1, k1, k2, f)*n(k1, k2, 1, f) +
+               vel(2, k1, k2, f)*n(k1, k2, 2, f);
+
+               if (execMode == 0)
+               {
+                  vvalnor = fmin(0., vvalnor); //advection
+               }
+               else
+               {
+                  vvalnor = -fmax(0., vvalnor);
+               }
+
+               double t_vn = vvalnor* int_weights(k1,k2) * detJ(k1, k2, f);
+               D(k1, k2, f) = -t_vn;
+            }//k2
+         }//k1
+      });
+   }//bdry
+}
+
+void PADGTraceLOSolver::ApplyFaceTerms(const Vector &x, Vector &y,
+                                       FaceType type) const
+{
+   Mesh *mesh = trace_pfes.GetMesh();
+   int dim = mesh->Dimension();
+
+   if (dim == 2) { return ApplyFaceTerms2D(x, y, type); }
+   if (dim == 3) { return ApplyFaceTerms3D(x, y, type); }
+}
+
+void PADGTraceLOSolver::ApplyFaceTerms2D(const Vector &x, Vector &y,
+                                         FaceType type) const
+{
+   const int Q1D = quad1D;
+   const int D1D = dofs1D;
+   const int nf = trace_pfes.GetNFbyType(type);
+   const FaceRestriction * face_restrict_lex = nullptr;
+
+   const IntegrationRule *ir = trace_assembly.lom.irF;
+   const FiniteElement &el_trace =
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
+   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
+
+   if (type == FaceType::Interior)
+   {
+      face_restrict_lex =
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Currently all ranks must call Mult
+      face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, 2, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, 2, nf);
+      auto D = mfem::Reshape(D_int.Read(), quad1D, 2, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         constexpr int max_Q1D = MAX_Q1D;
+
+         double Bu0[max_Q1D];
+         double Bu1[max_Q1D];
+
+         for (int q=0; q<Q1D; ++q)
+         {
+            Bu0[q] = 0.0;
+            Bu1[q] = 0.0;
+
+            //we are lumping the terms
+            for (int d=0; d < D1D; ++d)
+            {
+               Bu0[q] += B(q,d) * 1.0;
+               Bu1[q] += B(q,d) * 1.0;
+            }
+         }
+
+         //Scale with quadrature data
+         double DBu0[max_Q1D];
+         double DBu1[max_Q1D];
+         for (int q=0; q<Q1D; ++q)
+         {
+            DBu0[q] = Bu0[q] * D(q, 0, f);
+            DBu1[q] = Bu1[q] * D(q, 1, f);
+         }
+
+         //Apply Bt
+         for (int d=0; d<D1D; ++d)
+         {
+
+            double res0(0.0), res1(0.0);
+            for (int q=0; q<Q1D; ++q)
+            {
+               res0 += B(q,d) * DBu0[q];
+               res1 += B(q,d) * DBu1[q];
+            }
+
+            Y(d, 0, f) = res0 * (X(d,1,f) - X(d,0,f));
+            Y(d, 1, f) = res1 * (X(d,0,f) - X(d,1,f));
+         }
+      });
+
+      face_restrict_lex->AddMultTranspose(y_loc,y);
+   }
+
+
+   if (type == FaceType::Boundary)
+   {
+
+      face_restrict_lex =
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                                       L2FaceValues::SingleValued);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Currently all ranks must call Mult
+      face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, nf);
+      auto D = mfem::Reshape(D_bdry.Read(), quad1D, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         constexpr int max_Q1D = MAX_Q1D;
+
+         double Bu0[max_Q1D];
+         for (int q=0; q<Q1D; ++q)
+         {
+            Bu0[q] = 0.0;
+
+            //we are lumping the terms
+            for (int d=0; d < D1D; ++d)
+            {
+               Bu0[q] += B(q,d) * 1.0;
+            }
+         }
+
+         //Scale with quadrature data
+         double DBu0[max_Q1D];
+         for (int q=0; q<Q1D; ++q)
+         {
+            DBu0[q] = Bu0[q] * D(q, f);
+         }
+
+         //Apply Bt
+         for (int d=0; d<D1D; ++d)
+         {
+
+            double res0(0.0);
+            for (int q=0; q<Q1D; ++q)
+            {
+               res0 += B(q,d) * DBu0[q];
+            }
+
+            Y(d, f) = -res0 * X(d,f);
+         }
+      });
+
+      face_restrict_lex->AddMultTranspose(y_loc,y);
+   }
+}
+
+void PADGTraceLOSolver::ApplyFaceTerms3D(const Vector &x, Vector &y,
+                                         FaceType type) const
+{
+   const int Q1D = quad1D;
+   const int D1D = dofs1D;
+   const int nf = trace_pfes.GetNFbyType(type);
+   const FaceRestriction * face_restrict_lex = nullptr;
+
+   const IntegrationRule *ir = trace_assembly.lom.irF;
+   const FiniteElement &el_trace =
+      *trace_pfes.GetTraceElement(0, trace_pfes.GetMesh()->GetFaceBaseGeometry(0));
+   const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
+
+   auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
+
+   if (type == FaceType::Interior)
+   {
+      face_restrict_lex =
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Currently all ranks must call Mult
+      face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, 2, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, 2, nf);
+      auto D = mfem::Reshape(D_int.Read(), quad1D, quad1D, 2, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+
+         double BX0[max_Q1D][max_D1D];
+         double BX1[max_Q1D][max_D1D];
+         for (int k2=0; k2<Q1D; ++k2)
+         {
+            for (int i1=0; i1<D1D; ++i1)
+            {
+
+               double res0(0), res1(0);
+               for (int i2=0; i2<D1D; ++i2)
+               {
+                  res0 += B(k2,i2)*1.0;
+                  res1 += B(k2,i2)*1.0;
+               }
+               BX0[k2][i1] = res0;
+               BX1[k2][i1] = res1;
+            }
+         }
+
+         double BBX0[max_Q1D][max_Q1D];
+         double BBX1[max_Q1D][max_Q1D];
+         for (int k2=0; k2<Q1D; ++k2)
+         {
+            for (int k1=0; k1<Q1D; ++k1)
+            {
+
+               double res0(0.0), res1(0.0);
+               for (int i1=0; i1<D1D; ++i1)
+               {
+                  res0 += B(k1,i1)*BX0[k2][i1];
+                  res1 += B(k1,i1)*BX1[k2][i1];
+               }
+               BBX0[k2][k1] = res0 * D(k1, k2, 0, f);
+               BBX1[k2][k1] = res1 * D(k1, k2, 1, f);
+            }
+         }
+
+         double BDBBX0[max_D1D][max_Q1D];
+         double BDBBX1[max_D1D][max_Q1D];
+         for (int j2=0; j2<D1D; ++j2)
+         {
+            for (int k1=0; k1<Q1D; ++k1)
+            {
+
+               double res0(0.0), res1(0.0);
+               for (int k2=0; k2<Q1D; ++k2)
+               {
+                  res0 += B(k2, j2) * BBX0[k2][k1];
+                  res1 += B(k2, j2) * BBX1[k2][k1];
+               }
+               BDBBX0[j2][k1] = res0;
+               BDBBX1[j2][k1] = res1;
+            }
+         }
+
+         for (int j2=0; j2<D1D; ++j2)
+         {
+            for (int j1=0; j1<D1D; ++j1)
+            {
+
+               double res0(0.0), res1(0.0);
+               for (int k1=0; k1<Q1D; ++k1)
+               {
+                  res0 += B(k1, j1) * BDBBX0[j2][k1];
+                  res1 += B(k1, j1) * BDBBX1[j2][k1];
+               }
+
+               Y(j1, j2, 0, f) = res0 * (X(j1,j2,1,f) - X(j1,j2,0,f));
+               Y(j1, j2, 1, f) = res1 * (X(j1,j2,0,f) - X(j1,j2,1,f));
+            }
+         }
+
+      });
+
+      face_restrict_lex->AddMultTranspose(y_loc,y);
+   }
+
+
+   if (type == FaceType::Boundary)
+   {
+
+      face_restrict_lex =
+         trace_pfes.GetFaceRestriction(ElementDofOrdering::LEXICOGRAPHIC,type,
+                                       L2FaceValues::SingleValued);
+
+      Vector x_loc(face_restrict_lex->Height());
+      Vector y_loc(face_restrict_lex->Height());
+
+      //Currently all ranks must call Mult
+      face_restrict_lex->Mult(x, x_loc);
+      if (nf == 0 ) { return; }
+      y_loc = 0.0;
+
+      auto X = mfem::Reshape(x_loc.Read(), dofs1D, dofs1D, nf);
+      auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, nf);
+      auto D = mfem::Reshape(D_bdry.Read(), quad1D, quad1D, nf);
+
+      MFEM_FORALL(f, nf,
+      {
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
+
+         double BX0[max_Q1D][max_D1D];
+         for (int k2=0; k2<Q1D; ++k2)
+         {
+            for (int i1=0; i1<D1D; ++i1)
+            {
+
+               double res0(0);
+               for (int i2=0; i2<D1D; ++i2)
+               {
+                  res0 += B(k2,i2)*1.0;
+               }
+               BX0[k2][i1] = res0;
+            }
+         }
+
+         double BBX0[max_Q1D][max_Q1D];
+         for (int k2=0; k2<Q1D; ++k2)
+         {
+            for (int k1=0; k1<Q1D; ++k1)
+            {
+
+               double res0(0.0);
+               for (int i1=0; i1<D1D; ++i1)
+               {
+                  res0 += B(k1,i1)*BX0[k2][i1];
+               }
+               BBX0[k2][k1] = res0 * D(k1, k2, f);
+            }
+         }
+
+         double BDBBX0[max_D1D][max_Q1D];
+         for (int j2=0; j2<D1D; ++j2)
+         {
+            for (int k1=0; k1<Q1D; ++k1)
+            {
+
+               double res0(0.0);
+               for (int k2=0; k2<Q1D; ++k2)
+               {
+                  res0 += B(k2, j2) * BBX0[k2][k1];
+               }
+               BDBBX0[j2][k1] = res0;
+            }
+         }
+
+         for (int j2=0; j2<D1D; ++j2)
+         {
+            for (int j1=0; j1<D1D; ++j1)
+            {
+
+               double res0(0.0);
+               for (int k1=0; k1<Q1D; ++k1)
+               {
+                  res0 += B(k1, j1) * BDBBX0[j2][k1];
+               }
+
+               Y(j1, j2, f) = -res0 * X(j1,j2,f);
+            }
+         }
+
+      });
+
+      face_restrict_lex->AddMultTranspose(y_loc,y);
    }
 }
 
@@ -266,13 +1014,6 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
                       M_lumped(dof_id);
       }
    }
-}
-
-const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
-{
-   const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
-   return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
 //====
