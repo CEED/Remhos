@@ -435,7 +435,7 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
                       SparseMatrix &flux_mat, Vector &du) const
 {
    Vector &a_pos_n = coeff_pos.FaceNbrData(),
-          &a_neg_n = coeff_neg.FaceNbrData();
+           &a_neg_n = coeff_neg.FaceNbrData();
    coeff_pos.ExchangeFaceNbrData();
    coeff_neg.ExchangeFaceNbrData();
 
@@ -498,10 +498,10 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
-//   // Reduce propagation.
-//   const double interface_value = 1.0;
-//   Vector el_max;
-//   dof_info.ComputeElementMaxSparcityBound(u, el_max);
+   //   // Reduce propagation.
+   //   const double interface_value = 1.0;
+   //   Vector el_max;
+   //   dof_info.ComputeElementMaxSparcityBound(u, el_max);
 
    u.HostRead();
    m.HostRead();
@@ -509,11 +509,11 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    du_lo.HostRead(); du_ho.HostRead();
    for (int k = 0; k < NE; k++)
    {
-//      if (el_max(k) < interface_value)
-//      {
-//         for (int j = 0; j < nd; j++) { du(k*nd+j) = 0.0; }
-//         continue;
-//      }
+      //      if (el_max(k) < interface_value)
+      //      {
+      //         for (int j = 0; j < nd; j++) { du(k*nd+j) = 0.0; }
+      //         continue;
+      //      }
       sumPos = sumNeg = 0.0;
 
       // Clip.
@@ -753,12 +753,13 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
    } // element loop
 }
 
-void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
-                                     const Vector &d_us_HO, const Vector &d_us_LO,
-                                     Vector &s_min, Vector &s_max,
-                                     const Vector &u_new,
-                                     const Array<bool> &active_el,
-                                     const Array<bool> &active_dofs, Vector &d_us)
+void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us,
+                                          const Vector &m,
+                                          const Vector &d_us_HO, const Vector &d_us_LO,
+                                          Vector &s_min, Vector &s_max,
+                                          const Vector &u_new,
+                                          const Array<bool> &active_el,
+                                          const Array<bool> &active_dofs, Vector &d_us)
 {
    us.HostRead();
    s_min.HostReadWrite();

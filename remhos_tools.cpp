@@ -452,7 +452,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       }
    }
    Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+         maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -1168,11 +1168,11 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
 
-//   if (modify_cell[T.ElementNo] == false)
-//   {
-//      if (take_v_difference) { v = 0.0; }
-//      return;
-//   }
+   //   if (modify_cell[T.ElementNo] == false)
+   //   {
+   //      if (take_v_difference) { v = 0.0; }
+   //      return;
+   //   }
 
    Vector v_new(v);
 
@@ -1298,7 +1298,7 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
          //                increases up to 2v in the tail (grad_u*v < 0).
          // max = i_val -> keep the same v.
          v_new(d) = v(d) - (1.0 - pow(max / interface_val, trans_01_power)) *
-                           v_magn * grad_dir(d);
+                    v_magn * grad_dir(d);
          //v_new(d) = v(d);
       }
    }

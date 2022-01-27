@@ -41,19 +41,42 @@ DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
    ComputeDiscreteUpwindMatrix();
 }
 
+/*
+PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
+                                 ConvectionIntegrator *Conv_,
+                                 const Vector &Mlump,
+                                 Assembly &asmbly, bool timedep)
+: LOSolver(space),
+  PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
+                    get_maps(pfes, asmbly)->ndof,
+                    (pfes.GetMesh()->Dimension() ==2) ?
+                    get_maps(pfes, asmbly)->nqpt :
+                    get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
+                    asmbly),
+Conv(Conv_), M_lumped(Mlump), time_dep(timedep)
+{
+}
+*/
+
 PADiscreteUpwind::PADiscreteUpwind(ParFiniteElementSpace &space,
                                    ConvectionIntegrator *Conv_,
-                                   const Vector &Mlump,
-                                   Assembly &asmbly, bool timedep)
-  : LOSolver(space),
-    PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
-                      get_maps(pfes, asmbly)->ndof,
-                      (pfes.GetMesh()->Dimension() ==2) ?
-                      get_maps(pfes, asmbly)->nqpt :
-                      get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
-                      asmbly),
-  Conv(Conv_), M_lumped(Mlump), time_dep(timedep)
+                                   ConvectionIntegrator *TrConv_,
+                                   const SparseMatrix &adv,
+                                   const Array<int> &adv_smap, const Vector &Mlump,
+                                   Assembly &asmbly, bool updateD)
+   : LOSolver(space),
+     PADGTraceLOSolver(space, get_maps(pfes, asmbly)->nqpt,
+                       get_maps(pfes, asmbly)->ndof,
+                       (pfes.GetMesh()->Dimension() ==2) ?
+                       get_maps(pfes, asmbly)->nqpt :
+                       get_maps(pfes, asmbly)->nqpt * get_maps(pfes, asmbly)->nqpt,
+                       asmbly),
+     Conv(Conv_), TrConv(TrConv_),
+     K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
+     assembly(asmbly), time_dep(updateD)
 {
+   D = K;
+   ComputeDiscreteUpwindMatrix();
 }
 
 void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
@@ -97,32 +120,78 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
 void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 {
-  du = 0.0;
 
-  //Apply K* = K + D
+   const int ndof = pfes.GetFE(0)->GetDof();
+   Vector alpha(ndof); alpha = 0.0;
 
-  //Mult K
-  AddBlkMult(ConvMats, u, du);
+   // Recompute D due to mesh changes (K changes) in remap mode.
+   if (time_dep) { ComputeDiscreteUpwindMatrix(); }
 
-  //Mult D
-  AddBlkMult(AlgDiffMats, u, du);
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   ApplyDiscreteUpwindMatrix(u_gf, du);
 
-  ApplyFaceTerms(u, du, FaceType::Interior);
-  ApplyFaceTerms(u, du, FaceType::Boundary);
+   const int s = du.Size();
+   for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
 
-  u.HostRead();
-  du.HostReadWrite();
-  M_lumped.HostRead();
 
-  ParGridFunction u_gf(&pfes);
-  u_gf = u;
-  u_gf.ExchangeFaceNbrData();
+   //----------------------------------------------------------------------
 
-  const int s = du.Size();
-  for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+
+   /*
+   du = 0.0;
+
+   //Apply K* = K + D
+
+   //Mult K
+   AddBlkMult(ConvMats, u, du);
+
+   //Mult D
+   AddBlkMult(AlgDiffMats, u, du);
+
+   ApplyFaceTerms(u, du, FaceType::Interior);
+   ApplyFaceTerms(u, du, FaceType::Boundary);
+
+   u.HostRead();
+   du.HostReadWrite();
+   M_lumped.HostRead();
+
+   ParGridFunction u_gf(&pfes);
+   u_gf = u;
+   u_gf.ExchangeFaceNbrData();
+
+   const int s = du.Size();
+   for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
+   */
 }
 
 void DiscreteUpwind::ComputeDiscreteUpwindMatrix() const
+{
+   const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
+
+   const double *Kp = K.HostReadData();
+
+   double *Dp = D.HostReadWriteData();
+   D.HostReadWriteI(); D.HostReadWriteJ();
+
+   for (int i = 0, k = 0; i < n; i++)
+   {
+      double rowsum = 0.;
+      for (int end = Ip[i+1]; k < end; k++)
+      {
+         int j = Jp[k];
+         double kij = Kp[k];
+         double kji = Kp[K_smap[k]];
+         double dij = fmax(fmax(0.0,-kij),-kji);
+         Dp[k] = kij + dij;
+         Dp[K_smap[k]] = kji + dij;
+         if (i != j) { rowsum += dij; }
+      }
+      D(i,i) = K(i,i) - rowsum;
+   }
+}
+
+void PADiscreteUpwind::ComputeDiscreteUpwindMatrix() const
 {
    const int *Ip = K.HostReadI(), *Jp = K.HostReadJ(), n = K.Size();
 
@@ -171,83 +240,106 @@ void DiscreteUpwind::ApplyDiscreteUpwindMatrix(ParGridFunction &u,
    }
 }
 
+void PADiscreteUpwind::ApplyDiscreteUpwindMatrix(ParGridFunction &u,
+                                                 Vector &du) const
+{
+   const int s = u.Size();
+   const int *I = D.HostReadI(), *J = D.HostReadJ();
+   const double *D_data = D.HostReadData();
+
+   u.ExchangeFaceNbrData();
+   const Vector &u_np = u.FaceNbrData();
+
+   for (int i = 0; i < s; i++)
+   {
+      du(i) = 0.0;
+      for (int k = I[i]; k < I[i + 1]; k++)
+      {
+         int j = J[k];
+         double u_j  = (j < s) ? u(j) : u_np[j - s];
+         double d_ij = D_data[k];
+         du(i) += d_ij * u_j;
+      }
+   }
+}
+
 void PADiscreteUpwind::AssembleBlkOperators() const
 {
-  const int ndof = trace_pfes.GetFE(0)->GetDof();
-  const int NE     = trace_pfes.GetMesh()->GetNE();
+   const int ndof = trace_pfes.GetFE(0)->GetDof();
+   const int NE     = trace_pfes.GetMesh()->GetNE();
 
-  ConvMats.SetSize(ndof * ndof * NE);
-  AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
+   ConvMats.SetSize(ndof * ndof * NE);
+   AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
 
-  Conv->AssembleEA(pfes, ConvMats, false);
-  ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
+   Conv->AssembleEA(pfes, ConvMats, false);
+   ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
 }
 
 void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
                                                  Vector &AlgDiff) const
 {
 
-  const int ndof = pfes.GetFE(0)->GetDof();
-  const int NE     = pfes.GetMesh()->GetNE();
-  auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
-  auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+   auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
+   auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
 
-  //Matrices are assumed to be in row major format
-  for (int e=0; e<NE; ++e)
-  {
+   //Matrices are assumed to be in row major format
+   for (int e=0; e<NE; ++e)
+   {
 
-    //Dij = max{0, -Kij, -Kji}
-    for (int c=0; c<ndof; ++c)
-    {
-      for (int r=0; r<ndof; ++r)
+      //Dij = max{0, -Kij, -Kji}
+      for (int c=0; c<ndof; ++c)
+      {
+         for (int r=0; r<ndof; ++r)
+         {
+
+            if (r == c) { continue; }
+
+            alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+         }
+      }
+
+      for (int d=0; d<ndof; d++)
       {
 
-        if (r == c) { continue; }
-
-        alg_blk(r,c,e) = fmax(0, fmax(-conv_blk(r,c, e), -conv_blk(c, r, e)));
+         double dii = 0;
+         for (int k=0; k<ndof; ++k)
+         {
+            if (k==d) { continue; }
+            dii -= alg_blk(k,d,e);
+         }
+         alg_blk(d,d,e) = dii;
       }
-    }
-
-    for (int d=0; d<ndof; d++)
-    {
-
-      double dii = 0;
-      for (int k=0; k<ndof; ++k)
-      {
-        if (k==d) { continue; }
-        dii -= alg_blk(k,d,e);
-      }
-      alg_blk(d,d,e) = dii;
-    }
-  }
+   }
 
 }
 
 void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
                                   const Vector &x, Vector &y) const
 {
-  
-  const int ndof = pfes.GetFE(0)->GetDof();
-  const int NE     = pfes.GetMesh()->GetNE();
-  
-  auto X = Reshape(x.Read(), ndof, NE);
-  auto Y = Reshape(y.Write(), ndof, NE);
-  auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
-  
-  //Takes row major format
-  for (int e=0; e<NE; ++e)
-  {
-    for (int c=0; c<ndof; ++c)
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+
+   auto X = Reshape(x.Read(), ndof, NE);
+   auto Y = Reshape(y.Write(), ndof, NE);
+   auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
+
+   //Takes row major format
+   for (int e=0; e<NE; ++e)
+   {
+      for (int c=0; c<ndof; ++c)
       {
-        double dot=0;
-        for (int r=0; r<ndof; ++r)
-          {
-                dot += Me(r, c, e) * X(r, e);
-          }
-        Y(c, e) += dot;
+         double dot=0;
+         for (int r=0; r<ndof; ++r)
+         {
+            dot += Me(r, c, e) * X(r, e);
+         }
+         Y(c, e) += dot;
       }
-  }
-  
+   }
+
 }
 
 //=====DG Trace solvers=====
@@ -1933,7 +2025,7 @@ const
                         for (int k1=0; k1<quad1D; ++k1)
                         {
                            val +=  (G_1(k1,i1)*B_1(k2,i2)*D(k1,k2,0,e)
-                           + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
+                                    + B_1(k1,i1) * G_1(k2, i2) * D(k1,k2,1,e))
                            *B_0(k1,j1)*B_0(k2,j2);
                         }
                      }
@@ -1976,8 +2068,8 @@ const
                                  for (int k1=0; k1<quad1D; ++k1)
                                  {
                                     val +=  (G_1(k1,i1)*B_1(k2,i2)*B_1(k3,i3)*D(k1,k2,k3,0,e)
-                                    + B_1(k1,i1) * G_1(k2, i2) * B_1(k3,i3) * D(k1,k2,k3,1,e)
-                                    + B_1(k1,i1) * B_1(k2,i2) * G_1(k3, i3) * D(k1,k2,k3,2,e)
+                                             + B_1(k1,i1) * G_1(k2, i2) * B_1(k3,i3) * D(k1,k2,k3,1,e)
+                                             + B_1(k1,i1) * B_1(k2,i2) * G_1(k3, i3) * D(k1,k2,k3,2,e)
                                             )
                                     *B_0(k1,j1) * B_0(k2,j2) * B_0(k3, j3);
                                  }

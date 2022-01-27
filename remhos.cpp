@@ -419,6 +419,7 @@ int main(int argc, char *argv[])
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
+   ConvectionIntegrator *trconv, *conv;
    if (exec_mode == 0)
    {
       MFEM_ABORT("only remap tests now");
@@ -427,42 +428,47 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
+      conv = new ConvectionIntegrator(v_coef);
       k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
 
       auto dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
       auto dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
       K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-      K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+      //K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       K_HO.KeepNbrBlock(true);
 
+      trconv = new ConvectionIntegrator(v_diff_coeff, -1.0);
+
+      /* Extra Integrators
       auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
       auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
       K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
       K_HO.AddInteriorFaceIntegrator(dgt);
+      */
    }
 
-//   if (ho_type == HOSolverType::CG ||
-//       ho_type == HOSolverType::LocalInverse ||
-//       fct_type == FCTSolverType::FluxBased)
-//   {
-//      if (exec_mode == 0)
-//      {
-//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-//      }
-//      else if (exec_mode == 1)
-//      {
-//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-//      }
+   //   if (ho_type == HOSolverType::CG ||
+   //       ho_type == HOSolverType::LocalInverse ||
+   //       fct_type == FCTSolverType::FluxBased)
+   //   {
+   //      if (exec_mode == 0)
+   //      {
+   //         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
+   //         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
+   //         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+   //         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+   //      }
+   //      else if (exec_mode == 1)
+   //      {
+   //         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
+   //         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
+   //         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+   //         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+   //      }
 
-//      K_HO.KeepNbrBlock(true);
-//   }
+   //      K_HO.KeepNbrBlock(true);
+   //   }
 
    if (pa)
    {
@@ -653,8 +659,13 @@ int main(int argc, char *argv[])
    if (lo_type == LOSolverType::DiscrUpwind)
    {
       lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      /*
       lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
                                      lumpedM, asmbl, time_dep);
+      */
+      lo_solver = new PADiscreteUpwind(pfes, conv, trconv,
+                                       K_HO.SpMat(), lo_smap,
+                                       lumpedM, asmbl, time_dep);
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
@@ -833,8 +844,8 @@ int main(int argc, char *argv[])
       u.HostRead();
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
-//      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
-//      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
+      //      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
+      //      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -923,322 +934,323 @@ int main(int argc, char *argv[])
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          if (myid == 0)
          {
-            std::cout << "   --- Full time step" << std::endl; }
-            std::cout << "   in:  ";
-            std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
+            std::cout << "   --- Full time step" << std::endl;
          }
+         std::cout << "   in:  ";
+         std::cout << std::scientific << std::setprecision(5);
+         std::cout << "min_s: " << s_min_glob
+                   << "; max_s: " << s_max_glob << std::endl;
+      }
 #endif
-      }
-
-      // needed for velocity modifications.
-      dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
-      //dof_info.ComputeLinMaxBound(w, w_max_bounds);
-      // needed for velocity visualization.
-      if (exec_mode == 0)
-      {
-         v_new_coeff_adv.slow_front_u = true;
-         v_new_vis.ProjectCoefficient(v_new_coeff_adv);
-      }
-      else
-      {
-         v_new_coeff_rem.slow_front_u = v_diff_coeff.slow_front_u;
-         v_new_coeff_rem.push_tail_u  = v_diff_coeff.push_tail_u;
-         v_new_vis.ProjectCoefficient(v_new_coeff_rem);
-      }
-
-      ode_solver->Step(S, t, dt_real);
-      ti++;
-
-      // Perform cutting.
-//      Vector el_max(NE);
-//      const double interface_value = 1e-2;
-//      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
-//      const int nd = pfes.GetFE(0)->GetDof();
-//      for (int k = 0; k < NE; k++)
-//      {
-//         if (el_max(k) < interface_value)
-//         {
-//            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
-//         }
-//      }
-
-      // S has been modified, update the alias
-      u.SyncMemory(S);
-      if (product_sync)
-      {
-         us.SyncMemory(S);
-
-         // It is known that RK time integrators with more than 1 stage may
-         // cause violation of the lower bounds for us.
-         // The lower bound is corrected, causing small conservation error.
-         // Correction can also be done with localized bounds for s, but for
-         // now we have implemented only the minimum global bound.
-         u.HostRead();
-         us.HostReadWrite();
-         const int s = u.Size();
-         Array<bool> active_elem, active_dofs;
-         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         for (int i = 0; i < s; i++)
-         {
-            if (active_dofs[i] == false) { continue; }
-
-            double us_min = u(i) * s_min_glob;
-            if (us(i) < us_min) { us(i) = us_min; }
-         }
-
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
-         if (myid == 0)
-         {
-            std::cout << "   out: ";
-            std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
-         }
-#endif
-      }
-
-      // Monotonicity check for debug purposes mainly.
-      if (verify_bounds && forced_bounds && smth_indicator == NULL)
-      {
-         double umin_new, umax_new;
-         GetMinMax(u, umin_new, umax_new);
-         if (problem_num % 10 != 6 && problem_num % 10 != 7)
-         {
-            if (myid == 0)
-            {
-               MFEM_VERIFY(umin_new > umin - 1e-12,
-                           "Undershoot of " << umin - umin_new);
-               MFEM_VERIFY(umax_new < umax + 1e-12,
-                           "Overshoot of " << umax_new - umax);
-            }
-            umin = umin_new;
-            umax = umax_new;
-         }
-         else
-         {
-            if (myid == 0)
-            {
-               MFEM_VERIFY(umin_new > 0.0 - 1e-12,
-                           "Undershoot of " << 0.0 - umin_new);
-               MFEM_VERIFY(umax_new < 1.0 + 1e-12,
-                           "Overshoot of " << umax_new - 1.0);
-            }
-         }
-      }
-
-      if (exec_mode == 1)
-      {
-         x0.HostReadWrite(); v_sub_gf.HostReadWrite();
-         x.HostReadWrite();
-         add(x0, t, v_gf, x);
-         x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
-         MFEM_VERIFY(xsub != NULL,
-                     "xsub == NULL/This code should not be entered for order = 1.");
-         xsub->HostReadWrite();
-         add(x0_sub, t, v_sub_gf, *xsub);
-      }
-
-      if (problem_num != 6 && problem_num != 7 && problem_num != 8)
-      {
-         done = (t >= t_final - 1.e-8*dt);
-      }
-      else
-      {
-         // Steady state problems - stop at convergence.
-         double res_loc = 0.;
-         lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
-         for (int i = 0; i < res.Size(); i++)
-         {
-            res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
-         }
-         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
-
-         residual = sqrt(residual);
-         if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
-         else { res = u; }
-      }
-
-      if (done || ti % vis_steps == 0)
-      {
-         if (myid == 0)
-         {
-            cout << "time step: " << ti << ", time: " << t << ", residual: "
-                 << residual << endl;
-         }
-
-         for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
-         if (visualization)
-         {
-            int Wx = 0, Wy = 0; // window position
-            int Ww = 400, Wh = 400; // window size
-            VisualizeField(sout, vishost, visport, u, "Solution u",
-                           Wx, Wy, Ww, Wh);
-//            VisualizeField(vis_w, vishost, visport, w, "Solution w",
-//                           Wx, 400, Ww, Wh);
-//            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
-//                           Wx, 800, Ww, Wh);
-            VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
-                           Wx+400, Wy, Ww, Wh);
-            VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
-                           Wx+800, Wy, Ww, Wh);
-            if (product_sync)
-            {
-               // Recompute s = u_s / u.
-               ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
-               VisualizeField(vis_s, vishost, visport, s, "Solution s",
-                              Wx + Ww, Wy, Ww, Wh);
-               VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
-                              Wx + 2*Ww, Wy, Ww, Wh);
-            }
-         }
-
-         if (visit)
-         {
-            dc->SetCycle(ti);
-            dc->SetTime(t);
-            dc->Save();
-         }
-      }
    }
 
-   // Print the final meshes and solution.
+   // needed for velocity modifications.
+   dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
+   //dof_info.ComputeLinMaxBound(w, w_max_bounds);
+   // needed for velocity visualization.
+   if (exec_mode == 0)
    {
-      ofstream meshHO("meshHO_final.mesh");
-      meshHO.precision(precision);
-      pmesh.PrintAsOne(meshHO);
-      if (subcell_mesh)
-      {
-         ofstream meshLO("meshLO_final.mesh");
-         meshLO.precision(precision);
-         subcell_mesh->PrintAsOne(meshLO);
-      }
-      ofstream sltn("sltn_final.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
-   }
-
-   // Check for mass conservation.
-   double mass_u_loc = 0.0, mass_us_loc = 0.0;
-   if (exec_mode == 1)
-   {
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostRead();
-      ml.SpMat().GetDiag(lumpedM);
-      mass_u_loc = lumpedM * u;
-      if (product_sync) { mass_us_loc = lumpedM * us; }
+      v_new_coeff_adv.slow_front_u = true;
+      v_new_vis.ProjectCoefficient(v_new_coeff_adv);
    }
    else
    {
-      mass_u_loc = masses * u;
-      if (product_sync) { mass_us_loc = masses * us; }
+      v_new_coeff_rem.slow_front_u = v_diff_coeff.slow_front_u;
+      v_new_coeff_rem.push_tail_u  = v_diff_coeff.push_tail_u;
+      v_new_vis.ProjectCoefficient(v_new_coeff_rem);
    }
-   double mass_u, mass_us, s_max;
-   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+
+   ode_solver->Step(S, t, dt_real);
+   ti++;
+
+   // Perform cutting.
+   //      Vector el_max(NE);
+   //      const double interface_value = 1e-2;
+   //      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
+   //      const int nd = pfes.GetFE(0)->GetDof();
+   //      for (int k = 0; k < NE; k++)
+   //      {
+   //         if (el_max(k) < interface_value)
+   //         {
+   //            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
+   //         }
+   //      }
+
+   // S has been modified, update the alias
+   u.SyncMemory(S);
    if (product_sync)
    {
-      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
-      const double s_max_loc = s.Max();
-      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
-   }
-   if (myid == 0)
-   {
-      cout << setprecision(10)
-           << "Final mass u:  " << mass_u << endl
-           << "Max value u:   " << umax << endl << setprecision(6)
-           << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
-      if (product_sync)
+      us.SyncMemory(S);
+
+      // It is known that RK time integrators with more than 1 stage may
+      // cause violation of the lower bounds for us.
+      // The lower bound is corrected, causing small conservation error.
+      // Correction can also be done with localized bounds for s, but for
+      // now we have implemented only the minimum global bound.
+      u.HostRead();
+      us.HostReadWrite();
+      const int s = u.Size();
+      Array<bool> active_elem, active_dofs;
+      ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+      for (int i = 0; i < s; i++)
       {
-         cout << setprecision(10)
-              << "Final mass us: " << mass_us << endl
-              << "Max value s:   " << s_max << endl << setprecision(6)
-              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+         if (active_dofs[i] == false) { continue; }
+
+         double us_min = u(i) * s_min_glob;
+         if (us(i) < us_min) { us(i) = us_min; }
       }
-   }
 
-   ConstantCoefficient zero(0.0);
-   double norm_u = u.ComputeL2Error(zero), norm_w = w.ComputeL2Error(zero);
-   if (myid == 0)
-   {
-      cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
-      cout << setprecision(12) << "L2-norm w: " << norm_w << endl;
-   }
-
-   // Compute errors, if the initial condition is equal to the final solution
-   if (problem_num == 4) // solid body rotation
-   {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
-   }
-   else if (problem_num == 7)
-   {
-      FunctionCoefficient u_ex(inflow_function);
-      double e1 = u.ComputeLpError(1., u_ex);
-      double e2 = u.ComputeLpError(2., u_ex);
-      double eInf = u.ComputeLpError(numeric_limits<double>::infinity(), u_ex);
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+      ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
       if (myid == 0)
       {
-         cout << "L1-error: " << e1 << "." << endl;
-
-         // write output
-         ofstream file("errors.txt", ios_base::app);
-
-         if (!file)
-         {
-            MFEM_ABORT("Error opening file.");
-         }
-         else
-         {
-            ostringstream strs;
-            strs << e1 << " " << e2 << " " << eInf << "\n";
-            string str = strs.str();
-            file << str;
-            file.close();
-         }
+         std::cout << "   out: ";
+         std::cout << std::scientific << std::setprecision(5);
+         std::cout << "min_s: " << s_min_glob
+                   << "; max_s: " << s_max_glob << std::endl;
       }
+#endif
    }
 
-   if (smth_indicator)
+   // Monotonicity check for debug purposes mainly.
+   if (verify_bounds && forced_bounds && smth_indicator == NULL)
    {
-      // Print the values of the smoothness indicator.
-      ParGridFunction si_val;
-      smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+      double umin_new, umax_new;
+      GetMinMax(u, umin_new, umax_new);
+      if (problem_num % 10 != 6 && problem_num % 10 != 7)
       {
-         ofstream smth("si_final.gf");
-         smth.precision(precision);
-         si_val.SaveAsOne(smth);
+         if (myid == 0)
+         {
+            MFEM_VERIFY(umin_new > umin - 1e-12,
+                        "Undershoot of " << umin - umin_new);
+            MFEM_VERIFY(umax_new < umax + 1e-12,
+                        "Overshoot of " << umax_new - umax);
+         }
+         umin = umin_new;
+         umax = umax_new;
+      }
+      else
+      {
+         if (myid == 0)
+         {
+            MFEM_VERIFY(umin_new > 0.0 - 1e-12,
+                        "Undershoot of " << 0.0 - umin_new);
+            MFEM_VERIFY(umax_new < 1.0 + 1e-12,
+                        "Overshoot of " << umax_new - 1.0);
+         }
       }
    }
 
-   // Free the used memory.
-   delete mono_solver;
-   delete fct_solver;
-   delete smth_indicator;
-   delete ho_solver;
-
-   delete ode_solver;
-   delete mesh_fec;
-   delete lom.pk;
-   delete dc;
-
-   if (order > 1)
+   if (exec_mode == 1)
    {
-      delete subcell_mesh;
-      delete fec_sub;
-      delete pfes_sub;
-      delete xsub;
-      delete lom.SubFes0;
-      delete lom.SubFes1;
-      delete lom.VolumeTerms;
+      x0.HostReadWrite(); v_sub_gf.HostReadWrite();
+      x.HostReadWrite();
+      add(x0, t, v_gf, x);
+      x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
+      MFEM_VERIFY(xsub != NULL,
+                  "xsub == NULL/This code should not be entered for order = 1.");
+      xsub->HostReadWrite();
+      add(x0_sub, t, v_sub_gf, *xsub);
    }
 
-   return 0;
+   if (problem_num != 6 && problem_num != 7 && problem_num != 8)
+   {
+      done = (t >= t_final - 1.e-8*dt);
+   }
+   else
+   {
+      // Steady state problems - stop at convergence.
+      double res_loc = 0.;
+      lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
+      for (int i = 0; i < res.Size(); i++)
+      {
+         res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
+      }
+      MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+      residual = sqrt(residual);
+      if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
+      else { res = u; }
+   }
+
+   if (done || ti % vis_steps == 0)
+   {
+      if (myid == 0)
+      {
+         cout << "time step: " << ti << ", time: " << t << ", residual: "
+              << residual << endl;
+      }
+
+      for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
+      if (visualization)
+      {
+         int Wx = 0, Wy = 0; // window position
+         int Ww = 400, Wh = 400; // window size
+         VisualizeField(sout, vishost, visport, u, "Solution u",
+                        Wx, Wy, Ww, Wh);
+         //            VisualizeField(vis_w, vishost, visport, w, "Solution w",
+         //                           Wx, 400, Ww, Wh);
+         //            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
+         //                           Wx, 800, Ww, Wh);
+         VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
+                        Wx+400, Wy, Ww, Wh);
+         VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
+                        Wx+800, Wy, Ww, Wh);
+         if (product_sync)
+         {
+            // Recompute s = u_s / u.
+            ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+            VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                           Wx + Ww, Wy, Ww, Wh);
+            VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
+                           Wx + 2*Ww, Wy, Ww, Wh);
+         }
+      }
+
+      if (visit)
+      {
+         dc->SetCycle(ti);
+         dc->SetTime(t);
+         dc->Save();
+      }
+   }
+}
+
+// Print the final meshes and solution.
+{
+   ofstream meshHO("meshHO_final.mesh");
+   meshHO.precision(precision);
+   pmesh.PrintAsOne(meshHO);
+   if (subcell_mesh)
+   {
+      ofstream meshLO("meshLO_final.mesh");
+      meshLO.precision(precision);
+      subcell_mesh->PrintAsOne(meshLO);
+   }
+   ofstream sltn("sltn_final.gf");
+   sltn.precision(precision);
+   u.SaveAsOne(sltn);
+}
+
+// Check for mass conservation.
+double mass_u_loc = 0.0, mass_us_loc = 0.0;
+if (exec_mode == 1)
+{
+   ml.BilinearForm::operator=(0.0);
+   ml.Assemble();
+   lumpedM.HostRead();
+   ml.SpMat().GetDiag(lumpedM);
+   mass_u_loc = lumpedM * u;
+   if (product_sync) { mass_us_loc = lumpedM * us; }
+}
+else
+{
+   mass_u_loc = masses * u;
+   if (product_sync) { mass_us_loc = masses * us; }
+}
+double mass_u, mass_us, s_max;
+MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+const double umax_loc = u.Max();
+MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+if (product_sync)
+{
+   ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+   const double s_max_loc = s.Max();
+   MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+   MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+}
+if (myid == 0)
+{
+   cout << setprecision(10)
+        << "Final mass u:  " << mass_u << endl
+        << "Max value u:   " << umax << endl << setprecision(6)
+        << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
+   if (product_sync)
+   {
+      cout << setprecision(10)
+           << "Final mass us: " << mass_us << endl
+           << "Max value s:   " << s_max << endl << setprecision(6)
+           << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+   }
+}
+
+ConstantCoefficient zero(0.0);
+double norm_u = u.ComputeL2Error(zero), norm_w = w.ComputeL2Error(zero);
+if (myid == 0)
+{
+   cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
+   cout << setprecision(12) << "L2-norm w: " << norm_w << endl;
+}
+
+// Compute errors, if the initial condition is equal to the final solution
+if (problem_num == 4) // solid body rotation
+{
+   double err = u.ComputeLpError(1., u0);
+   if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+}
+else if (problem_num == 7)
+{
+   FunctionCoefficient u_ex(inflow_function);
+   double e1 = u.ComputeLpError(1., u_ex);
+   double e2 = u.ComputeLpError(2., u_ex);
+   double eInf = u.ComputeLpError(numeric_limits<double>::infinity(), u_ex);
+   if (myid == 0)
+   {
+      cout << "L1-error: " << e1 << "." << endl;
+
+      // write output
+      ofstream file("errors.txt", ios_base::app);
+
+      if (!file)
+      {
+         MFEM_ABORT("Error opening file.");
+      }
+      else
+      {
+         ostringstream strs;
+         strs << e1 << " " << e2 << " " << eInf << "\n";
+         string str = strs.str();
+         file << str;
+         file.close();
+      }
+   }
+}
+
+if (smth_indicator)
+{
+   // Print the values of the smoothness indicator.
+   ParGridFunction si_val;
+   smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+   {
+      ofstream smth("si_final.gf");
+      smth.precision(precision);
+      si_val.SaveAsOne(smth);
+   }
+}
+
+// Free the used memory.
+delete mono_solver;
+delete fct_solver;
+delete smth_indicator;
+delete ho_solver;
+
+delete ode_solver;
+delete mesh_fec;
+delete lom.pk;
+delete dc;
+
+if (order > 1)
+{
+   delete subcell_mesh;
+   delete fec_sub;
+   delete pfes_sub;
+   delete xsub;
+   delete lom.SubFes0;
+   delete lom.SubFes1;
+   delete lom.VolumeTerms;
+}
+
+return 0;
 }
 
 AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
@@ -1278,56 +1290,56 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       // Reset precomputed geometric data.
       Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
 
-//      // Reassemble on the new mesh. Element contributions.
-//      // Currently needed to have the sparse matrices used by the LO methods.
-//      Mbf.BilinearForm::operator=(0.0);
-//      Mbf.Assemble();
-//      Kbf.BilinearForm::operator=(0.0);
-//      Kbf.Assemble(0);
-//      ml.BilinearForm::operator=(0.0);
-//      ml.Assemble();
-//      lumpedM.HostReadWrite();
-//      ml.SpMat().GetDiag(lumpedM);
+      //      // Reassemble on the new mesh. Element contributions.
+      //      // Currently needed to have the sparse matrices used by the LO methods.
+      //      Mbf.BilinearForm::operator=(0.0);
+      //      Mbf.Assemble();
+      //      Kbf.BilinearForm::operator=(0.0);
+      //      Kbf.Assemble(0);
+      //      ml.BilinearForm::operator=(0.0);
+      //      ml.Assemble();
+      //      lumpedM.HostReadWrite();
+      //      ml.SpMat().GetDiag(lumpedM);
 
-//      M_HO.BilinearForm::operator=(0.0);
-//      M_HO.Assemble();
-//      K_HO.BilinearForm::operator=(0.0);
-//      K_HO.Assemble(0);
+      //      M_HO.BilinearForm::operator=(0.0);
+      //      M_HO.Assemble();
+      //      K_HO.BilinearForm::operator=(0.0);
+      //      K_HO.Assemble(0);
 
-//      if (lom.pk)
-//      {
-//         lom.pk->BilinearForm::operator=(0.0);
-//         lom.pk->Assemble();
-//      }
+      //      if (lom.pk)
+      //      {
+      //         lom.pk->BilinearForm::operator=(0.0);
+      //         lom.pk->Assemble();
+      //      }
 
-//      // Face contributions.
-//      asmbl.bdrInt = 0.;
-//      Mesh *mesh = M_HO.FESpace()->GetMesh();
-//      const int dim = mesh->Dimension(), ne = mesh->GetNE();
-//      Array<int> bdrs, orientation;
-//      FaceElementTransformations *Trans;
-//      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
-//      {
-//         RD_ptr->SampleVelocity(FaceType::Interior);
-//         RD_ptr->SampleVelocity(FaceType::Boundary);
-//         RD_ptr->SetupPA(FaceType::Interior);
-//         RD_ptr->SetupPA(FaceType::Boundary);
-//      }
-//      else
-//      {
-//         for (int k = 0; k < ne; k++)
-//         {
-//            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-//            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-//            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+      //      // Face contributions.
+      //      asmbl.bdrInt = 0.;
+      //      Mesh *mesh = M_HO.FESpace()->GetMesh();
+      //      const int dim = mesh->Dimension(), ne = mesh->GetNE();
+      //      Array<int> bdrs, orientation;
+      //      FaceElementTransformations *Trans;
+      //      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
+      //      {
+      //         RD_ptr->SampleVelocity(FaceType::Interior);
+      //         RD_ptr->SampleVelocity(FaceType::Boundary);
+      //         RD_ptr->SetupPA(FaceType::Interior);
+      //         RD_ptr->SetupPA(FaceType::Boundary);
+      //      }
+      //      else
+      //      {
+      //         for (int k = 0; k < ne; k++)
+      //         {
+      //            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+      //            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+      //            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-//            for (int i = 0; i < dofs.numBdrs; i++)
-//            {
-//               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-//               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-//            }
-//         }
-//      }
+      //            for (int i = 0; i < dofs.numBdrs; i++)
+      //            {
+      //               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+      //               asmbl.ComputeFluxTerms(k, i, Trans, lom);
+      //            }
+      //         }
+      //      }
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
@@ -1349,58 +1361,58 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    AssembleAndEvolve(u, d_u);
 
    // Compute du without modification.
-//   Vector d_u_unmod(size);
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = false;
-//   AssembleAndEvolve(u, d_u_unmod);
+   //   Vector d_u_unmod(size);
+   //   v_coeff.slow_front_u = false;
+   //   v_coeff.slow_front_w = false;
+   //   AssembleAndEvolve(u, d_u_unmod);
 
-//   for (int i = 0; i < size; i++)
-//   {
-//      delta_u(i) = d_u(i) - d_u_unmod(i);
-//   }
+   //   for (int i = 0; i < size; i++)
+   //   {
+   //      delta_u(i) = d_u(i) - d_u_unmod(i);
+   //   }
 
    // Compute dw with modification.
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = true;
+   //   v_coeff.slow_front_u = false;
+   //   v_coeff.slow_front_w = true;
    w.MakeRef(*xptr, size, size);
    d_w.MakeRef(Y, size, size);
    d_w = 0.0;
-//   AssembleAndEvolve(w, d_w);
+   //   AssembleAndEvolve(w, d_w);
 
-//   // Compute dw without modification.
-//   Vector d_w_unmod(size);
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = false;
-//   AssembleAndEvolve(w, d_w_unmod);
+   //   // Compute dw without modification.
+   //   Vector d_w_unmod(size);
+   //   v_coeff.slow_front_u = false;
+   //   v_coeff.slow_front_w = false;
+   //   AssembleAndEvolve(w, d_w_unmod);
 
-//   for (int i = 0; i < size; i++)
-//   {
-//      delta_w(i) = d_w(i) - d_w_unmod(i);
-//   }
+   //   for (int i = 0; i < size; i++)
+   //   {
+   //      delta_w(i) = d_w(i) - d_w_unmod(i);
+   //   }
 
-//   for (int i = 0; i < size; i++)
-//   {
-//      if (delta_u(i) > 1e-15)
-//      {
-//         // d_w(i) -= delta_u(i);
-//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
-//      }
-//      if (delta_u(i) < -1e-15)
-//      {
-//         // d_w(i) += delta_u(i);
-//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
-//      }
-//      if (delta_w(i) > 1e-15)
-//      {
-//         //d_u(i) -= delta_w(i);
-//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
-//      }
-//      if (delta_w(i) < -1e-15)
-//      {
-//         //d_u(i) += delta_w(i);
-//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
-//      }
-//   }
+   //   for (int i = 0; i < size; i++)
+   //   {
+   //      if (delta_u(i) > 1e-15)
+   //      {
+   //         // d_w(i) -= delta_u(i);
+   //         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
+   //      }
+   //      if (delta_u(i) < -1e-15)
+   //      {
+   //         // d_w(i) += delta_u(i);
+   //         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
+   //      }
+   //      if (delta_w(i) > 1e-15)
+   //      {
+   //         //d_u(i) -= delta_w(i);
+   //         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
+   //      }
+   //      if (delta_w(i) < -1e-15)
+   //      {
+   //         //d_u(i) += delta_w(i);
+   //         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
+   //      }
+   //   }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > 2*size)
@@ -1605,23 +1617,23 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-//      case 11:
-//      {
-//         // Gresho deformation used for mesh motion in remap tests.
-//         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
-//         if (r < 0.2)
-//         {
-//            v(0) =  5.0 * x(1);
-//            v(1) = -5.0 * x(0);
-//         }
-//         else if (r < 0.4)
-//         {
-//            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
-//            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
-//         }
-//         else { v = 0.0; }
-//         break;
-//      }
+      //      case 11:
+      //      {
+      //         // Gresho deformation used for mesh motion in remap tests.
+      //         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
+      //         if (r < 0.2)
+      //         {
+      //            v(0) =  5.0 * x(1);
+      //            v(1) = -5.0 * x(0);
+      //         }
+      //         else if (r < 0.4)
+      //         {
+      //            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
+      //            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
+      //         }
+      //         else { v = 0.0; }
+      //         break;
+      //      }
       case 10:
       case 11:
       case 12:
