@@ -548,8 +548,8 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = used_v; }
-   else                { lom.coef = used_v; }
+   if (exec_mode == 1) { lom.coef = &v_coef; }
+   else                { lom.coef = &v_coef; }
 
    // Face integration rule.
    const FaceElementTransformations *ft =
@@ -659,13 +659,16 @@ int main(int argc, char *argv[])
    if (lo_type == LOSolverType::DiscrUpwind)
    {
       lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+
       /*
       lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
                                      lumpedM, asmbl, time_dep);
+
       */
       lo_solver = new PADiscreteUpwind(pfes, conv, trconv,
                                        K_HO.SpMat(), lo_smap,
                                        lumpedM, asmbl, time_dep);
+
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {

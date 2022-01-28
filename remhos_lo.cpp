@@ -84,14 +84,15 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    const int ndof = pfes.GetFE(0)->GetDof();
    Vector alpha(ndof); alpha = 0.0;
 
+#if 1
    // Recompute D due to mesh changes (K changes) in remap mode.
    if (update_D) { ComputeDiscreteUpwindMatrix(); }
 
    ParGridFunction u_gf(&pfes);
    u_gf = u;
    ApplyDiscreteUpwindMatrix(u_gf, du);
+#else
 
-   /*
    // Discretization and monotonicity terms.
    D.Mult(u, du);
 
@@ -112,7 +113,8 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
          assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
       }
    }
-   */
+
+#endif
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
@@ -124,12 +126,54 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    const int ndof = pfes.GetFE(0)->GetDof();
    Vector alpha(ndof); alpha = 0.0;
 
+#if 1
+   Vector x(u); x.Randomize(0);
+
    // Recompute D due to mesh changes (K changes) in remap mode.
    if (time_dep) { ComputeDiscreteUpwindMatrix(); }
 
    ParGridFunction u_gf(&pfes);
    u_gf = u;
    ApplyDiscreteUpwindMatrix(u_gf, du);
+#endif
+
+   //====   
+   Vector y(u.Size()); y = 0.0;
+
+   pfes.GetMesh()->DeleteGeometricFactors();
+
+   AssembleBlkOperators();
+
+   //Mult K
+   AddBlkMult(ConvMats, u_gf, y);
+
+   //Mult D
+   AddBlkMult(AlgDiffMats, u_gf, y);
+
+   //Face terms
+   SampleVelocity(FaceType::Interior);
+
+   SetupPA(FaceType::Interior);
+
+   //ApplyTrFaceTerms(u_gf, y, FaceType::Interior);
+   ApplyFaceTerms(u_gf, y, FaceType::Interior);
+
+#if 0
+   y -= du;
+   double error = y.Norml2();
+   if(error > 1e-15) {
+     //std::cout<<"\nError too high "<<error<<std::endl;
+     //y.Print(mfem::out,3);
+     //exit(-1);
+   }else{
+     std::cout<<"PASS"<<std::endl;
+   }
+#else
+   du = y;
+#endif
+
+
+
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
