@@ -434,18 +434,18 @@ int main(int argc, char *argv[])
 
       auto dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
       auto dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-      K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+      //K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
       //K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       K_HO.KeepNbrBlock(true);
 
       trconv = new ConvectionIntegrator(v_diff_coeff, -1.0);
 
-      /* Extra Integrators
+      // Extra Integrators
       auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
       auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
       K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-      K_HO.AddInteriorFaceIntegrator(dgt);
-      */
+      //K_HO.AddInteriorFaceIntegrator(dgt);
+
    }
 
    //   if (ho_type == HOSolverType::CG ||
@@ -548,7 +548,11 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_coef; }
+   if (exec_mode == 1)
+   {
+      lom.coef = &v_coef;
+      lom.tr_coef = &v_coef;
+   }
    else                { lom.coef = &v_coef; }
 
    // Face integration rule.

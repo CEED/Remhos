@@ -105,6 +105,8 @@ protected:
 
    mutable Vector ConvMats, AlgDiffMats;
 
+   mutable Vector TrConvMats, TrAlgDiffMats;
+
    void ComputeDiscreteUpwindMatrix() const;
    void ApplyDiscreteUpwindMatrix(ParGridFunction &u, Vector &du) const;
 
@@ -127,6 +129,8 @@ public:
    void ComputeAlgebraicDiffusion(Vector &ConvMats, Vector &AlgDiff) const;
 
    void AddBlkMult(const Vector &Mat, const Vector &x, Vector &y) const;
+
+   void AddBlkMultTr(const Vector &Mat, const Vector &x, Vector &y) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };

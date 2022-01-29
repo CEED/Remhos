@@ -88,6 +88,7 @@ struct LowOrderMethod
    SparseMatrix D;
    ParBilinearForm* pk;
    VectorCoefficient* coef;
+   VectorCoefficient* tr_coef;
    VectorCoefficient* subcellCoeff;
    const IntegrationRule* irF;
    BilinearFormIntegrator* VolumeTerms;

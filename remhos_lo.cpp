@@ -137,18 +137,56 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    ApplyDiscreteUpwindMatrix(u_gf, du);
 #endif
 
-   //====   
+   //====
    Vector y(u.Size()); y = 0.0;
 
    pfes.GetMesh()->DeleteGeometricFactors();
 
    AssembleBlkOperators();
 
+   /*
    //Mult K
    AddBlkMult(ConvMats, u_gf, y);
 
    //Mult D
    AddBlkMult(AlgDiffMats, u_gf, y);
+
+
+   //Mult Tr(K)
+   AddBlkMultTr(TrConvMats, u_gf, y);
+
+   //Mult Tr(D)
+   AddBlkMultTr(TrAlgDiffMats, u_gf, y);
+   */
+
+   //Take the sum then apply discrete upwinding
+
+
+   Vector SumOfMats(ConvMats.Size());
+   Vector SumOfMatsDiffusion(ConvMats.Size());
+
+   const int NE     = pfes.GetMesh()->GetNE();
+   auto Me = Reshape(ConvMats.Read(), ndof, ndof, NE);
+   auto TrMe = Reshape(TrConvMats.Read(), ndof, ndof, NE);
+   auto Sum_Me = Reshape(SumOfMats.Write(), ndof, ndof, NE);
+
+   for (int e=0; e<NE; ++e)
+   {
+      for (int c=0; c<ndof; c++)
+      {
+         for (int r=0; r<ndof; ++r)
+         {
+            Sum_Me(c,r,e) = Me(c,r,e) + TrMe(r,c,e);
+         }
+      }
+   }
+   ComputeAlgebraicDiffusion(SumOfMats, SumOfMatsDiffusion);
+
+   AddBlkMult(SumOfMats, u_gf, y);
+   AddBlkMult(SumOfMatsDiffusion, u_gf, y);
+
+
+
 
    //Face terms
    SampleVelocity(FaceType::Interior);
@@ -156,17 +194,20 @@ void PADiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
    SetupPA(FaceType::Interior);
 
    //ApplyTrFaceTerms(u_gf, y, FaceType::Interior);
-   ApplyFaceTerms(u_gf, y, FaceType::Interior);
+   //ApplyFaceTerms(u_gf, y, FaceType::Interior);
 
-#if 0
+#if 1
    y -= du;
    double error = y.Norml2();
-   if(error > 1e-15) {
-     //std::cout<<"\nError too high "<<error<<std::endl;
-     //y.Print(mfem::out,3);
-     //exit(-1);
-   }else{
-     std::cout<<"PASS"<<std::endl;
+   if (error > 1e-15)
+   {
+      std::cout<<"\nError too high "<<error<<std::endl;
+      //y.Print(mfem::out,3);
+      exit(-1);
+   }
+   else
+   {
+      std::cout<<"PASS"<<std::endl;
    }
 #else
    du = y;
@@ -315,18 +356,24 @@ void PADiscreteUpwind::AssembleBlkOperators() const
    ConvMats.SetSize(ndof * ndof * NE);
    AlgDiffMats.SetSize(ndof * ndof * NE); AlgDiffMats = 0.0;
 
+   TrConvMats.SetSize(ndof * ndof * NE);
+   TrAlgDiffMats.SetSize(ndof * ndof * NE); TrAlgDiffMats = 0.0;
+
    Conv->AssembleEA(pfes, ConvMats, false);
    ComputeAlgebraicDiffusion(ConvMats, AlgDiffMats);
+
+   TrConv->AssembleEA(pfes, TrConvMats, false);
+   ComputeAlgebraicDiffusion(TrConvMats, TrAlgDiffMats);
 }
 
-void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats,
-                                                 Vector &AlgDiff) const
+void PADiscreteUpwind::ComputeAlgebraicDiffusion(Vector &ConvMats_in,
+                                                 Vector &AlgDiff_in) const
 {
 
    const int ndof = pfes.GetFE(0)->GetDof();
    const int NE     = pfes.GetMesh()->GetNE();
-   auto conv_blk = Reshape(ConvMats.Read(), ndof, ndof, NE);
-   auto alg_blk = Reshape(AlgDiff.ReadWrite(), ndof, ndof, NE);
+   auto conv_blk = Reshape(ConvMats_in.Read(), ndof, ndof, NE);
+   auto alg_blk = Reshape(AlgDiff_in.ReadWrite(), ndof, ndof, NE);
 
    //Matrices are assumed to be in row major format
    for (int e=0; e<NE; ++e)
@@ -380,6 +427,34 @@ void PADiscreteUpwind::AddBlkMult(const Vector &Mat,
          {
             dot += Me(r, c, e) * X(r, e);
          }
+         Y(c, e) += dot;
+      }
+   }
+
+}
+
+void PADiscreteUpwind::AddBlkMultTr(const Vector &Mat,
+                                    const Vector &x, Vector &y) const
+{
+
+   const int ndof = pfes.GetFE(0)->GetDof();
+   const int NE     = pfes.GetMesh()->GetNE();
+
+   auto X = Reshape(x.Read(), ndof, NE);
+   auto Y = Reshape(y.Write(), ndof, NE);
+   auto Me = Reshape(Mat.Read(), ndof, ndof, NE);
+
+   //Takes row major format
+   for (int e=0; e<NE; ++e)
+   {
+      for (int c=0; c<ndof; ++c)
+      {
+         double dot=0;
+         for (int r=0; r<ndof; ++r)
+         {
+            dot += Me(c, r, e) * X(r, e);
+         }
+         //Y(c, e) += dot;
          Y(c, e) += dot;
       }
    }
