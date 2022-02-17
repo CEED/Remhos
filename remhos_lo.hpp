@@ -75,6 +75,27 @@ public:
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
+class HOSolver;
+
+class MassBasedAvg : public LOSolver
+{
+protected:
+   HOSolver &ho_solver;
+   double &dt;
+   const ParGridFunction *mesh_v;
+
+   void MassesAndVolumesAtPosition(const ParGridFunction &u,
+                                   const GridFunction &x,
+                                   Vector &el_mass, Vector &el_vol) const;
+
+public:
+  MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
+               double &time_step, const ParGridFunction *mesh_vel)
+     : LOSolver(space), ho_solver(hos), dt(time_step), mesh_v(mesh_vel) { }
+
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
 //PA based Residual Distribution
 class PAResidualDistribution : public ResidualDistribution
 {

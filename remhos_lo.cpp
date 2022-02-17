@@ -16,6 +16,7 @@
 
 #include "remhos_lo.hpp"
 #include "remhos_tools.hpp"
+#include "remhos_ho.hpp"
 
 using namespace std;
 
@@ -234,6 +235,75 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
          du(dof_id) = (du(dof_id) + weightP * rhoP + weightN * rhoN) /
                       M_lumped(dof_id);
+      }
+   }
+}
+
+void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
+{
+   // Compute the new HO solution.
+   Vector du_HO(u.Size());
+   ParGridFunction u_HO_new(&pfes);
+   ho_solver.CalcHOSolution(u, du_HO);
+   add(1.0, u, dt, du_HO, u_HO_new);
+
+   // Mesh positions for the new HO solution.
+   ParMesh *pmesh = pfes.GetParMesh();
+   GridFunction x(pmesh->GetNodes()->FESpace());
+   // Copy the current nodes into x.
+   pmesh->GetNodes(x);
+   if (mesh_v)
+   {
+      // Remap mode - move the mesh nodes.
+      x.Add(dt, *mesh_v);
+   }
+
+   const int NE = pfes.GetNE();
+   Vector el_mass(NE), el_vol(NE);
+   MassesAndVolumesAtPosition(u_HO_new, x, el_mass, el_vol);
+
+   const int ndofs = u.Size() / NE;
+   for (int k = 0; k < NE; k++)
+   {
+      double u_LO_new = el_mass(k) / el_vol(k);
+      for (int i = 0; i < ndofs; i++)
+      {
+         du(k*ndofs + i) = (u_LO_new - u(i)) / dt;
+      }
+   }
+}
+
+void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
+                                              const GridFunction &x,
+                                              Vector &el_mass,
+                                              Vector &el_vol) const
+{
+   // Only the order of the transsformation matters.
+   auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
+   const FiniteElement *fe = u.ParFESpace()->GetFE(0);
+   const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
+   const int nqp = ir.GetNPoints();
+   const int NE = x.FESpace()->GetNE();
+
+   GeometricFactors geom(x, ir, GeometricFactors::DETERMINANTS);
+   auto *fes_u = u.FESpace();
+   const Operator *elem_restr =
+         fes_u->GetElementRestriction(ElementDofOrdering::LEXICOGRAPHIC);
+   const QuadratureInterpolator *qi_u = fes_u->GetQuadratureInterpolator(ir);
+   Vector u_evals(u.Size()), u_qvals(nqp * NE);
+   elem_restr->Mult(u, u_evals);
+   // TODO aren't these the same??
+   qi_u->Values(u_evals, u_qvals);
+
+   for (int k = 0; k < NE; k++)
+   {
+      el_mass(k) = 0.0;
+      el_vol(k)  = 0.0;
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         el_mass(k) += ip.weight * geom.detJ(k*nqp + q) * u_qvals(k*nqp + q);
+         el_vol(k)  += ip.weight * geom.detJ(k*nqp + q);
       }
    }
 }
