@@ -862,6 +862,9 @@ int main(int argc, char *argv[])
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
+      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+
 
       if (product_sync)
       {
