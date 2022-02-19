@@ -268,7 +268,7 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
       double u_LO_new = el_mass(k) / el_vol(k);
       for (int i = 0; i < ndofs; i++)
       {
-         du(k*ndofs + i) = (u_LO_new - u(i)) / dt;
+         du(k*ndofs + i) = (u_LO_new - u(k*ndofs + i)) / dt;
       }
    }
 }
@@ -286,14 +286,10 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
    const int NE = x.FESpace()->GetNE();
 
    GeometricFactors geom(x, ir, GeometricFactors::DETERMINANTS);
-   auto *fes_u = u.FESpace();
-   const Operator *elem_restr =
-         fes_u->GetElementRestriction(ElementDofOrdering::LEXICOGRAPHIC);
-   const QuadratureInterpolator *qi_u = fes_u->GetQuadratureInterpolator(ir);
-   Vector u_evals(u.Size()), u_qvals(nqp * NE);
-   elem_restr->Mult(u, u_evals);
-   // TODO aren't these the same??
-   qi_u->Values(u_evals, u_qvals);
+   auto qi_u = u.FESpace()->GetQuadratureInterpolator(ir);
+   Vector u_qvals(nqp * NE);
+   // As an L2 function, u has the correct EVector lexicographic ordering.
+   qi_u->Values(u, u_qvals);
 
    for (int k = 0; k < NE; k++)
    {

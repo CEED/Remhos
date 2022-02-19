@@ -174,7 +174,8 @@ int main(int argc, char *argv[])
                   "                  1 - Discrete Upwind,\n\t"
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
-                  "                  4 - Subcell Residual Distribution.");
+                  "                  4 - Subcell Residual Distribution,\n\t"
+                  "                  5 - Mass-Based Element Average,\n\t");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -725,6 +726,8 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::MassBased)
    {
+      MFEM_VERIFY(ho_solver != nullptr,
+                  "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
                                    (exec_mode == 1) ? &v_gf : nullptr);
    }
@@ -1266,6 +1269,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
    else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   // The HO option must be last, since some LO solvers use the HO. Then if the
+   // user only wants to run LO, this order will give him the LO solution.
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
