@@ -278,7 +278,7 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
                                               Vector &el_mass,
                                               Vector &el_vol) const
 {
-   // Only the order of the transsformation matters.
+   // Only the order of the transformation matters.
    auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
    const FiniteElement *fe = u.ParFESpace()->GetFE(0);
    const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
