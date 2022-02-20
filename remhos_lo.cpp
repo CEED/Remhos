@@ -249,18 +249,18 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 
    // Mesh positions for the new HO solution.
    ParMesh *pmesh = pfes.GetParMesh();
-   GridFunction x(pmesh->GetNodes()->FESpace());
+   GridFunction x_new(pmesh->GetNodes()->FESpace());
    // Copy the current nodes into x.
-   pmesh->GetNodes(x);
+   pmesh->GetNodes(x_new);
    if (mesh_v)
    {
-      // Remap mode - move the mesh nodes.
-      x.Add(dt, *mesh_v);
+      // Remap mode - get the positions of the mesh at time [t + dt].
+      x_new.Add(dt, *mesh_v);
    }
 
    const int NE = pfes.GetNE();
    Vector el_mass(NE), el_vol(NE);
-   MassesAndVolumesAtPosition(u_HO_new, x, el_mass, el_vol);
+   MassesAndVolumesAtPosition(u_HO_new, x_new, el_mass, el_vol);
 
    const int ndofs = u.Size() / NE;
    for (int k = 0; k < NE; k++)

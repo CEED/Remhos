@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
                   "                  4 - Subcell Residual Distribution,\n\t"
-                  "                  5 - Mass-Based Element Average,\n\t");
+                  "                  5 - Mass-Based Element Average.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
