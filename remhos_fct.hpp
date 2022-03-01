@@ -57,7 +57,7 @@ public:
 
    virtual ~FCTSolver() { }
 
-   virtual void UpdateTimeStep(double dt_) { dt = dt_; }
+   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    bool NeedsLOProductInput() const { return needs_LO_input_for_products; }
 

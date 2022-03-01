@@ -27,11 +27,14 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
+   double dt = -1.0; // usually not known at creation, updated later.
 
 public:
    LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
    virtual ~LOSolver() { }
+
+   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
 };
@@ -73,6 +76,26 @@ public:
                         bool subcell, bool timedep);
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
+class HOSolver;
+
+class MassBasedAvg : public LOSolver
+{
+protected:
+   HOSolver &ho_solver;
+   const GridFunction *mesh_v;
+
+   void MassesAndVolumesAtPosition(const ParGridFunction &u,
+                                   const GridFunction &x,
+                                   Vector &el_mass, Vector &el_vol) const;
+
+public:
+  MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
+               const GridFunction *mesh_vel)
+     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
 //PA based Residual Distribution
