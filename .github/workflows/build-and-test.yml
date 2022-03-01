@@ -44,8 +44,8 @@ jobs:
       if: steps.hypre-cache.outputs.cache-hit != 'true'
       uses: mfem/github-actions/build-hypre@master
       with:
-        hypre-archive: ${{ env.HYPRE_ARCHIVE }}
-        hypre-dir: ${{ env.HYPRE_TOP_DIR }}
+        archive: ${{ env.HYPRE_ARCHIVE }}
+        dir: ${{ env.HYPRE_TOP_DIR }}
 
     # Get Metis through cache, or build it.
     # Install will only run on cache miss.
