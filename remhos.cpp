@@ -43,8 +43,9 @@ using namespace std;
 using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell};
 enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty, FCTProject};
+enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
+                         ResDist, ResDistSubcell, MassBased};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
@@ -173,7 +174,8 @@ int main(int argc, char *argv[])
                   "                  1 - Discrete Upwind,\n\t"
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
-                  "                  4 - Subcell Residual Distribution.");
+                  "                  4 - Subcell Residual Distribution,\n\t"
+                  "                  5 - Mass-Based Element Average.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -607,6 +609,60 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
+   // Setup the initial conditions.
+   const int vsize = pfes.GetVSize();
+   Array<int> offset((product_sync) ? 3 : 2);
+   for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
+   BlockVector S(offset, Device::GetMemoryType());
+   // Primary scalar field is u.
+   ParGridFunction u(&pfes);
+   u.MakeRef(&pfes, S, offset[0]);
+   FunctionCoefficient u0(u0_function);
+   u.ProjectCoefficient(u0);
+   u.SyncAliasMemory(S);
+   // For the case of product remap, we also solve for s and u_s.
+   ParGridFunction s, us;
+   Array<bool> u_bool_el, u_bool_dofs;
+   if (product_sync)
+   {
+      s.SetSpace(&pfes);
+      ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
+      BoolFunctionCoefficient sc(s0_function, u_bool_el);
+      s.ProjectCoefficient(sc);
+
+      us.MakeRef(&pfes, S, offset[1]);
+      double *h_us = us.HostWrite();
+      const double *h_u = u.HostRead();
+      const double *h_s = s.HostRead();
+      // Simple - we don't target conservation at initialization.
+      for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
+      us.SyncAliasMemory(S);
+   }
+
+   // Smoothness indicator.
+   SmoothnessIndicator *smth_indicator = NULL;
+   if (smth_ind_type)
+   {
+      smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
+                                               pfes, u, dofs);
+   }
+
+   // Setup of the high-order solver (if any).
+   HOSolver *ho_solver = NULL;
+   if (ho_type == HOSolverType::Neumann)
+   {
+      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
+   }
+   else if (ho_type == HOSolverType::CG)
+   {
+      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
+   }
+   else if (ho_type == HOSolverType::LocalInverse)
+   {
+      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+   }
+
+   // Setup the low order solver (if any).
    LOSolver *lo_solver = NULL;
    Array<int> lo_smap;
    const bool time_dep = (exec_mode == 0) ? false : true;
@@ -668,58 +724,12 @@ int main(int argc, char *argv[])
                                               subcell_scheme, time_dep);
       }
    }
-
-   // Setup the initial conditions.
-   const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? 3 : 2);
-   for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
-   BlockVector S(offset, Device::GetMemoryType());
-   // Primary scalar field is u.
-   ParGridFunction u(&pfes);
-   u.MakeRef(&pfes, S, offset[0]);
-   FunctionCoefficient u0(u0_function);
-   u.ProjectCoefficient(u0);
-   u.SyncAliasMemory(S);
-   // For the case of product remap, we also solve for s and u_s.
-   ParGridFunction s, us;
-   Array<bool> u_bool_el, u_bool_dofs;
-   if (product_sync)
+   else if (lo_type == LOSolverType::MassBased)
    {
-      s.SetSpace(&pfes);
-      ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
-      BoolFunctionCoefficient sc(s0_function, u_bool_el);
-      s.ProjectCoefficient(sc);
-
-      us.MakeRef(&pfes, S, offset[1]);
-      double *h_us = us.HostWrite();
-      const double *h_u = u.HostRead();
-      const double *h_s = s.HostRead();
-      // Simple - we don't target conservation at initialization.
-      for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
-      us.SyncAliasMemory(S);
-   }
-
-   // Smoothness indicator.
-   SmoothnessIndicator *smth_indicator = NULL;
-   if (smth_ind_type)
-   {
-      smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
-   }
-
-   // Setup of the high-order solver (if any).
-   HOSolver *ho_solver = NULL;
-   if (ho_type == HOSolverType::Neumann)
-   {
-      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
-   }
-   else if (ho_type == HOSolverType::CG)
-   {
-      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
-   }
-   else if (ho_type == HOSolverType::LocalInverse)
-   {
-      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      MFEM_VERIFY(ho_solver != nullptr,
+                  "Mass-Based LO solver requires a choice of a HO solver.");
+      lo_solver = new MassBasedAvg(pfes, *ho_solver,
+                                   (exec_mode == 1) ? &v_gf : nullptr);
    }
 
    // Setup of the monolithic solver (if any).
@@ -865,6 +875,9 @@ int main(int argc, char *argv[])
       double dt_real = min(dt, t_final - t);
 
       adv.SetDt(dt_real);
+      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+
 
       if (product_sync)
       {
@@ -872,7 +885,7 @@ int main(int argc, char *argv[])
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          if (myid == 0)
          {
-            std::cout << "   --- Full time step" << std::endl; }
+            std::cout << "   --- Full time step" << std::endl;
             std::cout << "   in:  ";
             std::cout << std::scientific << std::setprecision(5);
             std::cout << "min_s: " << s_min_glob
@@ -1260,6 +1273,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                   dofs.xi_min, dofs.xi_max, d_u);
    }
    else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   // The HO option must be last, since some LO solvers use the HO. Then if the
+   // user only wants to run LO, this order will give him the LO solution.
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
