@@ -43,7 +43,8 @@ using namespace std;
 using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty, FCTProject};
+enum class FCTSolverType {None, FluxBased, ClipScale,
+                          NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};

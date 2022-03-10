@@ -20,7 +20,7 @@ methods=( "-ho 1 -lo 2 -fct 2"     # Hennes 1
           "-ho 2 -lo 4 -fct 2 -pa" # Arturo 2 (PA for HO and LO RDsubcell)
         # "-ho 2 -lo 3 -fct 3"     # Manuel (penalty-based FCT)
           "-ho 3 -lo 1 -fct 1"     # Blast
-          "-ho 3 -lo 5 -fct 1" )   # Blast + sharpening approach
+          "-ho 3 -lo 5 -fct 4" )   # Blast + sharpening approach
 
 cd ..
 rm -f $file
