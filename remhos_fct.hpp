@@ -57,7 +57,7 @@ public:
 
    virtual ~FCTSolver() { }
 
-   virtual void UpdateTimeStep(double dt_) { dt = dt_; }
+   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    bool NeedsLOProductInput() const { return needs_LO_input_for_products; }
 
@@ -102,11 +102,11 @@ protected:
    void AddFluxesAtDofs(const SparseMatrix &flux_mat,
                         Vector &flux_pos, Vector &flux_neg) const;
    void ComputeFluxCoefficients(const Vector &u, const Vector &du_lo,
-      const Vector &m, const Vector &u_min, const Vector &u_max,
-      Vector &coeff_pos, Vector &coeff_neg) const;
+                                const Vector &m, const Vector &u_min, const Vector &u_max,
+                                Vector &coeff_pos, Vector &coeff_neg) const;
    void UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
-      ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
-      SparseMatrix &flux_mat, Vector &du) const;
+                              ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
+                              SparseMatrix &flux_mat, Vector &du) const;
 
 public:
    FluxBasedFCT(ParFiniteElementSpace &space,
@@ -134,8 +134,27 @@ class ClipScaleSolver : public FCTSolver
 {
 public:
    ClipScaleSolver(ParFiniteElementSpace &space,
-                   SmoothnessIndicator *si, double dt_)
-      : FCTSolver(space, si, dt_, false) { }
+                   SmoothnessIndicator *si, double dt)
+      : FCTSolver(space, si, dt, false) { }
+
+   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+                                const Vector &du_ho, const Vector &du_lo,
+                                const Vector &u_min, const Vector &u_max,
+                                Vector &du) const;
+
+   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+                               const Vector &d_us_HO, const Vector &d_us_LO,
+                               Vector &s_min, Vector &s_max,
+                               const Vector &u_new,
+                               const Array<bool> &active_el,
+                               const Array<bool> &active_dofs, Vector &d_us);
+};
+
+class ElementFCTProjection : public FCTSolver
+{
+public:
+   ElementFCTProjection(ParFiniteElementSpace &space, double dt)
+      : FCTSolver(space, NULL, dt, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,

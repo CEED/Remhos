@@ -350,8 +350,9 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    gcomm.Bcast(maxvals);
 }
 
-DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
-   : pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
+DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
+   : bounds_type(btype),
+     pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
      fec_bounds(pfes.GetOrder(0), pmesh->Dimension(), BasisType::GaussLobatto),
      pfes_bounds(pmesh, &fec_bounds),
      x_min(&pfes_bounds), x_max(&pfes_bounds)
@@ -373,9 +374,61 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
    FillSubcell2CellDof(); // Fill Sub2Ind.
 }
 
-void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
-                            Vector &dof_min, Vector &dof_max,
-                            Array<bool> *active_el)
+void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
+                                          const Vector &el_max,
+                                          Vector &dof_min, Vector &dof_max,
+                                          Array<bool> *active_el)
+{
+   ParMesh *pmesh = pfes.GetParMesh();
+   L2_FECollection fec_bounds(0, pmesh->Dimension());
+   ParFiniteElementSpace pfes_bounds(pmesh, &fec_bounds);
+   ParGridFunction x_min(&pfes_bounds), x_max(&pfes_bounds);
+   const int NE = pmesh->GetNE();
+   const int ndofs = dof_min.Size() / NE;
+
+   x_min.HostReadWrite();
+   x_max.HostReadWrite();
+
+   x_min = el_min;
+   x_max = el_max;
+
+   x_min.ExchangeFaceNbrData(); x_max.ExchangeFaceNbrData();
+   const Vector &minv = x_min.FaceNbrData(), &maxv = x_max.FaceNbrData();
+   const Table &el_to_el = pmesh->ElementToElementTable();
+   Array<int> face_nbr_el;
+   for (int i = 0; i < NE; i++)
+   {
+      double el_min = x_min(i), el_max = x_max(i);
+
+      el_to_el.GetRow(i, face_nbr_el);
+      for (int n = 0; n < face_nbr_el.Size(); n++)
+      {
+         if (face_nbr_el[n] < NE)
+         {
+            // Local neighbor.
+            el_min = std::min(el_min, x_min(face_nbr_el[n]));
+            el_max = std::max(el_max, x_max(face_nbr_el[n]));
+         }
+         else
+         {
+            // MPI face neighbor.
+            el_min = std::min(el_min, minv(face_nbr_el[n] - NE));
+            el_max = std::max(el_max, maxv(face_nbr_el[n] - NE));
+         }
+      }
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_min(i*ndofs + j) = el_min;
+         dof_max(i*ndofs + j) = el_max;
+      }
+   }
+}
+
+void DofInfo::ComputeOverlapBounds(const Vector &el_min,
+                                   const Vector &el_max,
+                                   Vector &dof_min, Vector &dof_max,
+                                   Array<bool> *active_el)
 {
    GroupCommunicator &gcomm = pfes_bounds.GroupComm();
    Array<int> dofsCG;
@@ -398,8 +451,8 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
          x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
-   Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.GetData(), x_min.Size());
+   Array<double> maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
