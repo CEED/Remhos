@@ -43,9 +43,10 @@ using namespace std;
 using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
+enum class FCTSolverType {None, FluxBased, ClipScale,
+                          NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
-enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
@@ -837,6 +838,10 @@ int main(int argc, char *argv[])
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+   }
+   else if (fct_type == FCTSolverType::FCTProject)
+   {
+      fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
