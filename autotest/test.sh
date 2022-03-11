@@ -40,7 +40,7 @@ for method in "${methods[@]}"; do
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
   echo -e '\n'"- Transport per-1D" >> $file
-  run_line=$command" -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.0005 -tf 1 "$method
+  run_line=$command" -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 "$method
   echo -e $run_line >> $file
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
@@ -73,6 +73,11 @@ $run_line | grep -e 'mass us' -e 'loss us'>> $file
 
 echo -e '\n'"--- Product remap 2D (ClipScale)" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 2 -ps -s 1"
+echo -e $run_line >> $file
+$run_line | grep -e 'mass us' -e 'loss us'>> $file
+
+echo -e '\n'"--- Product remap 2D (FCTProject)" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 4 -ps -s 1"
 echo -e $run_line >> $file
 $run_line | grep -e 'mass us' -e 'loss us'>> $file
 
