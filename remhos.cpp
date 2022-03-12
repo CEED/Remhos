@@ -929,6 +929,7 @@ int main(int argc, char *argv[])
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
+         std::cout << "Real / est = " << dt_real << " / " << dt_est << endl;
          if (dt_est < dt_real)
          {
             // Repeat with the proper time step.
@@ -1336,7 +1337,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       lo_solver->CalcLOSolution(u, d_u);
 
-      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      dt_est = ComputeTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
       MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
                     x_gf.ParFESpace()->GetComm());
    }
@@ -1424,7 +1428,7 @@ double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
 
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
-   const double cfl = 0.5, eps = 1e-15, dt_min = 1e-10;
+   const double eps = 1e-12, dt_min = 1e-10;
    double dt = numeric_limits<double>::infinity();
 
    for (int i = 0; i < n; i++)
@@ -1438,10 +1442,18 @@ double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
          dt = min(dt, (x_min(i) - x(i)) / dx(i) );
       }
 
-      if (dt < dt_min) { MFEM_ABORT("Time step too small."); }
+      if (dt < dt_min)
+      {
+         cout << "Computed dt = " << dt << endl;
+         cout << "Min / max =   " << x_min(i) << " " << x_max(i) << endl;
+         cout << "Old x / dx =  " << x(i) << " " << dx(i) << endl;
+         cout << n << endl;
+
+         MFEM_ABORT("Time step too small.");
+      }
    }
 
-   return cfl * dt;
+   return dt;
 }
 
 // Velocity coefficient
