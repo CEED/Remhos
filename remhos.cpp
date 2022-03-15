@@ -383,13 +383,17 @@ int main(int argc, char *argv[])
          mono_type = MonolithicSolverType::None;
       }
    }
-
    const bool use_subcell_RD =
       ( lo_type   == LOSolverType::ResDistSubcell ||
         mono_type == MonolithicSolverType::ResDistMonoSubcell );
-
-   if (use_subcell_RD && order==1)
-   { MFEM_ABORT("Subcell schemes are not applicable to linear FE."); }
+   if (use_subcell_RD)
+   {
+      MFEM_VERIFY(order > 1, "Subcell schemes require FE order > 2.");
+   }
+   if (dt_control == TimeStepControl::LOBoundsError)
+   {
+      MFEM_VERIFY(bounds_type == 1, "Error: -dtc 1 requires -bt 1.");
+   }
 
    const int prob_size = pfes.GlobalTrueVSize();
    if (myid == 0) { cout << "Number of unknowns: " << prob_size << endl; }
@@ -1325,24 +1329,24 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-
-      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
-                    x_gf.ParFESpace()->GetComm());
-
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      }
    }
    else if (lo_solver)
    {
       lo_solver->CalcLOSolution(u, d_u);
 
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-
-      dt_est = ComputeTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
-      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
-                    x_gf.ParFESpace()->GetComm());
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+         dt_est = ComputeTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
+      }
    }
    // The HO option must be last, since some LO solvers use the HO. Then if the
    // user only wants to run LO, this order will give him the LO solution.
@@ -1453,6 +1457,8 @@ double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
       }
    }
 
+   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+                 Kbf.ParFESpace()->GetComm());
    return dt;
 }
 
