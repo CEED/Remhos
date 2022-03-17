@@ -280,6 +280,8 @@ int main(int argc, char *argv[])
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+   MPI_Comm comm = pmesh.GetComm();
+   const int NE  = pmesh.GetNE();
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
@@ -328,14 +330,31 @@ int main(int argc, char *argv[])
    // advective velocity (transport) or mesh velocity (remap).
    VectorFunctionCoefficient velocity(dim, velocity_function);
 
-   // Mesh velocity.
-   GridFunction v_gf(x.FESpace());
-   VectorGridFunctionCoefficient v_coef(&v_gf);
+   // Initial time step estimate (CFL-based).
+   if (dt < 0.0)
+   {
+      dt = std::numeric_limits<double>::infinity();
+      Vector vel_e(dim);
+      for (int e = 0; e < NE; e++)
+      {
+         double length_e = pmesh.GetElementSize(e);
+         auto Tr = pmesh.GetElementTransformation(e);
+         auto ip = Geometries.GetCenter(pmesh.GetElementBaseGeometry(e));
+         Tr->SetIntPoint(&ip);
+         velocity.Eval(vel_e, *Tr, ip);
+         double speed_e = sqrt(vel_e * vel_e + 1e-14);
+         dt = fmin(dt, 0.5 * length_e / speed_e);
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
+   }
 
+   // Mesh velocity.
    // If remap is on, obtain the mesh velocity by moving the mesh to the final
    // mesh positions, and taking the displacement vector.
    // The mesh motion resembles a time-dependent deformation, e.g., similar to
    // a deformation that is obtained by a Lagrangian simulation.
+   GridFunction v_gf(x.FESpace());
+   VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
@@ -428,8 +447,8 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -445,8 +464,8 @@ int main(int argc, char *argv[])
       }
       else if (exec_mode == 1)
       {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+         auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
@@ -519,7 +538,7 @@ int main(int argc, char *argv[])
       else if (exec_mode == 1)
       {
          lom.pk->AddDomainIntegrator(
-            new PrecondConvectionIntegrator(v_coef) );
+            new PrecondConvectionIntegrator(v_mesh_coeff) );
       }
       lom.pk->Assemble(skip_zeros);
       lom.pk->Finalize(skip_zeros);
@@ -532,7 +551,7 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_coef; }
+   if (exec_mode == 1) { lom.coef = &v_mesh_coeff; }
    else                { lom.coef = &velocity; }
 
    // Face integration rule.
@@ -833,7 +852,6 @@ int main(int argc, char *argv[])
    }
 
    // Record the initial mass.
-   MPI_Comm comm = pmesh.GetComm();
    Vector masses(lumpedM);
    const double mass0_u_loc = lumpedM * u;
    double mass0_u, mass0_us;
@@ -895,7 +913,6 @@ int main(int argc, char *argv[])
    double residual;
    double s_min_glob = numeric_limits<double>::infinity(),
           s_max_glob = -numeric_limits<double>::infinity();
-   const int NE = pmesh.GetNE();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
