@@ -343,7 +343,7 @@ int main(int argc, char *argv[])
          Tr->SetIntPoint(&ip);
          velocity.Eval(vel_e, *Tr, ip);
          double speed_e = sqrt(vel_e * vel_e + 1e-14);
-         dt = fmin(dt, 0.5 * length_e / speed_e);
+         dt = fmin(dt, 0.25 * length_e / speed_e);
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
    }
