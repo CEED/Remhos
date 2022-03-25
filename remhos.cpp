@@ -98,9 +98,8 @@ private:
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
 
-   double ComputeTimeStepEstimate(const Vector &x, const Vector &dx,
-                                  const Vector &x_min,
-                                  const Vector &x_max) const;
+   void UpdateTimeStepEstimate(const Vector &x, const Vector &dx,
+                               const Vector &x_min, const Vector &x_max) const;
 
 public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
@@ -922,10 +921,10 @@ int main(int argc, char *argv[])
    {
       double dt_real = min(dt, t_final - t);
 
+      // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
       if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
       if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
-
 
       if (product_sync)
       {
@@ -950,19 +949,19 @@ int main(int argc, char *argv[])
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
-         std::cout << "Real / est = " << dt_real << " / " << dt_est << endl;
          if (dt_est < dt_real)
          {
             // Repeat with the proper time step.
             if (myid == 0)
             {
                cout << "Repeat / decrease dt: "
-                    << dt_real << " --> " << dt_est << endl;
+                    << dt_real << " --> " << 0.85 * dt << endl;
             }
             ti--;
             t -= dt_real;
             S  = Sold;
-            dt = dt_est;
+            dt = 0.85 * dt;
+            if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
          }
          else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
@@ -1351,7 +1350,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
-         dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
       }
    }
    else if (lo_solver)
@@ -1362,7 +1361,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       {
          dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-         dt_est = ComputeTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
+         UpdateTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
       }
    }
    // The HO option must be last, since some LO solvers use the HO. Then if the
@@ -1440,43 +1439,34 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 }
 
-double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
-                                                  const Vector &dx,
-                                                  const Vector &x_min,
-                                                  const Vector &x_max) const
+void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
+                                               const Vector &dx,
+                                               const Vector &x_min,
+                                               const Vector &x_max) const
 {
-   if (dt_control == TimeStepControl::FixedTimeStep) { return dt; }
+   if (dt_control == TimeStepControl::FixedTimeStep) { return; }
 
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
-   const double eps = 1e-12, dt_min = 1e-10;
+   const double eps = 1e-12;
    double dt = numeric_limits<double>::infinity();
 
    for (int i = 0; i < n; i++)
    {
       if (dx(i) > eps)
       {
-         dt = min(dt, (x_max(i) - x(i)) / dx(i) );
+         dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
       }
       else if (dx(i) < -eps)
       {
-         dt = min(dt, (x_min(i) - x(i)) / dx(i) );
-      }
-
-      if (dt < dt_min)
-      {
-         cout << "Computed dt = " << dt << endl;
-         cout << "Min / max =   " << x_min(i) << " " << x_max(i) << endl;
-         cout << "Old x / dx =  " << x(i) << " " << dx(i) << endl;
-         cout << n << endl;
-
-         MFEM_ABORT("Time step too small.");
+         dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
       }
    }
 
    MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
                  Kbf.ParFESpace()->GetComm());
-   return dt;
+
+   dt_est = fmin(dt_est, dt);
 }
 
 // Velocity coefficient
