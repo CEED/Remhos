@@ -184,42 +184,42 @@ mpirun -np 2 ./remhos -no-vis --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p
 Final mass u:  0.8143001155
 Max value u:   0.9995762608
 
---- Method -ho 3 -lo 5 -fct 4
+--- Method -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 
 - Remap pacman nonper-struct-2D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 5 -fct 4
-Final mass u:  0.08585041209
-Max value u:   0.7468859443
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
+Final mass u:  0.08580647347
+Max value u:   0.9026301892
 
 - Remap bump nonper-struct-3D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 5 -fct 4
-Final mass u:  0.1197365299
-Max value u:   0.9894725164
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
+Final mass u:  0.1197663581
+Max value u:   0.9991156324
 
 - Transport per-1D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 3 -lo 5 -fct 4
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 Final mass u:  0.1401241455
-Max value u:   0.8811151565
+Max value u:   0.9136857717
 
 - Transport bump per-unstruct-2D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 -ho 3 -lo 5 -fct 4
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-hexagon.mesh -p 0 -rs 2 -dt 0.005 -tf 2.5 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 Final mass u:  0.3888354875
-Max value u:   0.9767038848
+Max value u:   0.9891377191
 
 - Transport balls-jacks per-struct-2D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 3 -lo 5 -fct 4
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 Final mass u:  0.1623263888
-Max value u:   0.6940589336
+Max value u:   0.7849472928
 
 - Transport bump per-struct-3D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 3 -lo 5 -fct 4
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 Final mass u:  0.9607429525
-Max value u:   0.9478268773
+Max value u:   0.9768049456
 
 - Transport bump nonper-unstruct-3D
-mpirun -np 2 ./remhos -no-vis --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.035 -tf 3 -ho 3 -lo 5 -fct 4
-Final mass u:  0.7767691274
-Max value u:   0.9981061699
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.035 -tf 3 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
+Final mass u:  0.7768315344
+Max value u:   0.9995306615
 
 --- Product remap 2D (FCT)
 mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps
@@ -235,6 +235,12 @@ Mass loss us:  0.00186952
 mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 4 -ps -s 1
 Final mass us: 0.1814920761
 Mass loss us:  0.0018842
+
+--- BLAST sharpening test - Pacman remap auto-dt
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
+
+--- BLAST sharpening test - Transport balls-jacks auto-dt
+mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/periodic-square.mesh -p 5 -rs 3 -dt -1 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 
 --- Steady monolithic 2 2D
 mpirun -np 2 ./remhos -no-vis --verify-bounds -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2
