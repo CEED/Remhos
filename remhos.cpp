@@ -427,15 +427,15 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
-   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds, w_max_bounds,
+   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 0, false);
-   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds, w_max_bounds,
+   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 1, false);
    VelocityCoefficient *used_v;
    if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
    if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
-   VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
+   VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds,
                                     u_max_bounds_grad_dir, 1.0, 1, true);
 
    ParBilinearForm k(&pfes);
@@ -732,7 +732,7 @@ int main(int argc, char *argv[])
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? 4 : 3);
+   Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
@@ -741,12 +741,6 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
-   ParGridFunction w(&pfes), u_plus_w(&pfes);
-   w.MakeRef(&pfes, S, offset[1]);
-   FunctionCoefficient w0(w0_function);
-   w.ProjectCoefficient(w0);
-   w.SyncAliasMemory(S);
-   for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -757,7 +751,7 @@ int main(int argc, char *argv[])
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
 
-      us.MakeRef(&pfes, S, offset[2]);
+      us.MakeRef(&pfes, S, offset[1]);
       double *h_us = us.HostWrite();
       const double *h_u = u.HostRead();
       const double *h_s = s.HostRead();
@@ -834,7 +828,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_b, vis_v_new, vis_s, vis_us, vis_w, vis_upw;
+   socketstream sout, vis_b, vis_v_new, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -846,16 +840,12 @@ int main(int argc, char *argv[])
       sout.precision(8);
       vis_s.precision(8);
       vis_us.precision(8);
-      vis_w.precision(8);
-      vis_upw.precision(8);
 
       int Wx = 0, Wy = 0; // window position
       const int Ww = 400, Wh = 400; // window size
       u.HostRead();
       s.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
-//      VisualizeField(vis_w, vishost, visport, w, "Solution w", Wx, 400, Ww, Wh);
-//      VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u", Wx, 800, Ww, Wh);
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -958,7 +948,6 @@ int main(int argc, char *argv[])
 
       // needed for velocity modifications.
       dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
-      //dof_info.ComputeLinMaxBound(w, w_max_bounds);
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
@@ -997,19 +986,6 @@ int main(int argc, char *argv[])
             dt *= 1.02;
          }
       }
-
-      // Perform cutting.
-//      Vector el_max(NE);
-//      const double interface_value = 1e-2;
-//      dof_info.ComputeElementMaxSparcityBound(u, 3, el_max);
-//      const int nd = pfes.GetFE(0)->GetDof();
-//      for (int k = 0; k < NE; k++)
-//      {
-//         if (el_max(k) < interface_value)
-//         {
-//            for (int j = 0; j < nd; j++) { u(k*nd+j) = 1e-14; }
-//         }
-//      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -1116,17 +1092,12 @@ int main(int argc, char *argv[])
                  << ", dt: " << dt << ", residual: " << residual << endl;
          }
 
-         for (int i = 0; i < vsize; i++) { u_plus_w(i) = 1.0 - u(i); }
          if (visualization)
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution u",
                            Wx, Wy, Ww, Wh);
-//            VisualizeField(vis_w, vishost, visport, w, "Solution w",
-//                           Wx, 400, Ww, Wh);
-//            VisualizeField(vis_upw, vishost, visport, u_plus_w, "Solution 1-u",
-//                           Wx, 800, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
             VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
@@ -1216,11 +1187,10 @@ int main(int argc, char *argv[])
    }
 
    ConstantCoefficient zero(0.0);
-   double norm_u = u.ComputeL2Error(zero), norm_w = w.ComputeL2Error(zero);
+   double norm_u = u.ComputeL2Error(zero);
    if (myid == 0)
    {
       cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
-      cout << setprecision(12) << "L2-norm w: " << norm_w << endl;
    }
 
    // Compute errors, if the initial condition is equal to the final solution
