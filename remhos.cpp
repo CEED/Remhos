@@ -881,7 +881,7 @@ int main(int argc, char *argv[])
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      fct_solver = new ClipScaleSolver(pfes, dof_info, smth_indicator, dt);
+      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {

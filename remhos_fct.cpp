@@ -498,22 +498,12 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
-//   // Reduce propagation.
-//   const double interface_value = 1.0;
-//   Vector el_max;
-//   dof_info.ComputeElementMaxSparcityBound(u, el_max);
-
    u.HostRead();
    m.HostRead();
    du.HostReadWrite();
    du_lo.HostRead(); du_ho.HostRead();
    for (int k = 0; k < NE; k++)
    {
-//      if (el_max(k) < interface_value)
-//      {
-//         for (int j = 0; j < nd; j++) { du(k*nd+j) = 0.0; }
-//         continue;
-//      }
       sumPos = sumNeg = 0.0;
 
       // Clip.

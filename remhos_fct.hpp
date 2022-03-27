@@ -133,13 +133,10 @@ public:
 
 class ClipScaleSolver : public FCTSolver
 {
-protected:
-   DofInfo &dof_info;
-
 public:
-   ClipScaleSolver(ParFiniteElementSpace &space, DofInfo &di,
+   ClipScaleSolver(ParFiniteElementSpace &space,
                    SmoothnessIndicator *si, double dt)
-      : FCTSolver(space, si, dt, false), dof_info(di) { }
+      : FCTSolver(space, si, dt, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
