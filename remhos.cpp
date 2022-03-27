@@ -98,8 +98,6 @@ private:
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
 
-   void AssembleAndEvolve(Vector &u, Vector &du) const;
-
    double ComputeTimeStepEstimate(const Vector &x, const Vector &dx,
                                   const Vector &x_min,
                                   const Vector &x_max) const;
@@ -1301,56 +1299,56 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       // Reset precomputed geometric data.
       Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
 
-//      // Reassemble on the new mesh. Element contributions.
-//      // Currently needed to have the sparse matrices used by the LO methods.
-//      Mbf.BilinearForm::operator=(0.0);
-//      Mbf.Assemble();
-//      Kbf.BilinearForm::operator=(0.0);
-//      Kbf.Assemble(0);
-//      ml.BilinearForm::operator=(0.0);
-//      ml.Assemble();
-//      lumpedM.HostReadWrite();
-//      ml.SpMat().GetDiag(lumpedM);
+      // Reassemble on the new mesh. Element contributions.
+      // Currently needed to have the sparse matrices used by the LO methods.
+      Mbf.BilinearForm::operator=(0.0);
+      Mbf.Assemble();
+      Kbf.BilinearForm::operator=(0.0);
+      Kbf.Assemble(0);
+      ml.BilinearForm::operator=(0.0);
+      ml.Assemble();
+      lumpedM.HostReadWrite();
+      ml.SpMat().GetDiag(lumpedM);
 
-//      M_HO.BilinearForm::operator=(0.0);
-//      M_HO.Assemble();
-//      K_HO.BilinearForm::operator=(0.0);
-//      K_HO.Assemble(0);
+      M_HO.BilinearForm::operator=(0.0);
+      M_HO.Assemble();
+      K_HO.BilinearForm::operator=(0.0);
+      K_HO.Assemble(0);
 
-//      if (lom.pk)
-//      {
-//         lom.pk->BilinearForm::operator=(0.0);
-//         lom.pk->Assemble();
-//      }
+      if (lom.pk)
+      {
+         lom.pk->BilinearForm::operator=(0.0);
+         lom.pk->Assemble();
+      }
 
-//      // Face contributions.
-//      asmbl.bdrInt = 0.;
-//      Mesh *mesh = M_HO.FESpace()->GetMesh();
-//      const int dim = mesh->Dimension(), ne = mesh->GetNE();
-//      Array<int> bdrs, orientation;
-//      FaceElementTransformations *Trans;
-//      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
-//      {
-//         RD_ptr->SampleVelocity(FaceType::Interior);
-//         RD_ptr->SampleVelocity(FaceType::Boundary);
-//         RD_ptr->SetupPA(FaceType::Interior);
-//         RD_ptr->SetupPA(FaceType::Boundary);
-//      }
-//      else
-//      {
-//         for (int k = 0; k < ne; k++)
-//         {
-//            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-//            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-//            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+      // Face contributions.
+      asmbl.bdrInt = 0.;
+      Mesh *mesh = M_HO.FESpace()->GetMesh();
+      const int dim = mesh->Dimension(), ne = mesh->GetNE();
+      Array<int> bdrs, orientation;
+      FaceElementTransformations *Trans;
+      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
+      {
+         RD_ptr->SampleVelocity(FaceType::Interior);
+         RD_ptr->SampleVelocity(FaceType::Boundary);
+         RD_ptr->SetupPA(FaceType::Interior);
+         RD_ptr->SetupPA(FaceType::Boundary);
+      }
+      else
+      {
+         for (int k = 0; k < ne; k++)
+         {
+            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
 
-//            for (int i = 0; i < dofs.numBdrs; i++)
-//            {
-//               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-//               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-//            }
-//         }
-//      }
+            for (int i = 0; i < dofs.numBdrs; i++)
+            {
+               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               asmbl.ComputeFluxTerms(k, i, Trans, lom);
+            }
+         }
+      }
    }
 
    const int size = Kbf.ParFESpace()->GetVSize();
@@ -1362,10 +1360,42 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    Vector u, d_u;
    Vector *xptr = const_cast<Vector*>(&X);
 
-   // Compute du with modification.
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
-   AssembleAndEvolve(u, d_u);
+   Vector du_HO(u.Size()), du_LO(u.Size());
+   x_gf = u;
+   x_gf.ExchangeFaceNbrData();
+   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
+   else if (fct_solver)
+   {
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      lo_solver->CalcLOSolution(u, du_LO);
+      ho_solver->CalcHOSolution(u, du_HO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
+                    x_gf.ParFESpace()->GetComm());
+
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, d_u);
+   }
+   else if (lo_solver)
+   {
+      lo_solver->CalcLOSolution(u, d_u);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      dt_est = ComputeTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
+      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
+                    x_gf.ParFESpace()->GetComm());
+   }
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+   else { MFEM_ABORT("No solver was chosen."); }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > 2*size)
@@ -1433,78 +1463,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       d_us.SyncAliasMemory(Y);
    }
-}
-
-void AdvectionOperator::AssembleAndEvolve(Vector &u, Vector &du) const
-{
-   Mesh *mesh = M_HO.FESpace()->GetMesh();
-   const int dim  = mesh->Dimension();
-   const int NE   = Kbf.ParFESpace()->GetNE();
-
-   // Assemble.
-   Mbf.BilinearForm::operator=(0.0);
-   Mbf.Assemble();
-   Kbf.BilinearForm::operator=(0.0);
-   Kbf.Assemble(0);
-   K_HO.BilinearForm::operator=(0.0);
-   K_HO.Assemble(0);
-   ml.BilinearForm::operator=(0.0);
-   ml.Assemble();
-   lumpedM.HostReadWrite();
-   ml.SpMat().GetDiag(lumpedM);
-
-   // Face contributions.
-   asmbl.bdrInt = 0.;
-   Array<int> bdrs, orientation;
-   FaceElementTransformations *Trans;
-   for (int k = 0; k < NE; k++)
-   {
-      if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-      else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-      else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-      for (int i = 0; i < dofs.numBdrs; i++)
-      {
-         Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-         asmbl.ComputeFluxTerms(k, i, Trans, lom);
-      }
-   }
-
-   // Evolve.
-   Vector du_HO(u.Size()), du_LO(u.Size());
-   x_gf = u;
-   x_gf.ExchangeFaceNbrData();
-   if (mono_solver) { mono_solver->CalcSolution(u, du); }
-   else if (fct_solver)
-   {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
-
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-
-      dt_est = ComputeTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
-                    x_gf.ParFESpace()->GetComm());
-
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, du);
-   }
-   else if (lo_solver)
-   {
-      lo_solver->CalcLOSolution(u, du);
-
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-
-      dt_est = ComputeTimeStepEstimate(u, du, dofs.xi_min, dofs.xi_max);
-      MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
-                    x_gf.ParFESpace()->GetComm());
-   }
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, du); }
-   else { MFEM_ABORT("No solver was chosen."); }
 }
 
 double AdvectionOperator::ComputeTimeStepEstimate(const Vector &x,
