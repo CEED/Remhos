@@ -437,8 +437,6 @@ int main(int argc, char *argv[])
 
    VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds, w_max_bounds,
                                     u_max_bounds_grad_dir, 1.0, 1, true);
-   v_diff_coeff.slow_front_u = true;
-   v_diff_coeff.push_tail_u = true;
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -964,13 +962,10 @@ int main(int argc, char *argv[])
       // needed for velocity visualization.
       if (exec_mode == 0)
       {
-         v_new_coeff_adv.slow_front_u = true;
          v_new_vis.ProjectCoefficient(v_new_coeff_adv);
       }
       else
       {
-         v_new_coeff_rem.slow_front_u = v_diff_coeff.slow_front_u;
-         v_new_coeff_rem.push_tail_u  = v_diff_coeff.push_tail_u;
          v_new_vis.ProjectCoefficient(v_new_coeff_rem);
       }
 
@@ -1394,71 +1389,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector delta_u(size), delta_w(size);
-
-   Vector u, w, d_u, d_w;
+   Vector u, d_u;
    Vector *xptr = const_cast<Vector*>(&X);
 
    // Compute du with modification.
-   v_coeff.slow_front_u = false;
-   v_coeff.slow_front_w = false;
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
    AssembleAndEvolve(u, d_u);
-
-   // Compute du without modification.
-//   Vector d_u_unmod(size);
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = false;
-//   AssembleAndEvolve(u, d_u_unmod);
-
-//   for (int i = 0; i < size; i++)
-//   {
-//      delta_u(i) = d_u(i) - d_u_unmod(i);
-//   }
-
-   // Compute dw with modification.
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = true;
-   w.MakeRef(*xptr, size, size);
-   d_w.MakeRef(Y, size, size);
-   d_w = 0.0;
-//   AssembleAndEvolve(w, d_w);
-
-//   // Compute dw without modification.
-//   Vector d_w_unmod(size);
-//   v_coeff.slow_front_u = false;
-//   v_coeff.slow_front_w = false;
-//   AssembleAndEvolve(w, d_w_unmod);
-
-//   for (int i = 0; i < size; i++)
-//   {
-//      delta_w(i) = d_w(i) - d_w_unmod(i);
-//   }
-
-//   for (int i = 0; i < size; i++)
-//   {
-//      if (delta_u(i) > 1e-15)
-//      {
-//         // d_w(i) -= delta_u(i);
-//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
-//      }
-//      if (delta_u(i) < -1e-15)
-//      {
-//         // d_w(i) += delta_u(i);
-//         d_w(i) = (1.0 - u(i) - w(i)) / dt - d_u(i);
-//      }
-//      if (delta_w(i) > 1e-15)
-//      {
-//         //d_u(i) -= delta_w(i);
-//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
-//      }
-//      if (delta_w(i) < -1e-15)
-//      {
-//         //d_u(i) += delta_w(i);
-//         d_u(i) = (1.0 - w(i) - u(i)) / dt - d_w(i);
-//      }
-//   }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > 2*size)

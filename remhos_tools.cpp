@@ -1162,119 +1162,6 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
-   EvalGD(v, T, ip);
-   return;
-
-   T.SetIntPoint(&ip);
-   v_coeff.Eval(v, T, ip);
-
-//   if (modify_cell[T.ElementNo] == false)
-//   {
-//      if (take_v_difference) { v = 0.0; }
-//      return;
-//   }
-
-   Vector v_new(v);
-
-   const double transition_01_power = 4;
-
-   const double eps = 1e-12;
-   if (slow_front_u)
-   {
-      Vector grad(vdim);
-      const double max = u_max.GetValue(T, ip);
-      u_max.GetGradient(T, grad);
-
-      if (grad * grad > eps && max + eps < interface_val)
-      {
-         Vector grad(vdim);
-         u_max.GetGradient(T, grad);
-
-         bool at_front = false;
-         if (exec_mode == 0 && grad * v + eps < 0.0) { at_front = true; }
-         if (exec_mode == 1 && grad * v - eps > 0.0) { at_front = true; }
-
-         // Front - slowdown the propagation into new cells.
-         if (at_front)
-         {
-            // um = 0.0   -> 0.
-            // um = i_val -> v
-            for (int d = 0; d < vdim; d++)
-            {
-               v_new(d) = pow(max, transition_01_power) / interface_val * v(d);
-            }
-         }
-      }
-   }
-
-   if (slow_front_w)
-   {
-      const double max = w_max.GetValue(T, ip);
-
-      // No modifications.
-      if (max + eps < interface_val)
-      {
-         Vector grad(vdim);
-         w_max.GetGradient(T, grad);
-
-         bool at_front = false;
-         if (exec_mode == 0 && grad * v + eps < 0.0) { at_front = true; }
-         if (exec_mode == 1 && grad * v - eps > 0.0) { at_front = true; }
-
-         // Front - slowdown the propagation into new cells.
-         if (at_front)
-         {
-            // um = 0.0   -> 0.
-            // um = i_val -> v
-            for (int d = 0; d < vdim; d++)
-            {
-               v_new(d) = pow(max, transition_01_power) / interface_val * v(d);
-            }
-         }
-      }
-   }
-
-   if (push_tail_u)
-   {
-      MFEM_VERIFY(exec_mode == 1, "not implemented for transport");
-
-      const double v_factor = 3.0;
-
-      Vector grad(vdim);
-      const double max = u_max.GetValue(T, ip);
-      u_max.GetGradient(T, grad);
-
-      if (grad*grad > eps && grad * v + eps < 0.0 && max + eps < interface_val)
-      {
-         // 1. map linearly um from [0, i_val] to [0, 1].
-         // 2. compute velocity: um = 0 -> v = 0
-         //                      um = 1 -> v = 1
-         // 3. map linearly v from [0, 1] to [v_factor * v, v], v_factor * v > v.
-
-         // linear map x: um -> [0, 1].
-         double x = max / interface_val;
-
-         // compute f : x -> [0, 1].
-         double f = pow(x, transition_01_power);
-
-         // linear map V(d) : f -> [v_factor * v, v].
-         for (int d = 0; d < vdim; d++)
-         {
-            v_new(d) = (1.0 - v_factor) * v(d) * f + v_factor * v(d);
-         }
-      }
-   }
-
-   if (take_v_difference)
-   {
-      for (int d = 0; d < vdim; d++) { v(d) = v_new(d) - v(d); }
-   }
-   else { v = v_new; }
-}
-
-void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
-                                 const IntegrationPoint &ip)
-{
    T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
 
@@ -1287,9 +1174,7 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
 
    const double v_magn = sqrt(v*v);
 
-   const double eps = 1e-12;
-
-   if (max + eps < interface_val)
+   if (max + 1e-12 < interface_val)
    {
       for (int d = 0; d < vdim; d++)
       {
@@ -1299,7 +1184,6 @@ void VelocityCoefficient::EvalGD(Vector &v, ElementTransformation &T,
          // max = i_val -> keep the same v.
          v_new(d) = v(d) - (1.0 - pow(max / interface_val, trans_01_power)) *
                            v_magn * grad_dir(d);
-         //v_new(d) = v(d);
       }
    }
 

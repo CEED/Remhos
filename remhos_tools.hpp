@@ -274,11 +274,6 @@ private:
    bool take_v_difference;
 
 public:
-   // dynamic options.
-   bool slow_front_u = false,
-        slow_front_w = false,
-        push_tail_u  = false;
-
    VelocityCoefficient(VectorCoefficient &vc,
                        const ParGridFunction &umax, const ParGridFunction &wmax,
                        const ParGridFunction &umgd,
@@ -290,7 +285,6 @@ public:
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
-   void EvalGD(Vector &v, ElementTransformation &T, const IntegrationPoint &ip);
 };
 
 class NormalGradCoeff : public VectorCoefficient
