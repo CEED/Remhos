@@ -49,6 +49,8 @@ enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
+enum class TimeStepControl {FixedTimeStep, LOBoundsError};
+
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
 int problem_num;
@@ -84,6 +86,8 @@ private:
    mutable ParGridFunction x_gf;
 
    double dt;
+   TimeStepControl dt_control;
+   mutable double dt_est;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -93,6 +97,9 @@ private:
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
+
+   void UpdateTimeStepEstimate(const Vector &x, const Vector &dx,
+                               const Vector &x_min, const Vector &x_max) const;
 
 public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
@@ -107,7 +114,18 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
-   virtual void SetDt(double _dt) { dt = _dt; }
+   void SetTimeStepControl(TimeStepControl tsc)
+   {
+      if (tsc == TimeStepControl::LOBoundsError)
+      {
+         MFEM_VERIFY(lo_solver,
+                     "The selected time step control requires a LO solver.");
+      }
+      dt_control = tsc;
+   }
+   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
+   double GetTimeStepEstimate() { return dt_est; }
+
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {
       start_mesh_pos    = m_pos;
@@ -138,6 +156,7 @@ int main(int argc, char *argv[])
    bool next_gen_full = false;
    int smth_ind_type = 0;
    double t_final = 4.0;
+   TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
    bool visualization = true;
    bool visit = false;
@@ -203,8 +222,11 @@ int main(int argc, char *argv[])
                   "                      2 - exact_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
+   args.AddOption((int*)(&dt_control), "-dtc", "--dt-control",
+                  "Time Step Control: 0 - Fixed time step, set with -dt,\n\t"
+                  "                   1 - Bounds violation of the LO sltn.");
    args.AddOption(&dt, "-dt", "--time-step",
-                  "Time step.");
+                  "Initial time step size (dt might change based on -dtc).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -257,6 +279,8 @@ int main(int argc, char *argv[])
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+   MPI_Comm comm = pmesh.GetComm();
+   const int NE  = pmesh.GetNE();
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
@@ -305,14 +329,31 @@ int main(int argc, char *argv[])
    // advective velocity (transport) or mesh velocity (remap).
    VectorFunctionCoefficient velocity(dim, velocity_function);
 
-   // Mesh velocity.
-   GridFunction v_gf(x.FESpace());
-   VectorGridFunctionCoefficient v_coef(&v_gf);
+   // Initial time step estimate (CFL-based).
+   if (dt < 0.0)
+   {
+      dt = std::numeric_limits<double>::infinity();
+      Vector vel_e(dim);
+      for (int e = 0; e < NE; e++)
+      {
+         double length_e = pmesh.GetElementSize(e);
+         auto Tr = pmesh.GetElementTransformation(e);
+         auto ip = Geometries.GetCenter(pmesh.GetElementBaseGeometry(e));
+         Tr->SetIntPoint(&ip);
+         velocity.Eval(vel_e, *Tr, ip);
+         double speed_e = sqrt(vel_e * vel_e + 1e-14);
+         dt = fmin(dt, 0.25 * length_e / speed_e);
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
+   }
 
+   // Mesh velocity.
    // If remap is on, obtain the mesh velocity by moving the mesh to the final
    // mesh positions, and taking the displacement vector.
    // The mesh motion resembles a time-dependent deformation, e.g., similar to
    // a deformation that is obtained by a Lagrangian simulation.
+   GridFunction v_gf(x.FESpace());
+   VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
@@ -360,13 +401,17 @@ int main(int argc, char *argv[])
          mono_type = MonolithicSolverType::None;
       }
    }
-
    const bool use_subcell_RD =
       ( lo_type   == LOSolverType::ResDistSubcell ||
         mono_type == MonolithicSolverType::ResDistMonoSubcell );
-
-   if (use_subcell_RD && order==1)
-   { MFEM_ABORT("Subcell schemes are not applicable to linear FE."); }
+   if (use_subcell_RD)
+   {
+      MFEM_VERIFY(order > 1, "Subcell schemes require FE order > 2.");
+   }
+   if (dt_control == TimeStepControl::LOBoundsError)
+   {
+      MFEM_VERIFY(bounds_type == 1, "Error: -dtc 1 requires -bt 1.");
+   }
 
    const int prob_size = pfes.GlobalTrueVSize();
    if (myid == 0) { cout << "Number of unknowns: " << prob_size << endl; }
@@ -401,8 +446,8 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
+      k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -418,8 +463,8 @@ int main(int argc, char *argv[])
       }
       else if (exec_mode == 1)
       {
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
+         auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
       }
@@ -492,7 +537,7 @@ int main(int argc, char *argv[])
       else if (exec_mode == 1)
       {
          lom.pk->AddDomainIntegrator(
-            new PrecondConvectionIntegrator(v_coef) );
+            new PrecondConvectionIntegrator(v_mesh_coeff) );
       }
       lom.pk->Assemble(skip_zeros);
       lom.pk->Finalize(skip_zeros);
@@ -505,7 +550,7 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_coef; }
+   if (exec_mode == 1) { lom.coef = &v_mesh_coeff; }
    else                { lom.coef = &velocity; }
 
    // Face integration rule.
@@ -806,7 +851,6 @@ int main(int argc, char *argv[])
    }
 
    // Record the initial mass.
-   MPI_Comm comm = pmesh.GetComm();
    Vector masses(lumpedM);
    const double mass0_u_loc = lumpedM * u;
    double mass0_u, mass0_us;
@@ -850,6 +894,7 @@ int main(int argc, char *argv[])
 
    double t = 0.0;
    adv.SetTime(t);
+   adv.SetTimeStepControl(dt_control);
    ode_solver->Init(adv);
 
    double umin, umax;
@@ -867,18 +912,19 @@ int main(int argc, char *argv[])
    double residual;
    double s_min_glob = numeric_limits<double>::infinity(),
           s_max_glob = -numeric_limits<double>::infinity();
-   const int NE = pmesh.GetNE();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   for (int ti = 0; !done;)
+   BlockVector Sold(S);
+   int ti_total = 0, ti = 0;
+   while (done == false)
    {
       double dt_real = min(dt, t_final - t);
 
+      // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
       if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
       if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
-
 
       if (product_sync)
       {
@@ -895,8 +941,31 @@ int main(int argc, char *argv[])
 #endif
       }
 
+      Sold = S;
       ode_solver->Step(S, t, dt_real);
       ti++;
+      ti_total++;
+
+      if (dt_control != TimeStepControl::FixedTimeStep)
+      {
+         double dt_est = adv.GetTimeStepEstimate();
+         if (dt_est < dt_real)
+         {
+            // Repeat with the proper time step.
+            if (myid == 0)
+            {
+               cout << "Repeat / decrease dt: "
+                    << dt_real << " --> " << 0.85 * dt << endl;
+            }
+            ti--;
+            t -= dt_real;
+            S  = Sold;
+            dt = 0.85 * dt;
+            if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
+            continue;
+         }
+         else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
+      }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
@@ -999,8 +1068,8 @@ int main(int argc, char *argv[])
       {
          if (myid == 0)
          {
-            cout << "time step: " << ti << ", time: " << t << ", residual: "
-                 << residual << endl;
+            cout << "time step: " << ti << ", time: " << t
+                 << ", dt: " << dt << ", residual: " << residual << endl;
          }
 
          if (visualization)
@@ -1027,6 +1096,12 @@ int main(int argc, char *argv[])
             dc->Save();
          }
       }
+   }
+
+   if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
+   {
+      cout << "Total time steps: " << ti_total
+           << " (" << ti_total-ti << " repeated)." << endl;
    }
 
    // Print the final meshes and solution.
@@ -1272,8 +1347,23 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      }
    }
-   else if (lo_solver) { lo_solver->CalcLOSolution(u, d_u); }
+   else if (lo_solver)
+   {
+      lo_solver->CalcLOSolution(u, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+         UpdateTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
+      }
+   }
    // The HO option must be last, since some LO solvers use the HO. Then if the
    // user only wants to run LO, this order will give him the LO solution.
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
@@ -1347,6 +1437,36 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       d_us.SyncAliasMemory(Y);
    }
+}
+
+void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
+                                               const Vector &dx,
+                                               const Vector &x_min,
+                                               const Vector &x_max) const
+{
+   if (dt_control == TimeStepControl::FixedTimeStep) { return; }
+
+   // x_min <= x + dt * dx <= x_max.
+   int n = x.Size();
+   const double eps = 1e-12;
+   double dt = numeric_limits<double>::infinity();
+
+   for (int i = 0; i < n; i++)
+   {
+      if (dx(i) > eps)
+      {
+         dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
+      }
+      else if (dx(i) < -eps)
+      {
+         dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
+      }
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+                 Kbf.ParFESpace()->GetComm());
+
+   dt_est = fmin(dt_est, dt);
 }
 
 // Velocity coefficient
