@@ -515,55 +515,6 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
    }
 }
 
-void DofInfo::ComputeElementMaxSparcityBound(const ParGridFunction &u,
-                                             int nbr_level, Vector &el_max)
-{
-   MFEM_VERIFY(nbr_level > 0, "At least the 1st neighbors must be used.");
-   ParMesh &pmesh = *pfes.GetParMesh();
-   L2_FECollection fec_bounds(0, pmesh.Dimension());
-   ParFiniteElementSpace pfes_bounds(&pmesh, &fec_bounds);
-   ParGridFunction el_max_gf(&pfes_bounds);
-
-   const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
-   el_max.SetSize(NE);
-   u.HostRead(); el_max.HostReadWrite();
-   for (int k = 0; k < NE; k++)
-   {
-      el_max(k) = -numeric_limits<double>::infinity();
-      for (int i = 0; i < ndof; i++)
-      {
-         el_max(k) = max(el_max(k), u(k*ndof + i));
-      }
-   }
-
-   for (int l = 0; l < nbr_level; l++)
-   {
-      el_max_gf = el_max;
-      el_max_gf.ExchangeFaceNbrData();
-      const Vector &el_max_nbr = el_max_gf.FaceNbrData();
-
-      const Table &el_to_el = pmesh.ElementToElementTable();
-      Array<int> face_nbr_el;
-      for (int k = 0; k < NE; k++)
-      {
-         el_to_el.GetRow(k, face_nbr_el);
-         for (int n = 0; n < face_nbr_el.Size(); n++)
-         {
-            if (face_nbr_el[n] < NE)
-            {
-               // Local neighbor.
-               el_max(k) = std::max(el_max(k), el_max_gf(face_nbr_el[n]));
-            }
-            else
-            {
-               // MPI face neighbor.
-               el_max(k) = std::max(el_max(k), el_max_nbr(face_nbr_el[n] - NE));
-            }
-         }
-      }
-   }
-}
-
 void DofInfo::ComputeLinMaxBound(const ParGridFunction &u,
                                  ParGridFunction &u_lin_max,
                                  ParGridFunction &u_lin_max_grad)
@@ -1162,6 +1113,8 @@ void MixedConvectionIntegrator::AssembleElementMatrix2(
 void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
                                const IntegrationPoint &ip)
 {
+   MFEM_VERIFY(exec_mode == 1, "advection not supported");
+
    T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
 

@@ -25,7 +25,6 @@ namespace mfem
 {
 
 class SmoothnessIndicator;
-class DofInfo;
 
 // Monotone, High-order, Conservative Solver.
 class FCTSolver

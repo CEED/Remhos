@@ -169,8 +169,6 @@ public:
                               Vector &el_min, Vector &el_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
-   void ComputeElementMaxSparcityBound(const ParGridFunction &u,
-                                       int nbr_level, Vector &el_max);
    void ComputeLinMaxBound(const ParGridFunction &u,
                            ParGridFunction &u_lin_max,
                            ParGridFunction &u_lin_max_grad);

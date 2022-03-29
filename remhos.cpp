@@ -62,7 +62,6 @@ void velocity_function(const Vector &x, Vector &v);
 
 // Initial condition
 double u0_function(const Vector &x);
-double w0_function(const Vector &x);
 double s0_function(const Vector &x);
 
 // Inflow boundary condition
@@ -77,7 +76,6 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
-   VelocityCoefficient &v_coeff, &v_diff_coeff;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -107,7 +105,6 @@ public:
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                     VelocityCoefficient &vcoeff, VelocityCoefficient &vdcoeff,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
@@ -361,10 +358,9 @@ int main(int argc, char *argv[])
    H1_FECollection lin_fec(1, dim);
    ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec),
                          lin_pfes_grad(&pmesh, &lin_fec, dim);
-   ParGridFunction u_max_bounds(&lin_pfes), w_max_bounds(&lin_pfes);
+   ParGridFunction u_max_bounds(&lin_pfes);
    ParGridFunction u_max_bounds_grad_dir(&lin_pfes_grad);
    u_max_bounds = 1.0;
-   w_max_bounds = 1.0;
 
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
@@ -893,7 +889,6 @@ int main(int argc, char *argv[])
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         *used_v, v_diff_coeff,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -1266,8 +1261,6 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
-                                     VelocityCoefficient &vcoeff,
-                                     VelocityCoefficient &vdcoeff,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
                                      Assembly &_asmbl,
@@ -1276,7 +1269,6 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
-   v_coeff(vcoeff), v_diff_coeff(vdcoeff),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
@@ -1398,7 +1390,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    else { MFEM_ABORT("No solver was chosen."); }
 
    // Remap the product field, if there is a product field.
-   if (X.Size() > 2*size)
+   if (X.Size() > size)
    {
       Vector us, d_us;
       us.MakeRef(*xptr, size, size);
@@ -1889,11 +1881,6 @@ double u0_function(const Vector &x)
       }
    }
    return 0.0;
-}
-
-double w0_function(const Vector &x)
-{
-   return (x(0) > 0.3 && x(0) < 0.7) ? 0.0 : 1.0;
 }
 
 double s0_function(const Vector &x)
