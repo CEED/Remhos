@@ -19,7 +19,7 @@ methods=( "-ho 1 -lo 2 -fct 2"     # Hennes 1
           "-ho 2 -lo 3 -fct 2 -pa" # Arturo 1 (PA for HO and LO RD)
           "-ho 2 -lo 4 -fct 2 -pa" # Arturo 2 (PA for HO and LO RDsubcell)
         # "-ho 2 -lo 3 -fct 3"     # Manuel (penalty-based FCT)
-          "-ho 3 -lo 1 -fct 1" )   # Blast
+          "-ho 3 -lo 1 -fct 1")     # Blast default remap
 
 cd ..
 rm -f $file
@@ -39,7 +39,7 @@ for method in "${methods[@]}"; do
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
   echo -e '\n'"- Transport per-1D" >> $file
-  run_line=$command" -m ./data/periodic-segment.mesh -p 0 -rs 5 -dt 0.0005 -tf 1 "$method
+  run_line=$command" -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 "$method
   echo -e $run_line >> $file
   $run_line | grep -e 'mass u' -e 'value u'>> $file
 
@@ -72,6 +72,21 @@ $run_line | grep -e 'mass us' -e 'loss us'>> $file
 
 echo -e '\n'"--- Product remap 2D (ClipScale)" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 2 -ps -s 1"
+echo -e $run_line >> $file
+$run_line | grep -e 'mass us' -e 'loss us'>> $file
+
+echo -e '\n'"--- Product remap 2D (FCTProject)" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 4 -ps -s 1"
+echo -e $run_line >> $file
+$run_line | grep -e 'mass us' -e 'loss us'>> $file
+
+echo -e '\n'"--- BLAST sharpening test - Pacman remap auto-dt" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
+echo -e $run_line >> $file
+$run_line | grep -e 'mass us' -e 'loss us'>> $file
+
+echo -e '\n'"--- BLAST sharpening test - Transport balls-jacks auto-dt" >> $file
+run_line=$command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt -1 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
 echo -e $run_line >> $file
 $run_line | grep -e 'mass us' -e 'loss us'>> $file
 

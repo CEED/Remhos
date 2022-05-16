@@ -57,7 +57,7 @@ public:
 
    virtual ~FCTSolver() { }
 
-   virtual void UpdateTimeStep(double dt_) { dt = dt_; }
+   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    bool NeedsLOProductInput() const { return needs_LO_input_for_products; }
 
@@ -102,11 +102,11 @@ protected:
    void AddFluxesAtDofs(const SparseMatrix &flux_mat,
                         Vector &flux_pos, Vector &flux_neg) const;
    void ComputeFluxCoefficients(const Vector &u, const Vector &du_lo,
-      const Vector &m, const Vector &u_min, const Vector &u_max,
-      Vector &coeff_pos, Vector &coeff_neg) const;
+                                const Vector &m, const Vector &u_min, const Vector &u_max,
+                                Vector &coeff_pos, Vector &coeff_neg) const;
    void UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
-      ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
-      SparseMatrix &flux_mat, Vector &du) const;
+                              ParGridFunction &coeff_pos, ParGridFunction &coeff_neg,
+                              SparseMatrix &flux_mat, Vector &du) const;
 
 public:
    FluxBasedFCT(ParFiniteElementSpace &space,

@@ -451,8 +451,8 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
          x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
-   Array<double> minvals(x_min.GetData(), x_min.Size()),
-                 maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.GetData(), x_min.Size());
+   Array<double> maxvals(x_max.GetData(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
