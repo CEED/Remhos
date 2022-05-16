@@ -748,20 +748,20 @@ int main(int argc, char *argv[])
       {
          lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
          lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
-                                        lumpedM, asmbl, time_dep);
+                                        lumpedM, asmbl, time_dep, false);
       }
       else
       {
          lo_smap = SparseMatrix_Build_smap(k.SpMat());
          lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
-                                        lumpedM, asmbl, time_dep);
+                                        lumpedM, asmbl, time_dep, true);
       }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
       lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
       lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+                                     lumpedM, asmbl, time_dep, true);
    }
    else if (lo_type == LOSolverType::ResDist)
    {

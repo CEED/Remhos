@@ -26,10 +26,10 @@ namespace mfem
 DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
-                               Assembly &asmbly, bool updateD)
+                               Assembly &asmbly, bool updateD, bool lumpFlux)
    : LOSolver(space),
      K(adv), D(), K_smap(adv_smap), M_lumped(Mlump),
-     assembly(asmbly), update_D(updateD)
+     assembly(asmbly), update_D(updateD), lump_flux(lumpFlux)
 {
    D = K;
    ComputeDiscreteUpwindMatrix();
@@ -45,30 +45,33 @@ void DiscreteUpwind::CalcLOSolution(const Vector &u, Vector &du) const
 
    ParGridFunction u_gf(&pfes);
    u_gf = u;
-   ApplyDiscreteUpwindMatrix(u_gf, du);
-
-   /*
-   // Discretization and monotonicity terms.
-   D.Mult(u, du);
-
-   // Lump fluxes (for PDU).
-   ParGridFunction u_gf(&pfes);
-   u_gf = u;
-   u_gf.ExchangeFaceNbrData();
-   Vector &u_nd = u_gf.FaceNbrData();
-   const int ne = pfes.GetNE();
-   u.HostRead();
-   du.HostReadWrite();
-   M_lumped.HostRead();
-   for (int k = 0; k < ne; k++)
+   if (lump_flux == false)
    {
-      // Face contributions.
-      for (int f = 0; f < assembly.dofs.numBdrs; f++)
+      ApplyDiscreteUpwindMatrix(u_gf, du);
+   }
+   else
+   {
+      // Discretization and monotonicity terms.
+      D.Mult(u, du);
+
+      // Lump fluxes (for PDU).
+      ParGridFunction u_gf(&pfes);
+      u_gf = u;
+      u_gf.ExchangeFaceNbrData();
+      Vector &u_nd = u_gf.FaceNbrData();
+      const int ne = pfes.GetNE();
+      u.HostRead();
+      du.HostReadWrite();
+      M_lumped.HostRead();
+      for (int k = 0; k < ne; k++)
       {
-         assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+         // Face contributions.
+         for (int f = 0; f < assembly.dofs.numBdrs; f++)
+         {
+            assembly.LinearFluxLumping(k, ndof, f, u, du, u_nd, alpha);
+         }
       }
    }
-   */
 
    const int s = du.Size();
    for (int i = 0; i < s; i++) { du(i) /= M_lumped(i); }
