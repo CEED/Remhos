@@ -1608,36 +1608,37 @@ void velocity_function(const Vector &x, Vector &v)
          switch (dim)
          {
             case 1: v(0) = 1.0; break;
-            case 2: v(0) = x(1); v(1) = -x(0); break;
+            case 2: v(0) = sqrt(2./3.); v(1) = sqrt(1./3.); break;
             case 3: v(0) = x(1); v(1) = -x(0); v(2) = 0.0; break;
          }
          break;
       }
-//      case 11:
-//      {
-//         // Gresho deformation used for mesh motion in remap tests.
-//         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
-//         if (r < 0.2)
-//         {
-//            v(0) =  5.0 * x(1);
-//            v(1) = -5.0 * x(0);
-//         }
-//         else if (r < 0.4)
-//         {
-//            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
-//            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
-//         }
-//         else { v = 0.0; }
-//         break;
-//      }
-      case 10:
       case 11:
+      {
+         // Gresho deformation used for mesh motion in remap tests.
+         const double r = sqrt(x(0)*x(0) + x(1)*x(1));
+         if (r < 0.2)
+         {
+            v(0) =  5.0 * x(1);
+            v(1) = -5.0 * x(0);
+         }
+         else if (r < 0.4)
+         {
+            v(0) =  2.0 * x(1) / r - 5.0 * x(1);
+            v(1) = -2.0 * x(0) / r + 5.0 * x(0);
+         }
+         else { v = 0.0; }
+         break;
+      }
+      case 10:
       case 12:
       case 13:
       case 14:
       case 15:
       case 16:
       case 17:
+      case 18:
+      case 19:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 
@@ -1650,18 +1651,19 @@ void velocity_function(const Vector &x, Vector &v)
          }
          else
          {
-            if (problem_num == 10)
+            if (problem_num == 18)
             {
                v(0) = 0.25 * sin(M_PI*X(0));
                v(1) = 0.25 * sin(M_PI*X(1));
                return;
             }
-            if (problem_num == 11)
+            if (problem_num == 19)
             {
                v(0) =  0.25 * sin(M_PI*X(0)) * cos(M_PI*X(1));
                v(1) = -0.25 * cos(M_PI*X(0)) * sin(M_PI*X(1));
                return;
             }
+
             v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
             v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
             if (dim == 3)
@@ -1777,23 +1779,8 @@ double u0_function(const Vector &x)
          switch (dim)
          {
             case 1:
-               return (x(0) > 0.3 && x(0) < 0.7) ? 1.0 : 0.0;
+               return exp(-40.*pow(X(0)-0.5,2));
             case 2:
-            {
-               if (problem_num == 10)
-               {
-                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) +
-                                         (x(1)-0.3) * (x(1)-0.3));
-                  return (rad <= 0.3) ? 1.0 : 0.0;
-               }
-               if (problem_num == 11)
-               {
-                  double rad = std::sqrt(x(0) * x(0) + x(1) * x(1));
-                  return (rad <= 0.3) ? 1.0 : 0.0;
-               }
-               return (x(0) > -0.2 && x(0) < 0.2 &&
-                       x(1) > -0.2 && x(1) < 0.2) ? 1.0 : 0.0;
-            }
             case 3:
             {
                double rx = 0.45, ry = 0.25, cx = 0., cy = -0.2, w = 10.;
@@ -1921,6 +1908,31 @@ double u0_function(const Vector &x)
          double r = x.Norml2();
          double a = 0.5, b = 3.e-2, c = 0.1;
          return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+      }
+      case 8:
+      case 9:
+      {
+         switch (dim)
+         {
+            case 1:
+               return (x(0) > 0.3 && x(0) < 0.7) ? 1.0 : 0.0;
+            case 2:
+            {
+               if (problem_num == 18)
+               {
+                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) +
+                                         (x(1)-0.3) * (x(1)-0.3));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
+               }
+               if (problem_num == 19)
+               {
+                  double rad = std::sqrt(x(0) * x(0) + x(1) * x(1));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
+               }
+               return 0.0;
+            }
+            case 3: MFEM_ABORT("not setup"); return 0.0;
+         }
       }
    }
    return 0.0;
