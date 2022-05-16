@@ -151,6 +151,7 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
+   bool sharp = false;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -206,6 +207,8 @@ int main(int argc, char *argv[])
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
+   args.AddOption(&sharp, "-sharp", "--sharp", "-no-sharp", "--no-sharp",
+                  "Enable or disable profile sharpening.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -327,7 +330,7 @@ int main(int argc, char *argv[])
 
    // Mesh velocity.
    GridFunction v_gf(x.FESpace());
-   VectorGridFunctionCoefficient v_coef(&v_gf);
+   VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
 
    // If remap is on, obtain the mesh velocity by moving the mesh to the final
    // mesh positions, and taking the displacement vector.
@@ -423,61 +426,56 @@ int main(int argc, char *argv[])
 
    VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 0, false);
-   VelocityCoefficient v_new_coeff_rem(v_coef, u_max_bounds,
+   VelocityCoefficient v_new_coeff_rem(v_mesh_coeff, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 1, false);
-   VelocityCoefficient *used_v;
-   if (exec_mode == 0) { used_v = &v_new_coeff_adv; }
-   if (exec_mode == 1) { used_v = &v_new_coeff_rem; }
 
-   VelocityCoefficient v_diff_coeff(v_coef, u_max_bounds,
+   VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
                                     u_max_bounds_grad_dir, 1.0, 1, true);
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
-      MFEM_ABORT("only remap tests now");
-      k.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(*used_v, -1.0));
+      MFEM_VERIFY(sharp == false, "only remap tests now");
+      k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
    else if (exec_mode == 1)
    {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_coef));
-
-      auto dgt_i = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-      auto dgt_b = new DGTraceIntegrator(v_coef, -1.0, -0.5);
-      K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-      K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-      K_HO.KeepNbrBlock(true);
-
-      auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
-      auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
-      K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-      K_HO.AddInteriorFaceIntegrator(dgt);
+      k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
+      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
    }
 
-//   if (ho_type == HOSolverType::CG ||
-//       ho_type == HOSolverType::LocalInverse ||
-//       fct_type == FCTSolverType::FluxBased)
-//   {
-//      if (exec_mode == 0)
-//      {
-//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, 1.0, -0.5);
-//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-//      }
-//      else if (exec_mode == 1)
-//      {
-//         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-//         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(*used_v, -1.0, -0.5);
-//         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-//         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-//      }
+   if (ho_type == HOSolverType::CG ||
+       ho_type == HOSolverType::LocalInverse ||
+       fct_type == FCTSolverType::FluxBased || sharp == true)
+   {
+      if (exec_mode == 0)
+      {
+         MFEM_VERIFY(sharp == false, "only remap tests now");
+         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(velocity, 1.0, -0.5);
+         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(velocity, 1.0, -0.5);
+         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+      }
+      else if (exec_mode == 1)
+      {
+         auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
 
-//      K_HO.KeepNbrBlock(true);
-//   }
+         if (sharp == true)
+         {
+            auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
+            auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
+            K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
+            K_HO.AddInteriorFaceIntegrator(dgt);
+         }
+      }
+
+      K_HO.KeepNbrBlock(true);
+   }
 
    if (pa)
    {
@@ -544,7 +542,7 @@ int main(int argc, char *argv[])
       else if (exec_mode == 1)
       {
          lom.pk->AddDomainIntegrator(
-            new PrecondConvectionIntegrator(v_coef) );
+            new PrecondConvectionIntegrator(v_mesh_coeff) );
       }
       lom.pk->Assemble(skip_zeros);
       lom.pk->Finalize(skip_zeros);
@@ -557,8 +555,8 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = used_v; }
-   else                { lom.coef = used_v; }
+   if (exec_mode == 1) { lom.coef = &v_mesh_coeff; }
+   else                { lom.coef = &velocity; }
 
    // Face integration rule.
    const FaceElementTransformations *ft =
@@ -649,8 +647,8 @@ int main(int argc, char *argv[])
       // Integrator on the submesh.
       if (exec_mode == 0)
       {
-         lom.subcellCoeff = used_v;
-         lom.VolumeTerms = new MixedConvectionIntegrator(*used_v, -1.0);
+         lom.subcellCoeff = &velocity;
+         lom.VolumeTerms = new MixedConvectionIntegrator(velocity, -1.0);
       }
       else if (exec_mode == 1)
       {
@@ -667,9 +665,18 @@ int main(int argc, char *argv[])
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+      if (sharp == true)
+      {
+         lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep);
+      }
+      else
+      {
+         lo_smap = SparseMatrix_Build_smap(k.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep);
+      }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
