@@ -123,7 +123,11 @@ public:
       }
       dt_control = tsc;
    }
-   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
+   void SetDt(double _dt)
+   {
+      dt = _dt;
+      dt_est = std::numeric_limits<double>::infinity();
+   }
    double GetTimeStepEstimate() { return dt_est; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
@@ -1020,7 +1024,10 @@ int main(int argc, char *argv[])
          }
          else if (dt_est > 1.25 * dt_real)
          {
-            cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+            if (myid == 0)
+            {
+               cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+            }
             dt *= 1.02;
          }
       }
