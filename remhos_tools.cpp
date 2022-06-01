@@ -539,13 +539,13 @@ void DofInfo::ComputeLinMaxBound(const ParGridFunction &u,
    u_lin_max.HostReadWrite();
    u_lin_max = -std::numeric_limits<double>::infinity();
    Array<int> dofs;
-   for (int i = 0; i < NE; i++)
+   for (int k = 0; k < NE; k++)
    {
       u_lin_max.HostReadWrite();
-      pfes_lin->GetElementDofs(i, dofs);
+      pfes_lin->GetElementDofs(k, dofs);
       for (int j = 0; j < dofs.Size(); j++)
       {
-         u_lin_max(dofs[j]) = std::max(u_lin_max(dofs[j]), el_max(i));
+         u_lin_max(dofs[j]) = std::max(u_lin_max(dofs[j]), el_max(k));
       }
    }
    GroupCommunicator &gcomm = pfes_lin->GroupComm();
@@ -1121,7 +1121,13 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    Vector v_new(v);
    const double trans_01_power = 3;
 
+//   Array<int> dofs;
+//   u_max.ParFESpace()->GetElementDofs(T.ElementNo, dofs);
+//   Vector vals;
+//   u_max.GetSubVector(dofs, vals);
+
    const double max = u_max.GetValue(T, ip);
+
    Vector grad_dir(vdim);
    u_max_grad_dir.GetVectorValue(T, ip, grad_dir);
 

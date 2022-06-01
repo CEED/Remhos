@@ -1145,8 +1145,11 @@ int main(int argc, char *argv[])
                            Wx, Wy, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
-            VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Velocity",
-                           Wx+800, Wy, Ww, Wh);
+            if (sharp == true)
+            {
+               VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Vel",
+                              Wx+800, Wy, Ww, Wh);
+            }
             if (product_sync)
             {
                // Recompute s = u_s / u.
@@ -1239,10 +1242,15 @@ int main(int argc, char *argv[])
    }
 
    // Compute errors, if the initial condition is equal to the final solution
-   if (problem_num == 4) // solid body rotation
+   if (problem_num == 4 || problem_num == 18) // solid body rotation
    {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      double err_L1 = u.ComputeLpError(1., u0),
+             err_L2 = u.ComputeL2Error(u0);
+      if (myid == 0)
+      {
+         cout << "L1-error: " << err_L1 << endl
+              << "L2-error: " << err_L2 << endl;
+      }
    }
    else if (problem_num == 7)
    {
