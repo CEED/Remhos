@@ -27,6 +27,8 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
+   ParFiniteElementSpace &pfes_LOR;
+   GridTransfer *gt;
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:
@@ -97,7 +99,23 @@ public:
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
-
+  
+// Low-Order Refined Solver.
+class MassBasedAvgLOR : public LOSolver
+{
+protected:
+  HOSolver &ho_solver;
+  const GridFunction *mesh_v;
+  
+public:
+  MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
+		  const GridFunction *mesh_vel)
+    : LOSolver(space), ho_solver(hos) { }
+  
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+  
+  
 //PA based Residual Distribution
 class PAResidualDistribution : public ResidualDistribution
 {

@@ -22,8 +22,8 @@ using namespace std;
 
 namespace mfem
 {
-
-DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
+  
+  DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
                                Assembly &asmbly, bool updateD)
@@ -302,6 +302,18 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
          el_vol(k)  += ip.weight * geom.detJ(k*nqp + q);
       }
    }
+}
+
+void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector du) const
+{
+   ParGridFunction u_LOR(&pfes_LOR);
+   //u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
+  
+   GridTransfer *gt;
+   gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
+
+   const Operator &R = gt->ForwardOperator();
+   R.Mult(u, u_LOR);
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
