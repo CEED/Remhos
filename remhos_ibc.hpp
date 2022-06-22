@@ -17,10 +17,7 @@
 #ifndef MFEM_REMHOS_IBC
 #define MFEM_REMHOS_IBC
 
-#include "remhos.hpp"
-
-using namespace std;
-using namespace mfem;
+#include "mfem.hpp"
 
 namespace mfem
 {

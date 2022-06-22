@@ -17,7 +17,8 @@
 #ifndef MFEM_REMHOS_AMR
 #define MFEM_REMHOS_AMR
 
-#include "remhos.hpp"
+#include "mfem.hpp"
+#include "remhos_adv.hpp"
 
 namespace mfem
 {
@@ -132,11 +133,12 @@ public:
                             Vector &flux, Vector *d_energy = NULL);
 
    virtual void ComputeElementFlux(const FiniteElement &el,
-                                   ElementTransformation &Trans,
+                                   ElementTransformation &Tranns,
                                    Vector &u,
                                    const FiniteElement &fluxelem,
                                    Vector &flux,
-                                   bool with_coef = false);
+                                   bool with_coef = true,
+                                   const IntegrationRule *ir = NULL);
 private:
    void ComputeElementFlux1(const FiniteElement &el,
                             ElementTransformation &Trans,

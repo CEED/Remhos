@@ -18,6 +18,7 @@
 #include "debug.hpp"
 
 #include "remhos.hpp"
+#include "remhos_ibc.hpp"
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.

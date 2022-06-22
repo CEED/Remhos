@@ -375,8 +375,9 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    gcomm.Bcast(maxvals);
 }
 
-DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn)
-   : pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
+DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
+   : bounds_type(btype),
+     pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
      fec_bounds(nullptr),
      pfes_bounds(nullptr),
      x_min(), x_max()
@@ -413,12 +414,63 @@ void DofInfo::Update()
 
    FillNeighborDofs();    // Fill NbrDof.
    FillSubcell2CellDof(); // Fill Sub2Ind.
-   dbg("done");
 }
 
-void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
-                            Vector &dof_min, Vector &dof_max,
-                            Array<bool> *active_el)
+void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
+                                          const Vector &el_max,
+                                          Vector &dof_min, Vector &dof_max,
+                                          Array<bool> *active_el)
+{
+   ParMesh *pmesh = pfes.GetParMesh();
+   L2_FECollection fec_bounds(0, pmesh->Dimension());
+   ParFiniteElementSpace pfes_bounds(pmesh, &fec_bounds);
+   ParGridFunction x_min(&pfes_bounds), x_max(&pfes_bounds);
+   const int NE = pmesh->GetNE();
+   const int ndofs = dof_min.Size() / NE;
+
+   x_min.HostReadWrite();
+   x_max.HostReadWrite();
+
+   x_min = el_min;
+   x_max = el_max;
+
+   x_min.ExchangeFaceNbrData(); x_max.ExchangeFaceNbrData();
+   const Vector &minv = x_min.FaceNbrData(), &maxv = x_max.FaceNbrData();
+   const Table &el_to_el = pmesh->ElementToElementTable();
+   Array<int> face_nbr_el;
+   for (int i = 0; i < NE; i++)
+   {
+      double el_min = x_min(i), el_max = x_max(i);
+
+      el_to_el.GetRow(i, face_nbr_el);
+      for (int n = 0; n < face_nbr_el.Size(); n++)
+      {
+         if (face_nbr_el[n] < NE)
+         {
+            // Local neighbor.
+            el_min = std::min(el_min, x_min(face_nbr_el[n]));
+            el_max = std::max(el_max, x_max(face_nbr_el[n]));
+         }
+         else
+         {
+            // MPI face neighbor.
+            el_min = std::min(el_min, minv(face_nbr_el[n] - NE));
+            el_max = std::max(el_max, maxv(face_nbr_el[n] - NE));
+         }
+      }
+
+      for (int j = 0; j < ndofs; j++)
+      {
+         dof_min(i*ndofs + j) = el_min;
+         dof_max(i*ndofs + j) = el_max;
+      }
+   }
+}
+
+void DofInfo::ComputeOverlapBounds(const Vector &el_min,
+                                   const Vector &el_max,
+                                   Vector &dof_min, Vector &dof_max,
+                                   Array<bool> *active_el)
 {
    GroupCommunicator &gcomm = pfes_bounds->GroupComm();
    Array<int> dofsCG;
@@ -441,8 +493,13 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
          x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
+   /*
    Array<double> minvals(x_min.GetData(), x_min.Size()),
          maxvals(x_max.GetData(), x_max.Size());
+   */
+   Array<double> minvals(x_min.GetData(), x_min.Size());
+   Array<double> maxvals(x_max.GetData(), x_max.Size());
+
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -455,6 +512,18 @@ void DofInfo::ComputeBounds(const Vector &el_min, const Vector &el_max,
    const int ndofs = dof_map.Size();
    for (int i = 0; i < NE; i++)
    {
+      // Comment about the case when active_el != null, i.e., when this function
+      // is used to compute the bounds of s:
+      //
+      // Note that this loop goes over all elements, including inactive ones.
+      // The following happens in an inactive element:
+      // - If a DOF is on the boundary with an active element, it will get the
+      //   value that's propagated by the continuous functions x_min and x_max.
+      // - Otherwise, the DOF would get the inf values.
+      // This is the mechanism that allows new elements, that switch from
+      // inactive to active, to get some valid bounds. More specifically, this
+      // function is called on the old state, but the result from it is used
+      // to limit the new state, which has different active elements.
       pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
@@ -471,6 +540,7 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
+   u.HostRead(); u_min.HostReadWrite(); u_max.HostReadWrite();
    for (int k = 0; k < NE; k++)
    {
       u_min(k) = numeric_limits<double>::infinity();
@@ -700,10 +770,10 @@ void DofInfo::FillSubcell2CellDof()
    }
 }
 
-Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &lom,
+Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &_lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
-   : exec_mode(mode), lom(lom), inflow_gf(inflow), x_gf(&pfes),
+   : exec_mode(mode), lom(_lom), inflow_gf(inflow), x_gf(&pfes),
      VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
      subcell_mesh(submesh), dofs(_dofs)

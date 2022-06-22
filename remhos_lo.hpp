@@ -27,11 +27,14 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
+   double dt = -1.0; // usually not known at creation, updated later.
 
 public:
    LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
    virtual ~LOSolver() { }
+
+   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
 };
@@ -71,6 +74,88 @@ public:
    ResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
                         Assembly &asmbly, const Vector &Mlump,
                         bool subcell, bool timedep);
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
+class HOSolver;
+
+class MassBasedAvg : public LOSolver
+{
+protected:
+   HOSolver &ho_solver;
+   const GridFunction *mesh_v;
+
+   void MassesAndVolumesAtPosition(const ParGridFunction &u,
+                                   const GridFunction &x,
+                                   Vector &el_mass, Vector &el_vol) const;
+
+public:
+  MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
+               const GridFunction *mesh_vel)
+     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
+//PA based Residual Distribution
+class PAResidualDistribution : public ResidualDistribution
+{
+protected:
+   // Data at quadrature points
+   const int quad1D, dofs1D, face_dofs;
+   mutable Array<double> D_int, D_bdry;
+   mutable Array<double> IntVelocity, BdryVelocity;
+
+public:
+   PAResidualDistribution(ParFiniteElementSpace &space, ParBilinearForm &Kbf,
+                          Assembly &asmbly, const Vector &Mlump,
+                          bool subcell, bool timedep);
+
+   void SampleVelocity(FaceType type) const;
+
+   void SetupPA(FaceType type) const;
+
+   void SetupPA2D(FaceType) const;
+
+   void SetupPA3D(FaceType) const;
+
+   void ApplyFaceTerms(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms2D(const Vector &x, Vector &y, FaceType type) const;
+
+   void ApplyFaceTerms3D(const Vector &x, Vector &y, FaceType type) const;
+
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
+class PAResidualDistributionSubcell : virtual public PAResidualDistribution
+{
+
+private:
+   mutable Array<double> SubCellVel;
+   mutable Array<double> subCell_pa_data;
+   mutable Array<double> subCellWeights;
+
+   void SampleSubCellVelocity() const;
+   mutable bool init_weights;
+
+public:
+
+   PAResidualDistributionSubcell(ParFiniteElementSpace &space,
+                                 ParBilinearForm &Kbf,
+                                 Assembly &asmbly, const Vector &Mlump,
+                                 bool subcell, bool timedep);
+
+   void SetupSubCellPA3D() const;
+
+   void SetupSubCellPA2D() const;
+
+   void SetupSubCellPA() const;
+
+   void ComputeSubCellWeights(Array<double> &subWeights) const;
+
+   void ApplySubCellWeights(const Vector &u, Vector &y) const;
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };

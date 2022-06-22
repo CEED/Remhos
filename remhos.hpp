@@ -17,11 +17,7 @@
 #ifndef MFEM_REMHOS
 #define MFEM_REMHOS
 
-#include <fstream>
-#include <iostream>
-
-#include "mfem.hpp"
-using namespace mfem;
+#include "linalg/vector.hpp"
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -32,21 +28,17 @@ extern int problem_num;
 extern int exec_mode;
 
 // Mesh bounding box
-extern Vector bb_min, bb_max;
-
-#include "remhos_ho.hpp"
-#include "remhos_lo.hpp"
-#include "remhos_ibc.hpp"
-#include "remhos_fct.hpp"
-#include "remhos_mono.hpp"
-#include "remhos_sync.hpp"
-#include "remhos_tools.hpp"
-#include "remhos_adv.hpp"
-#include "remhos_amr.hpp"
+extern mfem::Vector bb_min, bb_max;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class LOSolverType {None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell};
-enum class FCTSolverType {None, FluxBased, ClipScale, NonlinearPenalty};
+enum class FCTSolverType {None, FluxBased, ClipScale,
+                          NonlinearPenalty, FCTProject
+                         };
+enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
+                         ResDist, ResDistSubcell, MassBased
+                        };
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
+
+enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
 #endif // MFEM_REMHOS

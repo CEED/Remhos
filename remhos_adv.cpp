@@ -17,7 +17,8 @@
 #define MFEM_DEBUG_COLOR 220
 #include "debug.hpp"
 
-#include "remhos.hpp"
+#include "remhos_adv.hpp"
+#include "remhos_sync.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -25,23 +26,15 @@ using namespace mfem;
 namespace mfem
 {
 
-AdvectionOperator::AdvectionOperator(int size,
-                                     BilinearForm &Mbf_,
-                                     BilinearForm &_ml,
-                                     Vector &_lumpedM,
+AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
+                                     BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_,
-                                     ParBilinearForm &K_HO_,
-                                     GridFunction &pos,
-                                     GridFunction *sub_pos,
-                                     GridFunction &vel,
-                                     GridFunction &sub_vel,
+                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     GridFunction &pos, GridFunction *sub_pos,
+                                     GridFunction &vel, GridFunction &sub_vel,
                                      Assembly &_asmbl,
-                                     LowOrderMethod &_lom,
-                                     DofInfo &_dofs,
-                                     HOSolver *hos,
-                                     LOSolver *los,
-                                     FCTSolver *fct,
+                                     LowOrderMethod &_lom, DofInfo &_dofs,
+                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
@@ -61,10 +54,8 @@ AdvectionOperator::AdvectionOperator(int size,
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
-   dbg();
    if (exec_mode == 1)
    {
-      assert(false);
       // Move the mesh positions.
       const double t = GetTime();
       add(start_mesh_pos, t, mesh_vel, mesh_pos);
@@ -104,16 +95,26 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<int> bdrs, orientation;
       FaceElementTransformations *Trans;
 
-      for (int k = 0; k < ne; k++)
+      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
       {
-         if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-         else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-         else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-         for (int i = 0; i < dofs.numBdrs; i++)
+         RD_ptr->SampleVelocity(FaceType::Interior);
+         RD_ptr->SampleVelocity(FaceType::Boundary);
+         RD_ptr->SetupPA(FaceType::Interior);
+         RD_ptr->SetupPA(FaceType::Boundary);
+      }
+      else
+      {
+         for (int k = 0; k < ne; k++)
          {
-            Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-            asmbl.ComputeFluxTerms(k, i, Trans, lom);
+            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
+            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
+            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
+
+            for (int i = 0; i < dofs.numBdrs; i++)
+            {
+               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
+               asmbl.ComputeFluxTerms(k, i, Trans, lom);
+            }
          }
       }
    }
@@ -130,20 +131,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u.MakeRef(Y, 0, size);
    Vector du_HO(u.Size()), du_LO(u.Size());
 
-   dbg("x_gf");
    x_gf = u;
-   dbg("ExchangeFaceNbrData");
    x_gf.ExchangeFaceNbrData();
-   dbg("done");
 
-   if (mono_solver)
-   {
-      assert(false);
-      mono_solver->CalcSolution(u, d_u);
-   }
+   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
    else if (fct_solver)
    {
-      assert(false);
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
       lo_solver->CalcLOSolution(u, du_LO);
@@ -153,13 +146,26 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      }
    }
-   else if (lo_solver) { assert(false); lo_solver->CalcLOSolution(u, d_u); }
-   else if (ho_solver)
+   else if (lo_solver)
    {
-      dbg("CalcHOSolution");
-      ho_solver->CalcHOSolution(u, d_u);
+      lo_solver->CalcLOSolution(u, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+         UpdateTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
+      }
    }
+   // The HO option must be last, since some LO solvers use the HO. Then if the
+   // user only wants to run LO, this order will give him the LO solution.
+   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
 
    d_u.SyncAliasMemory(Y);
@@ -167,7 +173,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
    {
-      assert(false);
       Vector us, d_us;
       us.MakeRef(*xptr, size, size);
       d_us.MakeRef(Y, size, size);
@@ -180,16 +185,23 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector d_us_HO(us.Size()), d_us_LO(us.Size());
-         lo_solver->CalcLOSolution(us, d_us_LO);
+         Vector d_us_HO(us.Size()), d_us_LO;
+         if (fct_solver->NeedsLOProductInput())
+         {
+            d_us_LO.SetSize(us.Size());
+            lo_solver->CalcLOSolution(us, d_us_LO);
+         }
          ho_solver->CalcHOSolution(us, d_us_HO);
 
          // Compute the ratio s = us_old / u_old, and old active dofs.
          Vector s(size);
          Array<bool> s_bool_el, s_bool_dofs;
          ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
-#ifdef REMHOS_FCT_DEBUG
-         ComputeMinMaxS(s, s_bool_dofs, x_gf.ParFESpace()->GetMyRank());
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         const int myid = x_gf.ParFESpace()->GetMyRank();
+         if (myid == 0) { std::cout << "      --- RK stage" << std::endl; }
+         std::cout << "      in:  ";
+         ComputeMinMaxS(s, s_bool_dofs, myid);
 #endif
 
          // Bounds for s, based on the old values (and old active dofs).
@@ -211,12 +223,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                     u_new,
                                     s_bool_el_new, s_bool_dofs_new, d_us);
 
-#ifdef REMHOS_FCT_DEBUG
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
          Vector us_new(size);
          add(1.0, us, dt, d_us, us_new);
-         int myid = x_gf.ParFESpace()->GetMyRank();
+         std::cout << "      out: ";
          ComputeMinMaxS(NE, us_new, u_new, myid);
-         if (myid == 0) { std::cout << " --- " << std::endl; }
 #endif
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
@@ -225,6 +236,36 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       d_us.SyncAliasMemory(Y);
    }
+}
+
+void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
+                                               const Vector &dx,
+                                               const Vector &x_min,
+                                               const Vector &x_max) const
+{
+   if (dt_control == TimeStepControl::FixedTimeStep) { return; }
+
+   // x_min <= x + dt * dx <= x_max.
+   int n = x.Size();
+   const double eps = 1e-12;
+   double dt = numeric_limits<double>::infinity();
+
+   for (int i = 0; i < n; i++)
+   {
+      if (dx(i) > eps)
+      {
+         dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
+      }
+      else if (dx(i) < -eps)
+      {
+         dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
+      }
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+                 Kbf.ParFESpace()->GetComm());
+
+   dt_est = fmin(dt_est, dt);
 }
 
 void AdvectionOperator::AMRUpdate(const Vector &S,

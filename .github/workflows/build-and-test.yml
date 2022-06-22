@@ -1,0 +1,121 @@
+name: build-and-test-remhos
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+env:
+  HYPRE_ARCHIVE: v2.19.0.tar.gz
+  HYPRE_TOP_DIR: hypre-2.19.0
+  METIS_ARCHIVE: metis-4.0.3.tar.gz
+  METIS_TOP_DIR: metis-4.0.3
+  MFEM_TOP_DIR: mfem
+  MFEM_BRANCH: master
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout Remhos in "remhos" subdirectory. Final path: /home/runner/work/remhos/remhos/remhos
+    # Note: it must be done now to access "install-hypre", "install-metis" and "install-mfem" actions.
+    - name: checkout Remhos
+      uses: actions/checkout@v2
+      with:
+        path: remhos
+
+    - name: get MPI (Linux)
+      run: |
+        sudo apt-get install mpich libmpich-dev
+        export MAKE_CXX_FLAG="MPICXX=mpic++"
+
+    # Get Hypre through cache, or build it.
+    # Install will only run on cache miss.
+    - name: cache hypre
+      id: hypre-cache
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.HYPRE_TOP_DIR }}
+        key: ${{ runner.os }}-build-${{ env.HYPRE_TOP_DIR }}-v2
+
+    - name: build Hypre
+      if: steps.hypre-cache.outputs.cache-hit != 'true'
+      uses: mfem/github-actions/build-hypre@master
+      with:
+        archive: ${{ env.HYPRE_ARCHIVE }}
+        dir: ${{ env.HYPRE_TOP_DIR }}
+
+    # Get Metis through cache, or build it.
+    # Install will only run on cache miss.
+    - name: cache metis
+      id: metis-cache
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.METIS_TOP_DIR }}
+        key: ${{ runner.os }}-build-${{ env.METIS_TOP_DIR }}-v2
+
+    - name: build metis
+      if: steps.metis-cache.outputs.cache-hit != 'true'
+      uses: mfem/github-actions/build-metis@master
+      with:
+        archive: ${{ env.METIS_ARCHIVE }}
+        dir: ${{ env.METIS_TOP_DIR }}
+
+    # make generic links to libraries for MFEM install
+    # Those links are already created by build-mfem action, but not when the cache is used...
+    - name: configure links
+      run: |
+        echo "Hypre symlink:"
+        ln -s $HYPRE_TOP_DIR hypre;
+        echo "Metis symlink:"
+        ln -s $METIS_TOP_DIR metis-4.0;
+
+    - name: MFEM ${{ env.MFEM_BRANCH }} commit
+      run: |
+        echo "MFEM_COMMIT=$(git ls-remote --heads https://github.com/mfem/mfem.git ${{ env.MFEM_BRANCH }} | awk '{print $1;}')" >> $GITHUB_ENV
+
+    # Get mfem through cache, or build it.
+    # Install will only run on cache miss.
+    - name: cache mfem
+      id: mfem-cache
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.MFEM_TOP_DIR }}
+        key: ${{ runner.os }}-build-${{ env.MFEM_TOP_DIR }}-${{ env.MFEM_COMMIT }}-v3
+
+    - name: build mfem
+      if: steps.mfem-cache.outputs.cache-hit != 'true'
+      uses: mfem/github-actions/build-mfem@master
+      with:
+        os: ${{ runner.os }}
+        hypre-dir: ${{ env.HYPRE_TOP_DIR }}
+        metis-dir: ${{ env.METIS_TOP_DIR }}
+        mfem-dir: ${{ env.MFEM_TOP_DIR }}
+        mfem-branch: ${{ env.MFEM_BRANCH }}
+
+    - name: build Remhos
+      run: |
+        cd remhos && make -j
+
+    - name: test Remhos
+      run: |
+        cd remhos/autotest && ./test.sh 2
+        diff --report-identical-files out_test.dat out_baseline.dat
+
+    # TODO (bernede1@llnl.gov): Ideally, we would generate and export
+    # the path only on test failure. I couldn't find how.
+    - name: Prepare patch
+      if: always()
+      run: |
+        cd remhos
+        mv autotest/out_test.dat autotest/out_baseline.dat
+        git diff -- autotest/out_baseline.dat > baseline.patch
+
+    - name: Archive test results patch
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: baseline-patch
+        path: remhos/baseline.patch

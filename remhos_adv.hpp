@@ -17,10 +17,13 @@
 #ifndef MFEM_REMHOS_ADV
 #define MFEM_REMHOS_ADV
 
+#include "mfem.hpp"
 #include "remhos.hpp"
-
-using namespace std;
-using namespace mfem;
+#include "remhos_ho.hpp"
+#include "remhos_lo.hpp"
+#include "remhos_fct.hpp"
+#include "remhos_mono.hpp"
+#include "remhos_tools.hpp"
 
 namespace mfem
 {
@@ -39,6 +42,8 @@ private:
    mutable ParGridFunction x_gf;
 
    double dt;
+   TimeStepControl dt_control;
+   mutable double dt_est;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -48,6 +53,9 @@ private:
    LOSolver *lo_solver;
    FCTSolver *fct_solver;
    MonolithicSolver *mono_solver;
+
+   void UpdateTimeStepEstimate(const Vector &x, const Vector &dx,
+                               const Vector &x_min, const Vector &x_max) const;
 
 public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
@@ -62,7 +70,19 @@ public:
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
+   void SetTimeStepControl(TimeStepControl tsc)
+   {
+      if (tsc == TimeStepControl::LOBoundsError)
+      {
+         MFEM_VERIFY(lo_solver,
+                     "The selected time step control requires a LO solver.");
+      }
+      dt_control = tsc;
+   }
+
    virtual void SetDt(double _dt) { dt = _dt; }
+   double GetTimeStepEstimate() { return dt_est; }
+
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {
       start_mesh_pos    = m_pos;

@@ -19,7 +19,8 @@
 
 #include <unistd.h>
 
-#include "remhos.hpp"
+#include "mfem.hpp"
+#include "remhos_amr.hpp"
 #include "linalg/sparsemat.hpp"
 
 using namespace std;
@@ -156,7 +157,8 @@ void EstimatorIntegrator::ComputeElementFlux(const FiniteElement &el,
                                              Vector &u,
                                              const FiniteElement &fluxelem,
                                              Vector &flux,
-                                             bool with_coef)
+                                             bool with_coef,
+                                             const IntegrationRule */*ir*/)
 {
    // ZZ comes with with_coef set to true
    switch (mode)
@@ -217,7 +219,7 @@ Operator::Operator(ParFiniteElementSpace &pfes,
    l2_fec(new L2_FECollection(opt.mesh_order, dim)),
    flux_fec(opt.estimator == Estimator::ZZ ? h1_fec : l2_fec),
    flux_fes(new ParFiniteElementSpace(&pmesh, flux_fec, dim)),
-   quad_JJt(1, 1, Element::QUADRILATERAL)
+   quad_JJt(Mesh::MakeCartesian2D(1, 1, Element::QUADRILATERAL))
 {
    constexpr int SDIM = 3;
    constexpr bool discont = false;
@@ -435,11 +437,11 @@ void Operator::Update(AdvectionOperator &adv,
 /// Internall AMR update
 void Operator::UpdateAndRebalance(BlockVector &S,
                                   Array<int> &offset,
-                                  LowOrderMethod &lom,
-                                  ParMesh *subcell_mesh,
-                                  ParFiniteElementSpace *pfes_sub,
+                                  LowOrderMethod &/*lom*/,
+                                  ParMesh */*subcell_mesh*/,
+                                  ParFiniteElementSpace */*pfes_sub*/,
                                   ParGridFunction *xsub,
-                                  ParGridFunction &v_sub_gf)
+                                  ParGridFunction &/*v_sub_gf*/)
 {
    dbg("AMR Operator Update");
    Vector tmp;
@@ -578,7 +580,7 @@ void Operator::ApplyJJt()
    dbg("order:%d, ref_factor:%d, lorder:%d", horder, ref_factor, lorder_JJt);
 
    // Create the low-order refined mesh
-   ParMesh mesh_lor(&pmesh, ref_factor, ref_type);
+   ParMesh mesh_lor(ParMesh::MakeRefined(pmesh, ref_factor, ref_type));
 
    L2_FECollection fec_ho(horder, dim);
    L2_FECollection fec_lo(lorder_JJt, dim);

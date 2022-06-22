@@ -42,8 +42,6 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    Array<int> ess_tdof_list;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
-      MFEM_ABORT("PA for DG is not yet implemented.");
-
       K.Mult(u, rhs);
 
       M_solver.SetOperator(M);
@@ -51,7 +49,10 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
    else
    {
-      K_mat = K.ParallelAssemble();
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
       K_mat->Mult(u, rhs);
 
       M_mat = M.ParallelAssemble();
@@ -59,9 +60,9 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       M_prec = new HypreSmoother(*M_mat, HypreSmoother::Jacobi);
    }
    M_solver.SetPreconditioner(*M_prec);
-   M_solver.SetRelTol(1e-8);
+   M_solver.SetRelTol(1e-12);
    M_solver.SetAbsTol(0.0);
-   M_solver.SetMaxIter(50);
+   M_solver.SetMaxIter(500);
    M_solver.SetPrintLevel(0);
 
    M_solver.Mult(rhs, du);
@@ -78,10 +79,9 @@ LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   dbg("u:%d",u.Size());
    Vector rhs(u.Size());
 
-   HypreParMatrix *K_mat = NULL;
+   HypreParMatrix *K_mat = nullptr;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
       MFEM_ABORT("PA for DG is not yet implemented.");
@@ -89,11 +89,25 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
    else
    {
-      dbg("K.ParallelAssemble");
-      K_mat = K.ParallelAssemble();
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
       dbg("K_mat->Mult:%dx%d", K_mat->NumRows(), K_mat->NumCols());
       K_mat->Mult(u, rhs);
    }
+   /*
+      MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+                  "PA for DG is not supported for Local Inverse.");
+
+      Vector rhs(u.Size());
+
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
+      K_mat->Mult(u, rhs);
+   */
 
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
@@ -136,6 +150,8 @@ NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,
 
 void NeumannHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
+   MFEM_VERIFY(K.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+               "PA for DG is not supported for Neummann Solver.");
    const int n = u.Size(), ne = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    Vector rhs(n), res(n);
    Vector alpha(ndof); alpha = 1.0;

@@ -84,7 +84,7 @@ CFLAGS = -O3
 LDFLAGS =
 
 OPTIM_OPTS = -O3
-DEBUG_OPTS = -g -Wall
+DEBUG_OPTS = -g -Wall -std=c++11
 REMHOS_DEBUG = $(MFEM_DEBUG)
 ifneq ($(REMHOS_DEBUG),$(MFEM_DEBUG))
    ifeq ($(REMHOS_DEBUG),YES)
