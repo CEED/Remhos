@@ -268,11 +268,6 @@ int main(int argc, char *argv[])
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
 
-   // Create the refined mesh for the LOR solution
-   //   int basis_LOR = BasisType::ClosedUniform;
-   //Mesh *mesh_LOR = new Mesh::MakeRefined(mesh, lref, basis_LOR);
-   //mesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
-
    // Only standard assembly in 1D (some mfem functions just abort in 1D).
    if ((pa || next_gen_full) && dim == 1)
    {
@@ -357,14 +352,14 @@ int main(int argc, char *argv[])
    // Creating all the finite element spaces and structures
    int basis_LOR = 0;
    ParMesh pmesh_LOR = ParMesh::MakeRefined(pmesh, lref, basis_LOR);
-   pmesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
-
+   //pmesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
+   /*
    // Check if the input LOR mesh is periodic.
    const bool periodic_LOR = pmesh_LOR.GetNodes() != NULL &&
                              dynamic_cast<const L2_FECollection *>
                             (pmesh_LOR.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh_LOR.SetCurvature(mesh_order, periodic_LOR);
-
+   */
    // Mesh velocity.
    // If remap is on, obtain the mesh velocity by moving the mesh to the final
    // mesh positions, and taking the displacement vector.
@@ -402,6 +397,7 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace pfes(&pmesh, &fec);
 
    // Discontinuous FE space for LOR
+   /*
    int LOR_order = 0;
    DG_FECollection fec_LOR(LOR_order, dim, btype);
    ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);
@@ -411,6 +407,7 @@ int main(int argc, char *argv[])
    gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
 
    const Operator &R = gt->ForwardOperator();
+   */
 
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
@@ -462,7 +459,7 @@ int main(int argc, char *argv[])
    // discretization.
    ParBilinearForm m(&pfes);
    m.AddDomainIntegrator(new MassIntegrator);
-
+   
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
@@ -693,8 +690,8 @@ int main(int argc, char *argv[])
    ParGridFunction u(&pfes);
    u.MakeRef(&pfes, S, offset[0]);
    //Primary scalar field for the LOR is u_LOR
-   ParGridFunction u_LOR(&pfes_LOR);
-   u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
+   //ParGridFunction u_LOR(&pfes_LOR);
+   //u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
@@ -808,14 +805,14 @@ int main(int argc, char *argv[])
                   "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
                                    (exec_mode == 1) ? &v_gf : nullptr);
-   }
+   }/*
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
      MFEM_VERIFY(ho_solver != nullptr,
 		 "Mass Based LOR solver requires a chouce of a HO solver.");
      lo_solver = new MassBasedAvgLOR(pfes_LOR, *ho_solver,
 				     (exec_mode == 1) ? &v_gf : nullptr);
-   }
+				     }*/
 
    // Setup of the monolithic solver (if any).
    MonolithicSolver *mono_solver = NULL;

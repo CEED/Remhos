@@ -28,7 +28,8 @@ class LOSolver
 protected:
    ParFiniteElementSpace &pfes;
    ParFiniteElementSpace &pfes_LOR;
-   GridTransfer *gt;
+   ParGridFunction u_LOR; // idk if this belongs here
+  //GridTransfer *gt;
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:

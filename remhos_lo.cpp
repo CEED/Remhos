@@ -304,16 +304,16 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
    }
 }
 
-void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector du) const
+void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
-   ParGridFunction u_LOR(&pfes_LOR);
+  //ParGridFunction u_LOR(&pfes_LOR);
    //u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
   
    GridTransfer *gt;
    gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
 
    const Operator &R = gt->ForwardOperator();
-   R.Mult(u, u_LOR);
+   //R.Mult(u, u_LOR);
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
