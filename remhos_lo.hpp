@@ -32,7 +32,7 @@ protected:
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:
-   LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
+  LOSolver(ParFiniteElementSpace &space) : pfes(space),pfes_LOR(space) { }
 
    virtual ~LOSolver() { }
 
