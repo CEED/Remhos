@@ -499,7 +499,6 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
    */
    Array<double> minvals(x_min.GetData(), x_min.Size());
    Array<double> maxvals(x_max.GetData(), x_max.Size());
-
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -524,6 +523,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       // inactive to active, to get some valid bounds. More specifically, this
       // function is called on the old state, but the result from it is used
       // to limit the new state, which has different active elements.
+
       pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
@@ -773,10 +773,10 @@ void DofInfo::FillSubcell2CellDof()
 Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &_lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
-   : exec_mode(mode), lom(_lom), inflow_gf(inflow), x_gf(&pfes),
+   : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
      VolumeTerms(NULL),
      fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     subcell_mesh(submesh), dofs(_dofs)
+     subcell_mesh(submesh), dofs(_dofs), lom(_lom)
 {
    dbg();
    Update();
@@ -796,7 +796,6 @@ void Assembly::Update()
 
    if (lom.subcell_scheme)
    {
-      assert(false);
       VolumeTerms = lom.VolumeTerms;
       SubcellWeights.SetSize(dofs.numSubcells, dofs.numDofsSubcell, ne);
 
@@ -821,7 +820,6 @@ void Assembly::Update()
 
          if (lom.subcell_scheme)
          {
-            assert(false);
             for (m = 0; m < dofs.numSubcells; m++)
             {
                ComputeSubcellWeights(k, m);

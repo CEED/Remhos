@@ -114,7 +114,7 @@ HEADER_FILES = remhos.hpp remhos_adv.hpp remhos_tools.hpp remhos_lo.hpp remhos_h
 
 # Targets
 
-.PHONY: all lib clean distclean install status info opt debug test style clean-build clean-exec
+.PHONY: all clean distclean install status info opt debug test style clean-build clean-exec
 
 .SUFFIXES: .c .cpp .o
 .cpp.o:
@@ -123,13 +123,8 @@ HEADER_FILES = remhos.hpp remhos_adv.hpp remhos_tools.hpp remhos_lo.hpp remhos_h
 	cd $(<D); $(Ccc) -c $(<F)
 
 remhos: override MFEM_DIR = $(MFEM_DIR1)
-remhos: remhos.o libremhos.a $(CONFIG_MK) $(MFEM_LIB_FILE)
-	$(CXX) $(MFEM_LINK_FLAGS) -o remhos remhos.o libremhos.a $(LIBS)
-
-lib: libremhos.a
-OBJECT_LIB_FILES = $(filter-out remhos.o,$(OBJECT_FILES))
-libremhos.a: $(OBJECT_LIB_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
-	$(AR) $(ARFLAGS) $(@) $(OBJECT_LIB_FILES)
+remhos: $(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
+	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
 
 all: remhos
 
@@ -160,7 +155,7 @@ $(CONFIG_MK) $(MFEM_LIB_FILE):
 clean: clean-build clean-exec
 
 clean-build:
-	rm -rf remhos *.a *.o *~ *.dSYM *.mesh *.gf
+	rm -rf remhos *.o *~ *.dSYM *.mesh *.gf
 clean-exec:
 	rm -rf ./results
 

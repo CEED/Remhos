@@ -1700,7 +1700,6 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
       //denominator of equation 47
       double sumWeightsP = ndof*xe_max[k] - xSum + eps;
       double sumWeightsN = ndof*xe_min[k] - xSum - eps;
-      int dof_id;
       double sumFluctSubcellP = 0.; double sumFluctSubcellN = 0.;
       if (use_subcell_scheme)
       {
@@ -1716,22 +1715,22 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
          {
             xMinSubcell_v(m, k) = infinity;
             xMaxSubcell_v(m, k) = - infinity;
-            double xSum = 0.;
+            double xSumSubcell = 0.;
 
             for (int i = 0; i <numDofsSubcell; i++)
             {
-               dof_id = k*ndof + Sub2Ind(m, i);
+               int dof_id = k*ndof + Sub2Ind(m, i);
                xMaxSubcell_v(m, k) = max(xMaxSubcell_v(m, k), d_u[dof_id]);
                xMinSubcell_v(m, k) = min(xMinSubcell_v(m, k), d_u[dof_id]);
-               xSum += d_u[dof_id];
+               xSumSubcell += d_u[dof_id];
             }
 
             double fluct = fluct_all_v(m, k);
 
             sumWeightsSubcellP_v(m, k) =numDofsSubcell
-                                        * xMaxSubcell_v(m, k) - xSum + eps;
+                                        * xMaxSubcell_v(m, k) - xSumSubcell + eps;
             sumWeightsSubcellN_v(m, k) =numDofsSubcell
-                                        * xMinSubcell_v(m, k) - xSum - eps;
+                                        * xMinSubcell_v(m, k) - xSumSubcell - eps;
 
             fluctSubcellP_v(m, k) = max(0., fluct);
             fluctSubcellN_v(m, k) = min(0., fluct);
@@ -1744,7 +1743,7 @@ void PAResidualDistributionSubcell::CalcLOSolution(const Vector &u,
             for (int i = 0; i <numDofsSubcell; i++)
             {
                const int loc_id = Sub2Ind(m, i);
-               dof_id = k*ndof + loc_id;
+               int dof_id = k*ndof + loc_id;
                nodalWeightsP_v(loc_id, k) += fluctSubcellP_v(m, k)
                                              * ((xMaxSubcell_v(m, k) - d_u[dof_id])
                                                 / sumWeightsSubcellP_v(m, k)); // eq. (58)

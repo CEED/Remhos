@@ -34,90 +34,27 @@ using namespace mfem;
 namespace mfem
 {
 
-static double box(std::pair<double,double> p1,
-                  std::pair<double,double> p2,
-                  double theta,
-                  std::pair<double,double> origin,
-                  double x, double y)
+/// Boundary Conditions
+void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
+                           const ParGridFunction *xsub,
+                           ParGridFunction &v_sub_gf,
+                           VectorGridFunctionCoefficient &v_sub_coef)
 {
-   double xmin=p1.first;
-   double xmax=p2.first;
-   double ymin=p1.second;
-   double ymax=p2.second;
-   double ox=origin.first;
-   double oy=origin.second;
-
-   double pi = M_PI;
-   double s=std::sin(theta*pi/180);
-   double c=std::cos(theta*pi/180);
-
-   double xn=c*(x-ox)-s*(y-oy)+ox;
-   double yn=s*(x-ox)+c*(y-oy)+oy;
-
-   if (xn>xmin && xn<xmax && yn>ymin && yn<ymax)
+   Array<int> ess_bdr, ess_vdofs;
+   if (subcell_mesh->bdr_attributes.Size() > 0)
    {
-      return 1.0;
+      ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
    }
-   else
+   ess_bdr = 1;
+   xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
+   for (int i = 0; i < ess_vdofs.Size(); i++)
    {
-      return 0.0;
+      if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
    }
+   v_sub_coef.SetGridFunction(&v_sub_gf);
 }
 
-static double box3D(double xmin, double xmax,
-                    double ymin, double ymax,
-                    double zmin, double zmax,
-                    double theta,
-                    double ox, double oy, double x,
-                    double y, double z)
-{
-   double pi = M_PI;
-   double s=std::sin(theta*pi/180);
-   double c=std::cos(theta*pi/180);
-
-   double xn=c*(x-ox)-s*(y-oy)+ox;
-   double yn=s*(x-ox)+c*(y-oy)+oy;
-
-   if (xn>xmin && xn<xmax && yn>ymin && yn<ymax && z>zmin && z<zmax)
-   {
-      return 1.0;
-   }
-   else
-   {
-      return 0.0;
-   }
-}
-
-static double get_cross(double rect1, double rect2)
-{
-   double intersection=rect1*rect2;
-   return rect1+rect2-intersection; //union
-}
-
-static double ring(double rin, double rout, Vector c, Vector y)
-{
-   double r = 0.;
-   int dim = c.Size();
-   if (dim != y.Size())
-   {
-      mfem_error("Origin vector and variable have to be of the same size.");
-   }
-   for (int i = 0; i < dim; i++)
-   {
-      r += pow(y(i)-c(i), 2.);
-   }
-   r = sqrt(r);
-   if (r>rin && r<rout)
-   {
-      return 1.0;
-   }
-   else
-   {
-      return 0.0;
-   }
-}
-
-/// Velocity coefficient
+// Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
    int dim = x.Size();
@@ -239,7 +176,87 @@ void velocity_function(const Vector &x, Vector &v)
    }
 }
 
-/// Initial condition: lua function or hard-coded functions
+static
+double box(std::pair<double,double> p1, std::pair<double,double> p2,
+           double theta,
+           std::pair<double,double> origin, double x, double y)
+{
+   double xmin=p1.first;
+   double xmax=p2.first;
+   double ymin=p1.second;
+   double ymax=p2.second;
+   double ox=origin.first;
+   double oy=origin.second;
+
+   double pi = M_PI;
+   double s=std::sin(theta*pi/180);
+   double c=std::cos(theta*pi/180);
+
+   double xn=c*(x-ox)-s*(y-oy)+ox;
+   double yn=s*(x-ox)+c*(y-oy)+oy;
+
+   if (xn>xmin && xn<xmax && yn>ymin && yn<ymax)
+   {
+      return 1.0;
+   }
+   else
+   {
+      return 0.0;
+   }
+}
+
+static
+double box3D(double xmin, double xmax, double ymin, double ymax, double zmin,
+             double zmax, double theta, double ox, double oy, double x,
+             double y, double z)
+{
+   double pi = M_PI;
+   double s=std::sin(theta*pi/180);
+   double c=std::cos(theta*pi/180);
+
+   double xn=c*(x-ox)-s*(y-oy)+ox;
+   double yn=s*(x-ox)+c*(y-oy)+oy;
+
+   if (xn>xmin && xn<xmax && yn>ymin && yn<ymax && z>zmin && z<zmax)
+   {
+      return 1.0;
+   }
+   else
+   {
+      return 0.0;
+   }
+}
+
+static double get_cross(double rect1, double rect2)
+{
+   double intersection=rect1*rect2;
+   return rect1+rect2-intersection; //union
+}
+
+static double ring(double rin, double rout, Vector c, Vector y)
+{
+   double r = 0.;
+   int dim = c.Size();
+   if (dim != y.Size())
+   {
+      mfem_error("Origin vector and variable have to be of the same size.");
+   }
+   for (int i = 0; i < dim; i++)
+   {
+      r += pow(y(i)-c(i), 2.);
+   }
+   r = sqrt(r);
+   if (r>rin && r<rout)
+   {
+      return 1.0;
+   }
+   else
+   {
+      return 0.0;
+   }
+}
+
+// Initial condition: lua function or hard-coded functions
 double u0_function(const Vector &x)
 {
    int dim = x.Size();
@@ -396,13 +413,12 @@ double u0_function(const Vector &x)
    return 0.0;
 }
 
-/// s0: Simple nonlinear function.
 double s0_function(const Vector &x)
 {
+   // Simple nonlinear function.
    return 2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1));
 }
 
-/// inflow_function
 double inflow_function(const Vector &x)
 {
    double r = x.Norml2();
@@ -423,24 +439,5 @@ double inflow_function(const Vector &x)
    else { return 0.0; }
 }
 
-/// Boundary Conditions
-void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
-                           const ParGridFunction *xsub,
-                           ParGridFunction &v_sub_gf,
-                           VectorGridFunctionCoefficient &v_sub_coef)
-{
-   Array<int> ess_bdr, ess_vdofs;
-   if (subcell_mesh->bdr_attributes.Size() > 0)
-   {
-      ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
-   }
-   ess_bdr = 1;
-   xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-   for (int i = 0; i < ess_vdofs.Size(); i++)
-   {
-      if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
-   }
-   v_sub_coef.SetGridFunction(&v_sub_gf);
-}
 
 } // namespace mfem

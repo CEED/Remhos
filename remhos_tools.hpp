@@ -197,7 +197,6 @@ public:
    DofInfo &dofs;
 
    LowOrderMethod &lom;
-
    // Data structures storing Galerkin contributions. These are updated for
    // remap but remain constant for transport.
    // bdrInt - eq (32).

@@ -79,8 +79,7 @@ public:
       }
       dt_control = tsc;
    }
-
-   virtual void SetDt(double _dt) { dt = _dt; }
+   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
    double GetTimeStepEstimate() { return dt_est; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)

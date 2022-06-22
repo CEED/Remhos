@@ -175,7 +175,7 @@ void PrintCellValues(int cell_id, int NE, const Vector &vec, const char *msg)
 }
 
 void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
-                     const Vector &s_min, const Vector &s_max,
+                     const Vector &s_min_v, const Vector &s_max_v,
                      const Array<bool> &active_el,
                      const Array<bool> &active_dofs)
 {
@@ -188,8 +188,8 @@ void VerifyLOProduct(int NE, const Vector &us_LO, const Vector &u_LO,
       if (active_el[k] == false) { continue; }
 
       const double *us = &us_LO(k*ndofs), *u = &u_LO(k*ndofs);
-      s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
-      s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
+      s_min_loc.SetDataAndSize(s_min_v.GetData() + k*ndofs, ndofs);
+      s_max_loc.SetDataAndSize(s_max_v.GetData() + k*ndofs, ndofs);
       double s_min = numeric_limits<double>::infinity(),
              s_max = -numeric_limits<double>::infinity();
       for (int j = 0; j < ndofs; j++)

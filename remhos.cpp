@@ -251,7 +251,6 @@ int main(int argc, char *argv[])
    MPI_Comm comm = pmesh.GetComm();
    const int NE  = pmesh.GetNE();
 
-
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
    ODESolver *ode_solver = NULL;
@@ -330,7 +329,6 @@ int main(int argc, char *argv[])
    VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
    if (exec_mode == 1)
    {
-      assert(false);
       ParGridFunction v(&mesh_pfes);
       VectorFunctionCoefficient vcoeff(dim, velocity_function);
       v.ProjectCoefficient(vcoeff);
@@ -363,7 +361,6 @@ int main(int argc, char *argv[])
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
    {
-      assert(false);
       MFEM_VERIFY(btype == 2,
                   "Monotonicity treatment requires Bernstein basis.");
 
@@ -397,7 +394,6 @@ int main(int argc, char *argv[])
    ParGridFunction inflow_gf(&pfes);
    if (problem_num == 7) // Convergence test: use high order projection.
    {
-      assert(false);
       L2_FECollection l2_fec(order, dim);
       ParFiniteElementSpace l2_fes(&pmesh, &l2_fec);
       ParGridFunction l2_inflow(&l2_fes);
@@ -423,7 +419,6 @@ int main(int argc, char *argv[])
    }
    else if (exec_mode == 1)
    {
-      assert(false);
       k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
    }
@@ -441,7 +436,6 @@ int main(int argc, char *argv[])
       }
       else if (exec_mode == 1)
       {
-         assert(false);
          auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
@@ -494,10 +488,9 @@ int main(int argc, char *argv[])
    LowOrderMethod lom;
    lom.subcell_scheme = use_subcell_RD;
 
-   lom.pk = nullptr;
+   lom.pk = NULL;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      assert(false);
       lom.smap = SparseMatrix_Build_smap(k.SpMat());
       lom.D = k.SpMat();
 
@@ -508,7 +501,6 @@ int main(int argc, char *argv[])
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      assert(false);
       lom.pk = new ParBilinearForm(&pfes);
       if (exec_mode == 0)
       {
@@ -531,7 +523,7 @@ int main(int argc, char *argv[])
          ComputeDiscreteUpwindingMatrix(lom.pk->SpMat(), lom.smap, lom.D);
       }
    }
-   if (exec_mode == 1) { lom.coef = &v_mesh_coeff; assert(false); }
+   if (exec_mode == 1) { lom.coef = &v_mesh_coeff; }
    else                { lom.coef = &velocity; }
 
    // Face integration rule.
@@ -545,12 +537,12 @@ int main(int argc, char *argv[])
    DG_FECollection fec0(0, dim, btype);
    DG_FECollection fec1(1, dim, btype);
 
-   ParMesh *subcell_mesh = nullptr;
-   lom.SubFes0 = nullptr;
-   lom.SubFes1 = nullptr;
-   FiniteElementCollection *fec_sub = nullptr;
-   ParFiniteElementSpace *pfes_sub = nullptr;;
-   ParGridFunction *xsub = nullptr;
+   ParMesh *subcell_mesh = NULL;
+   lom.SubFes0 = NULL;
+   lom.SubFes1 = NULL;
+   FiniteElementCollection *fec_sub = NULL;
+   ParFiniteElementSpace *pfes_sub = NULL;;
+   ParGridFunction *xsub = NULL;
    ParGridFunction v_sub_gf;
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
@@ -625,64 +617,28 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
-   {
-      LOSolver *lo_solver = nullptr;
-      //Array<int> lo_smap;
-      //const bool time_dep = (exec_mode == 0) ? false : true;
-      if (lo_type == LOSolverType::DiscrUpwind)
-      {
-         assert(false);
-         /*lo_smap = SparseMatrix_Build_smap(Kbf.SpMat());
-         lo_solver = new DiscreteUpwind(pfes, Kbf.SpMat(), lo_smap,
-                                        lumpedM, asmbl, time_dep);*/
-      }
-      else if (lo_type == LOSolverType::DiscrUpwindPrec)
-      {
-         assert(false);
-         /*lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
-         lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
-                                        lumpedM, asmbl, time_dep);*/
-      }
-      else if (lo_type == LOSolverType::ResDist)
-      {
-         assert(false);
-         /*const bool subcell_scheme = false;
-         lo_solver = new ResidualDistribution(pfes, Kbf, asmbl, lumpedM,
-                                              subcell_scheme, time_dep);*/
-      }
-      else if (lo_type == LOSolverType::ResDistSubcell)
-      {
-         assert(false);
-         /*const bool subcell_scheme = true;
-         lo_solver = new ResidualDistribution(pfes, Kbf, asmbl, lumpedM,
-                                              subcell_scheme, time_dep);*/
-      }
-   }
-
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
    Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
-
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
    u.MakeRef(&pfes, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
-   {
+   /*{
       Vector tmp;
       u.GetTrueDofs(tmp);
       u.SetFromTrueDofs(tmp);
       dbg("pmesh.GetNE: %d, u.Size: %d", pmesh.GetNE(), u.Size());
-   }
+   }*/
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
    if (product_sync)
    {
-      assert(false);
       s.SetSpace(&pfes);
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
@@ -698,24 +654,21 @@ int main(int argc, char *argv[])
    }
 
    // Smoothness indicator.
-   SmoothnessIndicator *smth_indicator = nullptr;
+   SmoothnessIndicator *smth_indicator = NULL;
    if (smth_ind_type)
    {
-      assert(false);
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
                                                pfes, u, dofs);
    }
 
    // Setup of the high-order solver (if any).
-   HOSolver *ho_solver = nullptr;
+   HOSolver *ho_solver = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
-      assert(false);
       ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
    }
    else if (ho_type == HOSolverType::CG)
    {
-      assert(false);
       ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
    }
    else if (ho_type == HOSolverType::LocalInverse)
@@ -794,11 +747,10 @@ int main(int argc, char *argv[])
    }
 
    // Setup of the monolithic solver (if any).
-   MonolithicSolver *mono_solver = nullptr;
+   MonolithicSolver *mono_solver = NULL;
    bool mass_lim = (problem_num != 6 && problem_num != 7) ? true : false;
    if (mono_type == MonolithicSolverType::ResDistMono)
    {
-      assert(false);
       const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
@@ -806,7 +758,6 @@ int main(int argc, char *argv[])
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
-      assert(false);
       const bool subcell_scheme = true;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
@@ -874,12 +825,11 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    if (product_sync)
    {
-      assert(false);
       const double mass0_us_loc = lumpedM * us;
       MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
    }
 
-   {
+   /*{
       double mass_u, mass_u_loc = masses * u;
       MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
       if (myid == 0)
@@ -888,14 +838,13 @@ int main(int argc, char *argv[])
                    << "Initial mass u: " << mass_u << std::endl
                    << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
       }
-   }
+   }*/
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
-   FCTSolver *fct_solver = nullptr;
+   FCTSolver *fct_solver = NULL;
    if (fct_type == FCTSolverType::FluxBased)
    {
-      assert(false);
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
       K_HO.SpMat().HostReadI();
       K_HO.SpMat().HostReadJ();
@@ -907,12 +856,10 @@ int main(int argc, char *argv[])
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      assert(false);
       fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
-      assert(false);
       fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::FCTProject)
@@ -934,7 +881,6 @@ int main(int argc, char *argv[])
 
    if (exec_mode == 1)
    {
-      assert(false);
       adv.SetRemapStartPos(x0, x0_sub);
 
       // For remap, the pseudo-time always evolves from 0 to 1.
@@ -1117,11 +1063,11 @@ int main(int argc, char *argv[])
 #endif
       }
 
-      {
+      /*{
          Vector tmp;
          u.GetTrueDofs(tmp);
          u.SetFromTrueDofs(tmp);
-      }
+      }*/
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -1154,7 +1100,6 @@ int main(int argc, char *argv[])
 
       if (exec_mode == 1)
       {
-         assert(false);
          x0.HostReadWrite(); v_sub_gf.HostReadWrite();
          x.HostReadWrite();
          add(x0, t, v_gf, x);
@@ -1165,14 +1110,12 @@ int main(int argc, char *argv[])
          add(x0_sub, t, v_sub_gf, *xsub);
       }
 
-
       if (problem_num != 6 && problem_num != 7 && problem_num != 8)
       {
          done = (t >= t_final - 1.e-8*dt);
       }
       else
       {
-         assert(false);
          // Steady state problems - stop at convergence.
          double res_loc = 0.;
          lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
@@ -1206,7 +1149,6 @@ int main(int argc, char *argv[])
          {
             MPI_Barrier(pmesh.GetComm());
             u.HostRead();
-
             VisualizeField(sout, vishost, visport, u, "Solution",
                            Wx, Wy, Ww, Wh);
             if (product_sync)
@@ -1264,8 +1206,8 @@ int main(int argc, char *argv[])
    }
    else
    {
-      ml.SpMat().GetDiag(lumpedM);
-      masses = lumpedM;
+      /*ml.SpMat().GetDiag(lumpedM);
+      masses = lumpedM;*/
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
@@ -1288,11 +1230,10 @@ int main(int argc, char *argv[])
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
       if (product_sync)
       {
-         /*
-           cout << setprecision(10)
-                << "Final mass us: " << mass_us << endl
-                << "Max value s:   " << s_max << endl << setprecision(6)
-                << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;*/
+         cout << setprecision(10)
+              << "Final mass us: " << mass_us << endl
+              << "Max value s:   " << s_max << endl << setprecision(6)
+              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
       }
    }
 
@@ -1351,7 +1292,7 @@ int main(int argc, char *argv[])
    delete ode_solver;
    delete mesh_fec;
    delete lom.pk;
-   //delete dc;
+   delete dc;
 
    if (order > 1)
    {

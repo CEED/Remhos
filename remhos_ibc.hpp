@@ -22,21 +22,21 @@
 namespace mfem
 {
 
+// Force zero on boundary conditions
+void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
+                           const ParGridFunction *xsub,
+                           ParGridFunction &v_sub_gf,
+                           VectorGridFunctionCoefficient &v_sub_coef);
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v);
 
-// Initial condition
+// Initial conditions
 double u0_function(const Vector &x);
 double s0_function(const Vector &x);
 
 // Inflow boundary condition
 double inflow_function(const Vector &x);
 
-// Force zero on boundary conditions
-void ZeroItOutOnBoundaries(const ParMesh *subcell_mesh,
-                           const ParGridFunction *xsub,
-                           ParGridFunction &v_sub_gf,
-                           VectorGridFunctionCoefficient &v_sub_coef);
 
 } // namespace mfem
 

@@ -44,13 +44,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    mesh_vel(vel), submesh_vel(sub_vel),
    x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos)
-{
-   dbg();
-   assert(!lo_solver);
-   assert(!fct_solver);
-   assert(!mono_solver);
-}
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { dbg(); }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
