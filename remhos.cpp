@@ -196,7 +196,8 @@ int main(int argc, char *argv[])
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
                   "                  4 - Subcell Residual Distribution,\n\t"
-                  "                  5 - Mass-Based Element Average.");
+                  "                  5 - Mass-Based Element Average.\n\t"
+		  "                  6 - Mass-Based Element LOR Average");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -267,9 +268,6 @@ int main(int argc, char *argv[])
    const int dim = mesh->Dimension();
    for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
-
-   // testing things
-   //Mesh *mesh_LOR = new Mesh(Mesh::MakRefined(mesh, 
 
    // Only standard assembly in 1D (some mfem functions just abort in 1D).
    if ((pa || next_gen_full) && dim == 1)
@@ -405,14 +403,7 @@ int main(int argc, char *argv[])
    // Discontinuous FE space for LOR
    int LOR_order = 0;
    DG_FECollection fec_LOR(LOR_order, dim, btype);
-   ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);
-
-   // Grid transfer for LOR solution
-   GridTransfer *gt;
-   gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
-
-   //const Operator &R = gt->ForwardOperator();
-   
+   ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);   
 
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
@@ -815,7 +806,7 @@ int main(int argc, char *argv[])
    {
      MFEM_VERIFY(ho_solver != nullptr,
 		 "Mass Based LOR solver requires a chouce of a HO solver.");
-     lo_solver = new MassBasedAvgLOR(pfes_LOR, *ho_solver,
+     lo_solver = new MassBasedAvgLOR(pfes, pfes_LOR, *ho_solver,
 				     (exec_mode == 1) ? &v_gf : nullptr);
    }
 
@@ -1374,7 +1365,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector u, d_u;
+   Vector u, d_u, u_LOR;
    Vector* xptr = const_cast<Vector*>(&X);
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
@@ -1403,7 +1394,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
    else if (lo_solver)
    {
-      lo_solver->CalcLOSolution(u, d_u);
+     //  if (lo_type = LOSolverType::MassBasedLOR)
+     // {
+     //    lo_solver->CalcLORSolution(u, d_u, u_LOR);
+     // }
+     // else
+      {
+         lo_solver->CalcLOSolution(u, d_u);
+      }
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {

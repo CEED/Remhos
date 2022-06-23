@@ -28,7 +28,7 @@ class LOSolver
 protected:
    ParFiniteElementSpace &pfes;
    ParFiniteElementSpace &pfes_LOR;
-   ParGridFunction u_LOR; // idk if this belongs here
+  //ParGridFunction &u_LOR; // idk if this belongs here
   //GridTransfer *gt;
    double dt = -1.0; // usually not known at creation, updated later.
 
@@ -109,7 +109,9 @@ protected:
   const GridFunction *mesh_v;
   
 public:
-  MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
+  MassBasedAvgLOR(ParFiniteElementSpace &space,
+		  ParFiniteElementSpace &space_LOR,
+		  HOSolver &hos,
 		  const GridFunction *mesh_vel)
     : LOSolver(space), ho_solver(hos) { }
   
