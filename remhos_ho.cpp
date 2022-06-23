@@ -14,6 +14,9 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
+#define MFEM_DEBUG_COLOR 205
+#include "debug.hpp"
+
 #include "remhos_ho.hpp"
 #include "remhos_tools.hpp"
 
@@ -72,23 +75,43 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf) { }
+   : HOSolver(space), M(Mbf), K(Kbf) { dbg(); }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
-               "PA for DG is not supported for Local Inverse.");
-
    Vector rhs(u.Size());
 
-   K.SpMat().HostReadWriteI();
-   K.SpMat().HostReadWriteJ();
-   K.SpMat().HostReadWriteData();
-   HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
-   K_mat->Mult(u, rhs);
+   HypreParMatrix *K_mat = nullptr;
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      MFEM_ABORT("PA for DG is not yet implemented.");
+      K.Mult(u, rhs);
+   }
+   else
+   {
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
+      dbg("K_mat->Mult:%dx%d", K_mat->NumRows(), K_mat->NumCols());
+      K_mat->Mult(u, rhs);
+   }
+   /*
+      MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+                  "PA for DG is not supported for Local Inverse.");
+
+      Vector rhs(u.Size());
+
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
+      K_mat->Mult(u, rhs);
+   */
 
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
+   dbg("ne:%d, nd:%d",ne,nd);
    DenseMatrix M_loc(nd);
    DenseMatrixInverse M_loc_inv(&M_loc);
    Vector rhs_loc(nd), du_loc(nd);
@@ -104,6 +127,20 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
 
    delete K_mat;
+}
+
+void LocalInverseHOSolver::Update()
+{
+   dbg();
+   /*pfes.Update();
+
+   M.Update();
+   M.Assemble();
+   M.Finalize();
+
+   K.Update();
+   K.Assemble(0);
+   K.Finalize(0);*/
 }
 
 NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,

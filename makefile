@@ -105,12 +105,12 @@ LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
 CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
-SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
-  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp
+SOURCE_FILES = remhos.cpp remhos_adv.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
+  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp remhos_amr.cpp remhos_ibc.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
-HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
-  remhos_mono.hpp remhos_sync.hpp
+HEADER_FILES = remhos.hpp remhos_adv.hpp remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
+  remhos_mono.hpp remhos_sync.hpp remhos_amr.hpp remhos_ibc.hpp
 
 # Targets
 
@@ -123,7 +123,7 @@ HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
 	cd $(<D); $(Ccc) -c $(<F)
 
 remhos: override MFEM_DIR = $(MFEM_DIR1)
-remhos:	$(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
+remhos: $(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
 	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
 
 all: remhos

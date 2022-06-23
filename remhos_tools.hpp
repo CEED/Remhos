@@ -23,6 +23,12 @@
 namespace mfem
 {
 
+int GetMeshDepth(ParMesh &pmesh);
+
+void GetPerElementMinMax(const ParGridFunction &gf,
+                         Vector &elem_min, Vector &elem_max,
+                         int int_order = -1);
+
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 
@@ -105,8 +111,8 @@ private:
 
    // The min and max bounds are represented as CG functions of the same order
    // as the solution, thus having 1:1 dof correspondence inside each element.
-   H1_FECollection fec_bounds;
-   ParFiniteElementSpace pfes_bounds;
+   H1_FECollection *fec_bounds;
+   ParFiniteElementSpace *pfes_bounds;
    ParGridFunction x_min, x_max;
 
    // For each DOF on an element boundary, the global index of the DOF on the
@@ -169,6 +175,8 @@ public:
                               Vector &u_min, Vector &u_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
+
+   void Update();
 };
 
 class Assembly
@@ -209,6 +217,8 @@ public:
                           const int BdrID, const Vector &x,
                           Vector &y, const Vector &x_nd,
                           const Vector &alpha) const;
+
+   void Update();
 
    const FiniteElementSpace * GetFes() {return fes;}
 
