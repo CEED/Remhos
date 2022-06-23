@@ -242,24 +242,24 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
    const double eps = 1e-12;
-   double dt = numeric_limits<double>::infinity();
+   double x_dt = numeric_limits<double>::infinity();
 
    for (int i = 0; i < n; i++)
    {
       if (dx(i) > eps)
       {
-         dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
+         x_dt = fmin(x_dt, (x_max(i) - x(i)) / dx(i) );
       }
       else if (dx(i) < -eps)
       {
-         dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
+         x_dt = fmin(x_dt, (x_min(i) - x(i)) / dx(i) );
       }
    }
 
-   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+   MPI_Allreduce(MPI_IN_PLACE, &x_dt, 1, MPI_DOUBLE, MPI_MIN,
                  Kbf.ParFESpace()->GetComm());
 
-   dt_est = fmin(dt_est, dt);
+   dt_est = fmin(dt_est, x_dt);
 }
 
 void AdvectionOperator::AMRUpdate(const Vector &S,
@@ -297,7 +297,7 @@ void AdvectionOperator::AMRUpdate(const Vector &S,
                 << "AdvectionOperator, u size:" << u.Size() << std::endl
                 << "Current mass u: " << mass_u << std::endl
                 << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
-      //MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-6, "Error in mass!");
+      MFEM_VERIFY(abs(mass0_u - mass_u) < 1e-6, "Error in mass!");
    }
 
    dbg("Kbf");

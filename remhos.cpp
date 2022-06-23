@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
    double t_final = 4.0;
    TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
-   int max_tsteps = -1;
+   int max_steps = -1;
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
    double amr_deref_threshold = 1e-5;
    int amr_max_level = 2; // only for JJt
    int amr_nc_limit = 0;
-   double dt_factor = 2.0;
+   double amr_dt_factor = 2.0;
 
    int precision = 8;
    cout.precision(precision);
@@ -153,6 +153,8 @@ int main(int argc, char *argv[])
                   "                      2 - exact_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
+   args.AddOption(&max_steps, "-ms", "--max-steps",
+                  "Maximum number of steps (negative means no restriction).");
    args.AddOption((int*)(&dt_control), "-dtc", "--dt-control",
                   "Time Step Control: 0 - Fixed time step, set with -dt,\n\t"
                   "                   1 - Bounds violation of the LO sltn.");
@@ -185,10 +187,8 @@ int main(int argc, char *argv[])
                   "(after the initial serial and parallel refinements)");
    args.AddOption(&amr_nc_limit, "-al", "--amr-nc-limit",
                   "AMR maximum level of hanging nodes, (0 = unlimited)");
-   args.AddOption(&dt_factor, "-df", "--time-step-factor",
+   args.AddOption(&amr_dt_factor, "-af", "--amr-time-step-factor",
                   "Time step factor when adding an AMR depth level.");
-   args.AddOption(&max_tsteps, "-ms", "--max-steps",
-                  "Maximum number of steps (negative means no restriction).");
 
    args.Parse();
    if (!args.Good())
@@ -361,7 +361,7 @@ int main(int argc, char *argv[])
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
    {
-      MFEM_VERIFY(btype == 2,
+      MFEM_VERIFY(btype == BasisType::Positive,
                   "Monotonicity treatment requires Bernstein basis.");
 
       if (order == 0)
@@ -554,8 +554,8 @@ int main(int argc, char *argv[])
       MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
 
       // Get a uniformly refined mesh.
-      const int btype = BasisType::ClosedUniform;
-      subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, btype));
+      const int ref_type = BasisType::ClosedUniform;
+      subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, ref_type));
 
       // Check if the mesh is periodic.
       const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
@@ -628,12 +628,13 @@ int main(int argc, char *argv[])
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
-   /*{
+   if (amr)
+   {
       Vector tmp;
       u.GetTrueDofs(tmp);
       u.SetFromTrueDofs(tmp);
       dbg("pmesh.GetNE: %d, u.Size: %d", pmesh.GetNE(), u.Size());
-   }*/
+   }
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -906,12 +907,17 @@ int main(int argc, char *argv[])
       dbg("\033[31m###########################");
       dbg("\033[31m######## TIME LOOP ########");
       dbg("\033[31m######## dt:%f ########\033[m",dt);
-      double dt_real = min(dt, t_final - t);
+      double dt_real;
 
       // This also resets the time step estimate when automatic dt is on.
-      adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      auto SetDtTimeStep = [&]()
+      {
+         dt_real = min(dt, t_final - t);
+         adv.SetDt(dt_real);
+         if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+         if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      };
+      SetDtTimeStep();
 
       // The inner refinement loop. At the end we want to have the current
       // time step resolved to the prescribed tolerance in each element.
@@ -923,12 +929,11 @@ int main(int argc, char *argv[])
          for (int ref_it = 1; ; ref_it++)
          {
             const int new_depth = mfem::GetMeshDepth(pmesh);
-            if (new_depth > depth) { dt /= dt_factor; }
-            if (new_depth < depth) { dt *= dt_factor; }
+            if (new_depth > depth) { dt /= amr_dt_factor; }
+            if (new_depth < depth) { dt *= amr_dt_factor; }
             if (new_depth != depth)
             {
-               double dt_real = min(dt, t_final - t);
-               adv.SetDt(dt_real);
+               SetDtTimeStep();
                depth = new_depth;
                if (myid == 0)
                {
@@ -1040,10 +1045,10 @@ int main(int argc, char *argv[])
          // now we have implemented only the minimum global bound.
          u.HostRead();
          us.HostReadWrite();
-         const int s = u.Size();
+         const int u_sz = u.Size();
          Array<bool> active_elem, active_dofs;
          ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         for (int i = 0; i < s; i++)
+         for (int i = 0; i < u_sz; i++)
          {
             if (active_dofs[i] == false) { continue; }
 
@@ -1063,11 +1068,12 @@ int main(int argc, char *argv[])
 #endif
       }
 
-      /*{
+      if (amr)
+      {
          Vector tmp;
          u.GetTrueDofs(tmp);
          u.SetFromTrueDofs(tmp);
-      }*/
+      }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
@@ -1130,7 +1136,7 @@ int main(int argc, char *argv[])
          else { res = u; }
       }
 
-      if (ti == max_tsteps) { dbg("max_tsteps reached!"); done = true; }
+      if (ti == max_steps) { dbg("max_steps reached!"); done = true; }
 
       if (done || ti % vis_steps == 0)
       {
@@ -1179,18 +1185,18 @@ int main(int argc, char *argv[])
 
    // Print the final meshes and solution.
    {
-      ofstream meshHO("meshHO_final.mesh");
-      meshHO.precision(precision);
-      pmesh.PrintAsOne(meshHO);
+      ofstream meshHO_final("meshHO_final.mesh");
+      meshHO_final.precision(precision);
+      pmesh.PrintAsOne(meshHO_final);
       if (subcell_mesh)
       {
-         ofstream meshLO("meshLO_final.mesh");
-         meshLO.precision(precision);
-         subcell_mesh->PrintAsOne(meshLO);
+         ofstream meshLO_final("meshLO_final.mesh");
+         meshLO_final.precision(precision);
+         subcell_mesh->PrintAsOne(meshLO_final);
       }
-      ofstream sltn("sltn_final.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
+      ofstream sltn_final("sltn_final.gf");
+      sltn_final.precision(precision);
+      u.SaveAsOne(sltn_final);
    }
 
    // Check for mass conservation.
@@ -1206,8 +1212,11 @@ int main(int argc, char *argv[])
    }
    else
    {
-      /*ml.SpMat().GetDiag(lumpedM);
-      masses = lumpedM;*/
+      if (amr)
+      {
+         ml.SpMat().GetDiag(lumpedM);
+         masses = lumpedM;
+      }
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
@@ -1240,8 +1249,8 @@ int main(int argc, char *argv[])
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
    {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      double u_err = u.ComputeLpError(1., u0);
+      if (myid == 0) { cout << "L1-error: " << u_err << "." << endl; }
    }
    else if (problem_num == 7)
    {

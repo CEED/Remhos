@@ -37,7 +37,6 @@ double s0_function(const Vector &x);
 // Inflow boundary condition
 double inflow_function(const Vector &x);
 
-
 } // namespace mfem
 
 #endif // MFEM_REMHOS_IBC
