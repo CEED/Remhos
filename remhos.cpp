@@ -805,7 +805,7 @@ int main(int argc, char *argv[])
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
      MFEM_VERIFY(ho_solver != nullptr,
-		 "Mass Based LOR solver requires a chouce of a HO solver.");
+		 "Mass Based LOR solver requires a choice of a HO solver.");
      lo_solver = new MassBasedAvgLOR(pfes, pfes_LOR, *ho_solver,
 				     (exec_mode == 1) ? &v_gf : nullptr);
    }
