@@ -1394,14 +1394,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
    else if (lo_solver)
    {
-     //  if (lo_type = LOSolverType::MassBasedLOR)
-     // {
-     //    lo_solver->CalcLORSolution(u, d_u, u_LOR);
-     // }
-     // else
-      {
-         lo_solver->CalcLOSolution(u, d_u);
-      }
+      lo_solver->CalcLOSolution(u, d_u);
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {

@@ -33,13 +33,15 @@ protected:
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:
-  LOSolver(ParFiniteElementSpace &space) : pfes(space),pfes_LOR(space) { }
+   LOSolver(ParFiniteElementSpace &space) : pfes(space),pfes_LOR(space) { }
 
    virtual ~LOSolver() { }
 
    virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
+
+  //virtual void CalcLORSolution(const Vector &u, Vector &u_LOR) const;
 };
 
 class Assembly;
@@ -116,6 +118,8 @@ public:
     : LOSolver(space), ho_solver(hos) { }
   
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+
+  //virtual void CalcLORSolution(const Vector &u, Vector &u_LOR) const;
 };
   
   

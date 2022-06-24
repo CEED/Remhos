@@ -313,14 +313,22 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
    GridTransfer *gt;
    gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
 
-   cout << gt << endl;
-
    const Operator &R = gt->ForwardOperator(); // segfault
    
    //gt->ForwardOperator().Mult(u, u_LOR);
    //cout << "R multiplication has happened" << endl;
 }
+/*
+void MassBasedAvgLOR::CalcLORSolution(const Vector &u, Vector &u_LOR) const
+{
+  GridTransfer *gt;
+  gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
 
+  const Operator &R = gt->ForwardOperator();
+
+  cout << "The if statement worked" << endl;
+}
+*/
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
 {
    const FiniteElement *el_trace =
