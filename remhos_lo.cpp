@@ -22,7 +22,7 @@ using namespace std;
 
 namespace mfem
 {
-  
+
   DiscreteUpwind::DiscreteUpwind(ParFiniteElementSpace &space,
                                const SparseMatrix &adv,
                                const Array<int> &adv_smap, const Vector &Mlump,
@@ -306,29 +306,311 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
-   ParGridFunction u_LOR(&pfes_LOR);
+   //ParGridFunction u_LOR(&pfes_LOR);
    //u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
 
-   
-   GridTransfer *gt;
-   gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
 
-   const Operator &R = gt->ForwardOperator(); // segfault
-   
+   //GridTransfer *gt;
+   //gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
+
+  // const Operator &R = gt->ForwardOperator();
+
    //gt->ForwardOperator().Mult(u, u_LOR);
    //cout << "R multiplication has happened" << endl;
 }
-/*
-void MassBasedAvgLOR::CalcLORSolution(const Vector &u, Vector &u_LOR) const
+
+void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
+                                  Vector &m, Vector &x, double y_min,
+                                  double y_max, Vector &xy) const
 {
-  GridTransfer *gt;
-  gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
+  // [IN]  - M, M_inv, m, x, y_min, y_max
+  // [OUT] - xy
 
-  const Operator &R = gt->ForwardOperator();
+  m.HostReadWrite();
+  x.HostReadWrite();
+  xy.HostReadWrite();
+  const int s = M.Size();
 
-  cout << "The if statement worked" << endl;
+  xy.SetSize(s);
+
+  // Compute the lumped mass matrix in ML
+  Vector ML(s);
+  M.GetRowSums(ML);
+
+  // Compute the high-order projection in xy
+  M_inv.Mult(m, xy);
+
+  // Q0 solutions can't be adjusted conservatively. It's what it is.
+  if (xy.Size() == 1) {
+    return;
+  }
+
+  double dMLX(0);
+  for (int i = 0; i < x.Size(); ++i) {
+    dMLX += ML(i) * x(i);
+  }
+
+  const double y_avg = m.Sum() / dMLX;
+
+  if (!(y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12)) {
+    std::cout << "Average is out of bounds: "
+              << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
+              << " " << y_avg << " " << y_max << std::endl;
+  }
+
+  Vector z(s);
+  Vector beta(s);
+  Vector Mxy(s);
+  M.Mult(xy, Mxy);
+  for (int i = 0; i < s; i++) {
+    // Some different options for beta:
+    // beta(i) = 1.0;
+    beta(i) = ML(i) * x(i);
+    // beta(i) = ML(i)*(x(i) + 1e-14);
+    // beta(i) = ML(i);
+    // beta(i) = Mxy(i);
+
+    // The low order flux correction
+    z(i) = m(i) - ML(i) * x(i) * y_avg;
+  }
+
+  // Make beta_i sum to 1
+  beta /= beta.Sum();
+
+  DenseMatrix F(s);
+  for (int i = 1; i < s; i++) {
+    for (int j = 0; j < i; j++) {
+      F(i, j) = M(i, j) * (xy(i) - xy(j)) + (beta(j) * z(i) - beta(i) * z(j));
+    }
+  }
+
+  Vector gp(s), gm(s);
+  gp = 0.0;
+  gm = 0.0;
+  for (int i = 1; i < s; i++) {
+    for (int j = 0; j < i; j++) {
+      double fij = F(i, j);
+      if (fij >= 0.0) {
+        gp(i) += fij;
+        gm(j) -= fij;
+      } else {
+        gm(i) += fij;
+        gp(j) -= fij;
+      }
+    }
+  }
+
+  for (int i = 0; i < s; i++) {
+    xy(i) = x(i) * y_avg;
+  }
+
+  for (int i = 0; i < s; i++) {
+    double mi = ML(i), xyLi = xy(i);
+    double rp = std::max(mi * (x(i) * y_max - xyLi), 0.0);
+    double rm = std::min(mi * (x(i) * y_min - xyLi), 0.0);
+    double sp = gp(i), sm = gm(i);
+
+    gp(i) = (rp < sp) ? rp / sp : 1.0;
+    gm(i) = (rm > sm) ? rm / sm : 1.0;
+  }
+
+  for (int i = 1; i < s; i++) {
+    for (int j = 0; j < i; j++) {
+      double fij = F(i, j), aij;
+
+      if (fij >= 0.0) {
+        aij = std::min(gp(i), gm(j));
+      } else {
+        aij = std::min(gm(i), gp(j));
+      }
+
+      fij *= aij;
+      xy(i) += fij / ML(i);
+      xy(j) -= fij / ML(j);
+    }
+  }
 }
-*/
+
+void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
+                                Vector &ip_trans, const int &dim) const
+{
+  Vector temp(dim + 1);
+  DenseMatrix trans(dim + 1);
+  if (dim == 2) {
+    ip_trans(0) = ip.x;
+    ip_trans(1) = ip.y;
+    ip_trans(2) = 1;
+
+    trans(0, 0) = 0.5;
+    trans(1, 1) = 0.5;
+    trans(2, 2) = 1;
+
+    if (s == 1) {
+      trans(0, 2) = 0.5;
+    } else if (s == 2) {
+      trans(1, 2) = 0.5;
+    } else if (s == 3) {
+      trans(0, 2) = 0.5;
+      trans(1, 2) = 0.5;
+    }
+  } else if (dim == 3) {
+    ip_trans(0) = ip.x;
+    ip_trans(1) = ip.y;
+    ip_trans(2) = ip.z;
+    ip_trans(3) = 1;
+
+    trans(0, 0) = 0.5;
+    trans(1, 1) = 0.5;
+    trans(2, 2) = 0.5;
+    trans(3, 3) = 1;
+
+    if (s == 1) {
+      trans(0, 3) = 0.5;
+    } else if (s == 2) {
+      trans(1, 3) = 0.5;
+    } else if (s == 3) {
+      trans(0, 3) = 0.5;
+      trans(1, 3) = 0.5;
+    } else if (s == 4) {
+      trans(2, 3) = 0.5;
+    } else if (s == 5) {
+      trans(0, 3) = 0.5;
+      trans(2, 3) = 0.5;
+    } else if (s == 6) {
+      trans(1, 3) = 0.5;
+      trans(2, 3) = 0.5;
+    } else if (s == 7) {
+      trans(0, 3) = 0.5;
+      trans(1, 3) = 0.5;
+      trans(2, 3) = 0.5;
+    }
+  }
+  trans.Mult(ip_trans, temp);
+
+  ip_trans = temp;
+}
+
+void MassBasedAvgLOR::CalculateLORProjection(const ParGridFunction &x,
+                                             const ParGridFunction &u_HO,
+                                             const ParFiniteElementSpace &fes,
+                                             const int &order, const int &lref,
+                                             ParMesh &mesh,
+                                             Vector &sol_vec) const
+{
+  // creating the LOR mesh
+  Vector bb_min, bb_max;
+  int basis_LOR = BasisType::ClosedUniform;
+  ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
+  mesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
+
+  // Discontinuous FE space for LOR
+  int dim = mesh.Dimension();
+  int LOR_order = 0;
+  DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
+  ParFiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
+
+  // Function for the LOR solution, doesn't need to be seen outside this functions
+  ParGridFunction u_LOR(&fes_LOR);
+
+  // Projecting from the HO space to the LOR space
+  GridTransfer *gt;
+  gt = new L2ProjectionGridTransfer(fes, fes_LOR);
+  const Operator &R = gt->ForwardOperator();
+  R.Mult(u_HO, u_LOR);
+
+  // Setup for projecting back to the HO space
+  int dim = mesh.Dimension();
+  const int NE = x.FESpace()->GetNE();
+
+  int ndofs = (order + 1);
+  if (dim == 2)
+    ndofs *= (order + 1);
+  if (dim == 3)
+    ndofs *= (order + 1) * (order + 1);
+
+  auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
+  const FiniteElement *fe = u_HO.FESpace()->GetFE(0);
+  const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
+  // Store important data in emat
+  // It's stored such that emat[dof1 + height*(dof2 + elem*width)]
+  Vector emat(ndofs * ndofs * NE);
+
+  MassIntegrator mass_int(&ir);
+  mass_int.AssembleEA(fes, emat, false);
+
+  Mesh *mesh_temp_LOR = fes_LOR.GetMesh();
+  ParGridFunction x_LOR(mesh_temp_LOR->GetNodes()->FESpace());
+  mesh_temp_LOR->GetNodes(x_LOR);
+
+  int subcell_num;
+  if (dim == 2) {
+    subcell_num = lref * lref;
+  } else if (dim == 3) {
+    subcell_num = lref * lref * lref;
+  }
+
+  const IntegrationRule &ir_LOR = MassIntegrator::GetRule(*fe, *fe, *Tr);
+  const int nqp_LOR = ir_LOR.GetNPoints();
+  GeometricFactors geom_LOR(x_LOR, ir_LOR, GeometricFactors::DETERMINANTS);
+
+  Vector m_rhs(ndofs);
+  Vector ip_trans(dim + 1);
+
+  // Declarations for the FCT Function
+  Vector x_FCT(ndofs);
+  x_FCT = 1.0;
+  double y_min = -std::numeric_limits<double>::max();
+  double y_max = std::numeric_limits<double>::max();
+  Vector xy(ndofs);
+
+
+  // Integration loop for the LOR projection
+  for (int k = 0; k < NE; k++) {
+    m_rhs = 0.0;
+    for (int i = 0; i < ndofs; i++) {
+      for (int s = 0; s < subcell_num; s++) {
+        IntegrationRule my_ir = ir_LOR;
+        for (int q = 0; q < nqp_LOR; q++) {
+          IntegrationPoint ip_LOR = ir_LOR.IntPoint(q);
+          NodeShift(ip_LOR, s, ip_trans, dim);
+          if (dim == 2) {
+            ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
+          } else if (dim == 3) {
+            ip_LOR.Set(ip_trans(0), ip_trans(1), ip_trans(2), ip_LOR.weight);
+          }
+
+          Vector shape(ndofs);
+          fe->CalcShape(ip_LOR, shape);
+          m_rhs(i) +=
+              my_ir[q].weight *
+              geom_LOR.detJ(k * subcell_num * nqp_LOR + s * nqp_LOR + q) *
+              u_LOR(k * subcell_num + s) * shape(i);
+        }
+      }
+    }
+
+    // Handle the mass matrix for the linear solve for each element
+    DenseMatrix M(ndofs, ndofs);
+    for (int j = 0; j < ndofs; j++) {
+      for (int i = 0; i < ndofs; i++) {
+        M(j, i) = emat(i + ndofs * (j + ndofs * k));
+      }
+    }
+
+    DenseMatrixInverse M_inv(M);
+    DenseMatrix M_temp;
+    M_inv.Factor();
+    M_inv.GetInverseMatrix(M_temp);
+
+    FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
+
+    for (int i = 0; i < xy.Size(); i++) {
+      sol_vec(i + k * ndofs) = xy(i);
+    }
+  }
+}
+
+
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
 {
    const FiniteElement *el_trace =

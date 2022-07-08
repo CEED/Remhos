@@ -46,7 +46,7 @@ enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
                           NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased, MassBasedLOR};
+                         ResDist, ResDistSubcell, MassBased};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::MassBasedLOR;
+   LOSolverType lo_type           = LOSolverType::MassBased;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
@@ -281,7 +281,7 @@ int main(int argc, char *argv[])
    // Refine the mesh further in parallel to increase the resolution.
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
-   
+
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
    MPI_Comm comm = pmesh.GetComm();
    const int NE  = pmesh.GetNE();
@@ -309,7 +309,7 @@ int main(int argc, char *argv[])
    const bool periodic = pmesh.GetNodes() != NULL &&
                          dynamic_cast<const L2_FECollection *>
                          (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
-   pmesh.SetCurvature(mesh_order, periodic);   
+   pmesh.SetCurvature(mesh_order, periodic);
 
    FiniteElementCollection *mesh_fec;
    if (periodic)
@@ -350,7 +350,7 @@ int main(int argc, char *argv[])
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
    }
-   
+
    // Mesh velocity.
    // If remap is on, obtain the mesh velocity by moving the mesh to the final
    // mesh positions, and taking the displacement vector.
@@ -391,7 +391,7 @@ int main(int argc, char *argv[])
    int basis_LOR = BasisType::ClosedUniform;
    ParMesh pmesh_LOR = ParMesh::MakeRefined(pmesh, lref, basis_LOR);
    //pmesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
-   
+
    // Check if the input LOR mesh is periodic.
    /*
    const bool periodic_LOR = pmesh_LOR.GetNodes() != NULL &&
@@ -399,11 +399,11 @@ int main(int argc, char *argv[])
                             (pmesh_LOR.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh_LOR.SetCurvature(mesh_order, periodic_LOR);
    */
-   
+
    // Discontinuous FE space for LOR
    int LOR_order = 0;
    DG_FECollection fec_LOR(LOR_order, dim, btype);
-   ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);   
+   ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);
 
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
@@ -455,7 +455,7 @@ int main(int argc, char *argv[])
    // discretization.
    ParBilinearForm m(&pfes);
    m.AddDomainIntegrator(new MassIntegrator);
-   
+
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
@@ -801,14 +801,14 @@ int main(int argc, char *argv[])
                   "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
                                    (exec_mode == 1) ? &v_gf : nullptr);
-   }
+   }/*
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
      MFEM_VERIFY(ho_solver != nullptr,
 		 "Mass Based LOR solver requires a choice of a HO solver.");
-     lo_solver = new MassBasedAvgLOR(pfes, pfes_LOR, *ho_solver,
+     lo_solver = new MassBasedAvgLOR(pfes, *ho_solver,
 				     (exec_mode == 1) ? &v_gf : nullptr);
-   }
+   }*/
 
    // Setup of the monolithic solver (if any).
    MonolithicSolver *mono_solver = NULL;

@@ -102,27 +102,39 @@ public:
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
-  
+
 // Low-Order Refined Solver.
 class MassBasedAvgLOR : public LOSolver
 {
 protected:
   HOSolver &ho_solver;
   const GridFunction *mesh_v;
-  
-public:
-  MassBasedAvgLOR(ParFiniteElementSpace &space,
-		  ParFiniteElementSpace &space_LOR,
-		  HOSolver &hos,
-		  const GridFunction *mesh_vel)
-    : LOSolver(space), ho_solver(hos) { }
-  
-  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 
-  //virtual void CalcLORSolution(const Vector &u, Vector &u_LOR) const;
+public:
+  MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
+		  const GridFunction *mesh_vel)
+    : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+
+  virtual void CalculateLORProjection(const ParGridFunction &x,
+                                      const ParGridFunction &u_HO,
+                                      const ParFiniteElementSpace &fes,
+                                      const int &order, const int &lref,
+                                      ParMesh &mesh,
+                                      Vector &sol_vec) const;
+
+  virtual void FCT_Project(DenseMatrix &M,
+                           DenseMatrixInverse &M_inv,
+                           Vector &m, Vector &x, double y_min,
+                           double y_max, Vector &xy) const;
+
+  virtual void NodeShift(const IntegrationPoint &ip,
+                         const int &s, Vector &ip_trans,
+                         const int &dim) const;
+
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
-  
-  
+
+
 //PA based Residual Distribution
 class PAResidualDistribution : public ResidualDistribution
 {
