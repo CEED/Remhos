@@ -27,13 +27,13 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
-   ParFiniteElementSpace &pfes_LOR;
+  //ParFiniteElementSpace &pfes_LOR;
   //ParGridFunction &u_LOR; // idk if this belongs here
   //GridTransfer *gt;
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:
-   LOSolver(ParFiniteElementSpace &space) : pfes(space),pfes_LOR(space) { }
+   LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
    virtual ~LOSolver() { }
 
@@ -115,11 +115,11 @@ public:
 		  const GridFunction *mesh_vel)
     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
 
-  virtual void CalculateLORProjection(const ParGridFunction &x,
+  virtual void CalculateLORProjection(const GridFunction &x,
                                       const ParGridFunction &u_HO,
                                       const ParFiniteElementSpace &fes,
                                       const int &order, const int &lref,
-                                      ParMesh &mesh,
+                                      Mesh &mesh,
                                       Vector &sol_vec) const;
 
   virtual void FCT_Project(DenseMatrix &M,

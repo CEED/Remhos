@@ -46,7 +46,7 @@ enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
                           NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased, MassBasedLOR};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::MassBased;
+   LOSolverType lo_type           = LOSolverType::MassBasedLOR;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
@@ -164,7 +164,6 @@ int main(int argc, char *argv[])
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
-   int lref = 2;
 
    int precision = 8;
    cout.precision(precision);
@@ -196,8 +195,7 @@ int main(int argc, char *argv[])
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
                   "                  4 - Subcell Residual Distribution,\n\t"
-                  "                  5 - Mass-Based Element Average.\n\t"
-		  "                  6 - Mass-Based Element LOR Average");
+                  "                  5 - Mass-Based Element Average.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -243,7 +241,6 @@ int main(int argc, char *argv[])
                   "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
-   args.AddOption(&lref, "-lref", "--lor-ref-level", "LOR refinement level.");
    args.Parse();
    if (!args.Good())
    {
@@ -281,7 +278,6 @@ int main(int argc, char *argv[])
    // Refine the mesh further in parallel to increase the resolution.
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
-
    for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
    MPI_Comm comm = pmesh.GetComm();
    const int NE  = pmesh.GetNE();
@@ -386,24 +382,6 @@ int main(int argc, char *argv[])
    const int btype = BasisType::Positive;
    DG_FECollection fec(order, dim, btype);
    ParFiniteElementSpace pfes(&pmesh, &fec);
-
-   // Creating all the finite element spaces and structures
-   int basis_LOR = BasisType::ClosedUniform;
-   ParMesh pmesh_LOR = ParMesh::MakeRefined(pmesh, lref, basis_LOR);
-   //pmesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
-
-   // Check if the input LOR mesh is periodic.
-   /*
-   const bool periodic_LOR = pmesh_LOR.GetNodes() != NULL &&
-                             dynamic_cast<const L2_FECollection *>
-                            (pmesh_LOR.GetNodes()->FESpace()->FEColl()) != NULL;
-   pmesh_LOR.SetCurvature(mesh_order, periodic_LOR);
-   */
-
-   // Discontinuous FE space for LOR
-   int LOR_order = 0;
-   DG_FECollection fec_LOR(LOR_order, dim, btype);
-   ParFiniteElementSpace pfes_LOR(&pmesh_LOR, &fec_LOR);
 
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
@@ -685,9 +663,6 @@ int main(int argc, char *argv[])
    // Primary scalar field is u.
    ParGridFunction u(&pfes);
    u.MakeRef(&pfes, S, offset[0]);
-   //Primary scalar field for the LOR is u_LOR
-   ParGridFunction u_LOR(&pfes_LOR);
-   u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
@@ -801,14 +776,15 @@ int main(int argc, char *argv[])
                   "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
                                    (exec_mode == 1) ? &v_gf : nullptr);
-   }/*
+   }
+
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
-     MFEM_VERIFY(ho_solver != nullptr,
-		 "Mass Based LOR solver requires a choice of a HO solver.");
-     lo_solver = new MassBasedAvgLOR(pfes, *ho_solver,
-				     (exec_mode == 1) ? &v_gf : nullptr);
-   }*/
+      MFEM_VERIFY(ho_solver != nullptr,
+                  "Mass-Based-LOR LO solver requires a choice of a HO solver.");
+      lo_solver = new MassBasedAvgLOR(pfes, *ho_solver,
+                                      (exec_mode == 1) ? &v_gf : nullptr);
+   }
 
    // Setup of the monolithic solver (if any).
    MonolithicSolver *mono_solver = NULL;
@@ -1150,13 +1126,6 @@ int main(int argc, char *argv[])
       ofstream sltn("sltn_final.gf");
       sltn.precision(precision);
       u.SaveAsOne(sltn);
-      // Printing the LOR solution
-      ofstream meshLOR("meshLOR_final.mesh");
-      meshLOR.precision(precision);
-      pmesh_LOR.PrintAsOne(meshLOR);
-      ofstream sltnLOR("sltnLOR_final.gf");
-      sltnLOR.precision(precision);
-      u_LOR.SaveAsOne(sltnLOR);
    }
 
    // Check for mass conservation.
@@ -1291,7 +1260,6 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
-//test
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
@@ -1366,7 +1334,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector u, d_u, u_LOR;
+   Vector u, d_u;
    Vector* xptr = const_cast<Vector*>(&X);
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
