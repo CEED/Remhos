@@ -18,6 +18,7 @@
 #define MFEM_REMHOS_LO
 
 #include "mfem.hpp"
+#include "remhos_tools.hpp"
 
 namespace mfem
 {
@@ -119,7 +120,7 @@ public:
                                       const ParGridFunction &u_HO,
                                       const ParFiniteElementSpace &fes,
                                       const int &order, const int &lref,
-                                      Mesh &mesh,
+                                      Mesh &mesh, DofInfo &dofs,
                                       Vector &sol_vec) const;
 
   virtual void FCT_Project(DenseMatrix &M,

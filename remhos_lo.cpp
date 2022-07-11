@@ -306,18 +306,6 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
-   //ParGridFunction u_LOR(&pfes_LOR);
-   //u_LOR.MakeRef(&pfes_LOR, S, offset[0]);
-
-
-   //GridTransfer *gt;
-   //gt = new L2ProjectionGridTransfer(pfes, pfes_LOR);
-
-  // const Operator &R = gt->ForwardOperator();
-
-   //gt->ForwardOperator().Mult(u, u_LOR);
-   //cout << "R multiplication has happened" << endl;
-
   Mesh *mesh_temp = pfes.GetMesh();
   GridFunction x(mesh_temp->GetNodes()->FESpace());
 
@@ -334,6 +322,11 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   const int lref = 2;
   const int order = pfes.GetOrder(0);
 
+  // Dofinfo stuff
+  int bounds_type = 0;
+  DofInfo dofs(pfes, bounds_type);
+  dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+
 
   //Step 1 calculate LOR solution
 
@@ -347,6 +340,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
                          pfes,
                          order, lref,
                          *mesh_temp,
+                         dofs,
                          sol_vec);
 
 
@@ -536,13 +530,13 @@ void MassBasedAvgLOR::CalculateLORProjection(const GridFunction &x,
                                              const ParGridFunction &u_HO,
                                              const ParFiniteElementSpace &fes,
                                              const int &order, const int &lref,
-                                             Mesh &mesh,
+                                             Mesh &mesh, DofInfo &dofs,
                                              Vector &sol_vec) const
 {
   // creating the LOR mesh
   Vector bb_min, bb_max;
   int basis_LOR = BasisType::ClosedUniform;
- Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
+  Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
   mesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
 
   // Discontinuous FE space for LOR
@@ -602,14 +596,14 @@ void MassBasedAvgLOR::CalculateLORProjection(const GridFunction &x,
   // Declarations for the FCT Function
   Vector x_FCT(ndofs);
   x_FCT = 1.0;
-  double y_min = -std::numeric_limits<double>::max();
-  double y_max = std::numeric_limits<double>::max();
   Vector xy(ndofs);
 
 
   // Integration loop for the LOR projection
   for (int k = 0; k < NE; k++) {
     m_rhs = 0.0;
+    double y_min = dofs.xe_min(k);
+    double y_max = dofs.xe_max(k);
     for (int i = 0; i < ndofs; i++) {
       for (int s = 0; s < subcell_num; s++) {
         IntegrationRule my_ir = ir_LOR;
