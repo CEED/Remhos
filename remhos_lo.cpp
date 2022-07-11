@@ -323,10 +323,28 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   const int order = pfes.GetOrder(0);
 
   // Dofinfo stuff
-  int bounds_type = 0;
+  int bounds_type = 1;
   DofInfo dofs(pfes, bounds_type);
   dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
 
+  //Need this part to look at neighbors...
+  //Actually compute the bounds.... 
+  dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+  //Actually compute xe_min/xe_max
+  const int NE =  pfes.GetMesh()->GetNE();
+  for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
+
+    const int n_dof = dofs.xi_min.Size()/NE;
+    double my_min = std::numeric_limits<double>::infinity();
+    double my_max = -std::numeric_limits<double>::infinity();
+    for(int i = 0; i<n_dof; ++i) {
+      my_min = fmin(my_min, dofs.xi_min(i + n_dof*e));
+      my_max = fmax(my_max, dofs.xi_max(i + n_dof*e));
+    }
+    dofs.xe_max(e) = my_max;
+    dofs.xe_min(e) = my_min;
+  }
 
   //Step 1 calculate LOR solution
 
@@ -344,7 +362,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
                          sol_vec);
 
 
-  const int NE = mesh_temp->GetNE();
+  //const int NE = mesh_temp->GetNE();
   const int ndofs = u.Size() / NE;
   for (int k = 0; k < NE; k++)
   {
@@ -388,10 +406,16 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 
   const double y_avg = m.Sum() / dMLX;
 
-  if (!(y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12)) {
-    std::cout << "Average is out of bounds: "
-              << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
-              << " " << y_avg << " " << y_max << std::endl;
+  if ((y_min > y_avg + 1e-12)) {
+    std::cout << "Bottom - Average is out of bounds: "
+    << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
+    << " " << y_avg << std::endl;
+  }
+
+  if ((y_avg > y_max + 1e-12)) {
+    std::cout << "Top - Average is out of bounds: "
+              << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " <<
+      y_avg << " " << y_max << std::endl;
   }
 
   Vector z(s);
@@ -639,6 +663,13 @@ void MassBasedAvgLOR::CalculateLORProjection(const GridFunction &x,
     M_inv.Factor();
     M_inv.GetInverseMatrix(M_temp);
 
+    //Ay = m
+
+    //m = int{u(x) * phi(x)}
+    //y = dofs of ho space
+    //A is Mass matrix from ho space
+    
+    
     FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
 
     for (int i = 0; i < xy.Size(); i++) {

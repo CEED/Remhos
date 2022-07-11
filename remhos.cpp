@@ -1457,6 +1457,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
 {
    if (dt_control == TimeStepControl::FixedTimeStep) { return; }
 
+   std::cout<<"AdvectionOperator::UpdateTimeStepEstimate"<<std::endl;
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
    const double eps = 1e-12;
