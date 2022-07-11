@@ -334,6 +334,14 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   const int lref = 2;
   const int order = pfes.GetOrder(0);
 
+
+  //Step 1 calculate LOR solution
+
+  //Step 2 make sure that subcell solution is within bounds
+  //If not within bounds set dt to a smaller value and recalc u_HO_new
+
+  //Step 3 complete sol_vec (call fct project)
+
   CalculateLORProjection(x,
                          u_HO_new,
                          pfes,

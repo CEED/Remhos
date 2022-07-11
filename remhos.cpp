@@ -1359,6 +1359,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       if (dt_control == TimeStepControl::LOBoundsError)
       {
          UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+
+         //We need a version of this for the LOR refine solution
+         //make sure subcells are within bounds of of dofs.xe_min, dofs.xe_max
       }
    }
    else if (lo_solver)
