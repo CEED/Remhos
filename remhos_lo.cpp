@@ -514,12 +514,11 @@ void MassBasedAvgLOR::CalculateLORProjection(const ParGridFunction &x,
 
   // Projecting from the HO space to the LOR space
   GridTransfer *gt;
-  gt = new L2ProjectionGridTransfer(fes, fes_LOR);
+  gt = new L2ProjectionGridTransfer(const_cast<ParFiniteElementSpace &>(fes), fes_LOR);
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
 
   // Setup for projecting back to the HO space
-  int dim = mesh.Dimension();
   const int NE = x.FESpace()->GetNE();
 
   int ndofs = (order + 1);
@@ -538,8 +537,8 @@ void MassBasedAvgLOR::CalculateLORProjection(const ParGridFunction &x,
   MassIntegrator mass_int(&ir);
   mass_int.AssembleEA(fes, emat, false);
 
-  Mesh *mesh_temp_LOR = fes_LOR.GetMesh();
-  ParGridFunction x_LOR(mesh_temp_LOR->GetNodes()->FESpace());
+  ParMesh *mesh_temp_LOR = fes_LOR.GetParMesh();
+  ParGridFunction x_LOR(mesh_temp_LOR->GetNodes()->ParFESpace());
   mesh_temp_LOR->GetNodes(x_LOR);
 
   int subcell_num;
