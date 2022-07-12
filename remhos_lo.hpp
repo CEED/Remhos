@@ -116,13 +116,6 @@ public:
 		  const GridFunction *mesh_vel)
     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
 
-  virtual void CalculateLORProjection(const GridFunction &x,
-                                      const ParGridFunction &u_HO,
-                                      const ParFiniteElementSpace &fes,
-                                      const int &order, const int &lref,
-                                      Mesh &mesh, DofInfo &dofs,
-                                      Vector &sol_vec) const;
-
   virtual void FCT_Project(DenseMatrix &M,
                            DenseMatrixInverse &M_inv,
                            Vector &m, Vector &x, double y_min,
@@ -134,19 +127,17 @@ public:
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 
-  virtual void CalcLORSolution(const GridFunction &x,
-                               const ParGridFunction &u_HO,
+  virtual void CalcLORSolution(const ParGridFunction &u_HO,
                                const ParFiniteElementSpace &fes,
                                const int &order, const int &lref,
-                               Mesh &mesh, DofInfo &dofs,
-                               Vector &sol_vec) const;
+                               Mesh &mesh, Vector &u_LOR_vec) const;
 
   virtual void CalcLORProjection(const GridFunction &x,
-                                               const ParGridFunction &u_HO,
-                                               const ParFiniteElementSpace &fes,
-                                               const int &order, const int &lref,
-                                               Mesh &mesh, DofInfo &dofs,
-                                               Vector &sol_vec, Vector &sol_vec_u) const;
+                                 const ParGridFunction &u_HO,
+                                 const ParFiniteElementSpace &fes,
+                                 const int &order, const int &lref,
+                                 Mesh &mesh, DofInfo &dofs,
+                                 Vector &u_LOR_vec, Vector &u_Proj_vec) const;
 
 };
 

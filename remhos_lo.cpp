@@ -306,19 +306,32 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
+  // Mesh info
   Mesh *mesh = pfes.GetMesh();
+  int dim = mesh->Dimension();
   GridFunction x(mesh->GetNodes()->FESpace());
+
+  //Number of subcells
+  const int lref = 2;
+  int subcell_num;
+  if (dim == 2) {
+    subcell_num = lref * lref;
+  } else if (dim == 3) {
+    subcell_num = lref * lref * lref;
+  }
 
   //u_new = u + dt * du_HO;
   Vector du_HO(u.Size());
-  Vector sol_vec(4 * u.Size());
+  Vector u_LOR_vec(subcell_num * u.Size());
+  Vector u_Proj_vec(u); u_Proj_vec = 0.0;
   ParGridFunction u_HO_new(&pfes);
   ho_solver.CalcHOSolution(u, du_HO);
   add(1.0, u, dt, du_HO, u_HO_new);
 
-  //Number of subcells
-  const int lref = 2;
+  // Some useful constants
   const int order = pfes.GetOrder(0);
+  const int NE =  pfes.GetMesh()->GetNE();
+  const int ndofs = u.Size() / NE;
 
   // Dofinfo stuff
   int bounds_type = 1;
@@ -330,9 +343,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
   //Actually compute xe_min/xe_max
-  const int NE =  pfes.GetMesh()->GetNE();
   for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
-
     const int n_dof = dofs.xi_min.Size()/NE;
     double my_min = std::numeric_limits<double>::infinity();
     double my_max = -std::numeric_limits<double>::infinity();
@@ -344,99 +355,45 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     dofs.xe_min(e) = my_min;
   }
 
-  CalcLORSolution(x,
-                  u_HO_new,
-                  pfes,
-                  order, lref,
-                  *mesh, dofs,
-                  sol_vec);
+  // Here we calculate the low order refined solution
+  CalcLORSolution(u_HO_new, pfes, order, lref, *mesh, u_LOR_vec);
 
-  int count = 0;
-
+  // This is a check for bounds preservatoin
+  // This assumes that the timestep is fixed
   for (int k = 0; k < NE; k++) {
     for (int s = 0; s < 4; s++) {
-      if (sol_vec(s + 4 * k) > dofs.xe_max(k) || sol_vec(s + 4 * k) < dofs.xe_min(k)) {
-        count++;
-        cout << "Macro cell minimum = " << dofs.xe_min(k) << endl;
-        cout << "Micro cell average = " << sol_vec(s + 4 * k) << endl;
-        cout << "Macro cell maximum = " << dofs.xe_max(k) << endl;
-        cout << endl;
+      if (u_LOR_vec(s + 4 * k) - 1e15 > dofs.xe_max(k) ||
+          u_LOR_vec(s + 4 * k) + 1e-15 < dofs.xe_min(k)) {
+        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
+        break;
       }
     }
   }
-  cout << "count for u_LOR = " << count << endl;
 
-  Vector sol_vec_u(u); sol_vec_u = 0.0;
+  // Here wa calculate the projected high order solutions
+  // This is what will be merged with the HO solution in Remhos
+  CalcLORProjection(x, u_HO_new, pfes, order, lref,
+                    *mesh, dofs, u_LOR_vec, u_Proj_vec);
 
-  CalcLORProjection(x,
-                    u_HO_new,
-                    pfes,
-                    order, lref,
-                    *mesh, dofs,
-                    sol_vec, sol_vec_u);
-
-  DofInfo dofs_Proj(pfes, bounds_type);
-  dofs.ComputeElementsMinMax(sol_vec_u, dofs_Proj.xe_min, dofs_Proj.xe_max, NULL, NULL);
-
-  //Need this part to look at neighbors...
-  //Actually compute the bounds....
-  dofs.ComputeBounds(dofs_Proj.xe_min, dofs_Proj.xe_max, dofs_Proj.xi_min, dofs_Proj.xi_max);
-
-  //Actually compute xe_min/xe_max
-  for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
-
-    const int n_dof = dofs_Proj.xi_min.Size()/NE;
-    double my_min = std::numeric_limits<double>::infinity();
-    double my_max = -std::numeric_limits<double>::infinity();
-    for(int i = 0; i<n_dof; ++i) {
-      my_min = fmin(my_min, dofs_Proj.xi_min(i + n_dof*e));
-      my_max = fmax(my_max, dofs_Proj.xi_max(i + n_dof*e));
-    }
-    dofs_Proj.xe_max(e) = my_max;
-    dofs_Proj.xe_min(e) = my_min;
-  }
-
-  count = 0;
+  // Another bounds preservation check
   for (int k = 0; k < NE; k++) {
-    if (dofs_Proj.xe_min(k) < dofs.xe_min(k) || dofs_Proj.xe_max(k) > dofs.xe_max(k)) {
-      count++;
-      /*
-      cout << "Macro cell minimum = " << dofs.xe_min(k) << endl;
-      cout << "Solution cell minimum = " << dofs_Proj.xe_min(k) << endl;
-      cout << "Solution cell maximum = " << dofs_Proj.xe_max(k) << endl;
-      cout << "Macro cell maximum = " << dofs.xe_max(k) << endl;
-      cout << endl;
-      */
+    for (int i = 0; i < ndofs; i++) {
+      if (u_Proj_vec(i + k * ndofs) + 1e-15 < dofs.xe_min(k) ||
+          u_Proj_vec(i + k * ndofs) - 1e15 > dofs.xe_max(k)) {
+        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
+        break;
+      }
     }
   }
-  cout << "count for Projection = " << count << endl;
 
-  //Step 1 calculate LOR solution
-
-  //Step 2 make sure that subcell solution is within bounds
-  //If not within bounds set dt to a smaller value and recalc u_HO_new
-
-  //Step 3 complete sol_vec (call fct project)
-
-/*
-  CalculateLORProjection(x,
-                         u_HO_new,
-                         pfes,
-                         order, lref,
-                         *mesh_temp,
-                         dofs,
-                         sol_vec);
-
-
-  //const int NE = mesh_temp->GetNE();
-  const int ndofs = u.Size() / NE;
+  // Calculating du
   for (int k = 0; k < NE; k++)
   {
     for (int i = 0; i < ndofs; i++)
-      {
-        du(k*ndofs + i) = (sol_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
-      }
-  } */
+    {
+      du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
+    }
+  }
 }
 
 void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
@@ -616,140 +573,10 @@ void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
   ip_trans = temp;
 }
 
-void MassBasedAvgLOR::CalculateLORProjection(const GridFunction &x,
-                                             const ParGridFunction &u_HO,
-                                             const ParFiniteElementSpace &fes,
-                                             const int &order, const int &lref,
-                                             Mesh &mesh, DofInfo &dofs,
-                                             Vector &sol_vec) const
-{
-  // creating the LOR mesh
-  Vector bb_min, bb_max;
-  int basis_LOR = BasisType::ClosedUniform;
-  Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
-  mesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
-
-  // Discontinuous FE space for LOR
-  int dim = mesh.Dimension();
-  int LOR_order = 0;
-  DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
-  FiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
-
-  // Function for the LOR solution, doesn't need to be seen outside this functions
-  GridFunction u_LOR(&fes_LOR);
-
-  // Projecting from the HO space to the LOR space
-  GridTransfer *gt;
-  FiniteElementSpace fes_ho = fes;
-  //gt = new L2ProjectionGridTransfer(const_cast<ParFiniteElementSpace &>(fes), fes_LOR);
-  gt = new L2ProjectionGridTransfer(fes_ho, fes_LOR);
-  const Operator &R = gt->ForwardOperator();
-  R.Mult(u_HO, u_LOR);
-
-  // Setup for projecting back to the HO space
-  const int NE = x.FESpace()->GetNE();
-
-  int ndofs = (order + 1);
-  if (dim == 2)
-    ndofs *= (order + 1);
-  if (dim == 3)
-    ndofs *= (order + 1) * (order + 1);
-
-  auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
-  const FiniteElement *fe = u_HO.FESpace()->GetFE(0);
-  const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
-  // Store important data in emat
-  // It's stored such that emat[dof1 + height*(dof2 + elem*width)]
-  Vector emat(ndofs * ndofs * NE);
-
-  MassIntegrator mass_int(&ir);
-  mass_int.AssembleEA(fes, emat, false);
-
-  Mesh *mesh_temp_LOR = fes_LOR.GetMesh();
-  GridFunction x_LOR(mesh_temp_LOR->GetNodes()->FESpace());
-  mesh_temp_LOR->GetNodes(x_LOR);
-
-  int subcell_num;
-  if (dim == 2) {
-    subcell_num = lref * lref;
-  } else if (dim == 3) {
-    subcell_num = lref * lref * lref;
-  }
-
-  const IntegrationRule &ir_LOR = MassIntegrator::GetRule(*fe, *fe, *Tr);
-  const int nqp_LOR = ir_LOR.GetNPoints();
-  GeometricFactors geom_LOR(x_LOR, ir_LOR, GeometricFactors::DETERMINANTS);
-
-  Vector m_rhs(ndofs);
-  Vector ip_trans(dim + 1);
-
-  // Declarations for the FCT Function
-  Vector x_FCT(ndofs);
-  x_FCT = 1.0;
-  Vector xy(ndofs);
-
-
-  // Integration loop for the LOR projection
-  for (int k = 0; k < NE; k++) {
-    m_rhs = 0.0;
-    double y_min = dofs.xe_min(k);
-    double y_max = dofs.xe_max(k);
-    for (int i = 0; i < ndofs; i++) {
-      for (int s = 0; s < subcell_num; s++) {
-        IntegrationRule my_ir = ir_LOR;
-        for (int q = 0; q < nqp_LOR; q++) {
-          IntegrationPoint ip_LOR = ir_LOR.IntPoint(q);
-          NodeShift(ip_LOR, s, ip_trans, dim);
-          if (dim == 2) {
-            ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
-          } else if (dim == 3) {
-            ip_LOR.Set(ip_trans(0), ip_trans(1), ip_trans(2), ip_LOR.weight);
-          }
-
-          Vector shape(ndofs);
-          fe->CalcShape(ip_LOR, shape);
-          m_rhs(i) +=
-              my_ir[q].weight *
-              geom_LOR.detJ(k * subcell_num * nqp_LOR + s * nqp_LOR + q) *
-              u_LOR(k * subcell_num + s) * shape(i);
-        }
-      }
-    }
-
-    // Handle the mass matrix for the linear solve for each element
-    DenseMatrix M(ndofs, ndofs);
-    for (int j = 0; j < ndofs; j++) {
-      for (int i = 0; i < ndofs; i++) {
-        M(j, i) = emat(i + ndofs * (j + ndofs * k));
-      }
-    }
-
-    DenseMatrixInverse M_inv(M);
-    DenseMatrix M_temp;
-    M_inv.Factor();
-    M_inv.GetInverseMatrix(M_temp);
-
-    //Ay = m
-
-    //m = int{u(x) * phi(x)}
-    //y = dofs of ho space
-    //A is Mass matrix from ho space
-
-
-    FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
-
-    for (int i = 0; i < xy.Size(); i++) {
-      sol_vec(i + k * ndofs) = xy(i);
-    }
-  }
-}
-
-void MassBasedAvgLOR::CalcLORSolution(const GridFunction &x,
-                                      const ParGridFunction &u_HO,
+void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
                                       const ParFiniteElementSpace &fes,
                                       const int &order, const int &lref,
-                                      Mesh &mesh, DofInfo &dofs,
-                                      Vector &sol_vec) const
+                                      Mesh &mesh, Vector &u_LOR_vec) const
 {
   // creating the LOR mesh
   Vector bb_min, bb_max;
@@ -774,17 +601,18 @@ void MassBasedAvgLOR::CalcLORSolution(const GridFunction &x,
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
 
-  for (int i = 0; i < sol_vec.Size(); i++) {
-    sol_vec(i) = u_LOR(i);
+  for (int i = 0; i < u_LOR_vec.Size(); i++) {
+    u_LOR_vec(i) = u_LOR(i);
   }
 }
 
 void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
-                                             const ParGridFunction &u_HO,
-                                             const ParFiniteElementSpace &fes,
-                                             const int &order, const int &lref,
-                                             Mesh &mesh, DofInfo &dofs,
-                                             Vector &sol_vec, Vector &sol_vec_u) const
+                                        const ParGridFunction &u_HO,
+                                        const ParFiniteElementSpace &fes,
+                                        const int &order, const int &lref,
+                                        Mesh &mesh, DofInfo &dofs,
+                                        Vector &u_LOR_vec,
+                                        Vector &u_Proj_vec) const
 {
   Vector bb_min, bb_max;
   int basis_LOR = BasisType::ClosedUniform;
@@ -798,7 +626,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   FiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
 
   // Function for the LOR solution, doesn't need to be seen outside this functions
-  GridFunction u_LOR(&fes_LOR, sol_vec);
+  GridFunction u_LOR(&fes_LOR, u_LOR_vec);
 
   // Setup for projecting back to the HO space
   const int NE = x.FESpace()->GetNE();
@@ -893,7 +721,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
     FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
 
     for (int i = 0; i < xy.Size(); i++) {
-      sol_vec_u(i + k * ndofs) = xy(i);
+      u_Proj_vec(i + k * ndofs) = xy(i);
     }
   }
 }
