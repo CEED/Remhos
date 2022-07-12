@@ -1141,7 +1141,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
          //                decreases to 0 in the front (grad_u*v > 0).
          //                increases up to 2v in the tail (grad_u*v < 0).
          // max = i_val -> keep the same v.
-         v_new(d) = v(d) - (1.0 - pow(max / interface_val, trans_01_power)) *
+         v_new(d) = v(d) - 2.0 * (1.0 - pow(max / interface_val, trans_01_power)) *
                            v_magn * grad_dir(d);
       }
    }

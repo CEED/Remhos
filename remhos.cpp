@@ -1935,8 +1935,8 @@ double u0_function(const Vector &x)
             {
                if (problem_num == 18)
                {
-                  double rad = std::sqrt((x(0)-0.3) * (x(0)-0.3) +
-                                         (x(1)-0.3) * (x(1)-0.3));
+                  double rad = std::sqrt((x(0)-0.2) * (x(0)-0.2) +
+                                         (x(1)-0.2) * (x(1)-0.2));
                   return (rad <= 0.3) ? 1.0 : 0.0;
                }
                if (problem_num == 19)
