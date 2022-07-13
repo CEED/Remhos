@@ -364,9 +364,6 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // time stuff for mesh remapping
   add(mesh_pos, dt, mesh_v, mesh_pos);
-  if (submesh_pos) {
-     add(*submesh_pos, dt, submesh_vel, *submesh_pos);
-  }
 
   // Some useful constants
   const int order = pfes.GetOrder(0);
@@ -400,12 +397,16 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // This is a check for bounds preservatoin
   // This assumes that the timestep is fixed
+  double eps = 1e-9;
   for (int k = 0; k < NE; k++) {
     for (int s = 0; s < 4; s++) {
-      if (u_LOR_vec(s + 4 * k) - 1e15 > dofs.xe_max(k) ||
-          u_LOR_vec(s + 4 * k) + 1e-15 < dofs.xe_min(k)) {
+      if (u_LOR_vec(s + 4 * k) - eps >= dofs.xe_max(k) ||
+          u_LOR_vec(s + 4 * k) + eps <= dofs.xe_min(k)) {
         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-        break;
+        cout << "Lower Bound = " << dofs.xe_min(k) << endl;
+        cout << "u_LOR_vec(s + 4 * k) = " << u_LOR_vec(s + 4 * k) << endl;
+        cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+        exit(0);
       }
     }
   }
@@ -418,10 +419,13 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   // Another bounds preservation check
   for (int k = 0; k < NE; k++) {
     for (int i = 0; i < ndofs; i++) {
-      if (u_Proj_vec(i + k * ndofs) + 1e-15 < dofs.xe_min(k) ||
-          u_Proj_vec(i + k * ndofs) - 1e15 > dofs.xe_max(k)) {
+      if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
+          u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k)) {
         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-        break;
+        cout << "Lower Bound = " << dofs.xe_min(k) << endl;
+        cout << "u_Proj_vec(i + k * ndofs) = " << u_Proj_vec(i + k * ndofs) << endl;
+        cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+        exit(0);
       }
     }
   }
@@ -434,6 +438,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
     }
   }
+  add(mesh_pos, -dt, mesh_v, mesh_pos);
 }
 
 void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
