@@ -123,7 +123,11 @@ public:
       }
       dt_control = tsc;
    }
-   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
+   void SetDt(double _dt)
+   {
+      dt = _dt;
+      dt_est = std::numeric_limits<double>::infinity();
+   }
    double GetTimeStepEstimate() { return dt_est; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
@@ -152,6 +156,7 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
+   bool sharp = false;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -208,6 +213,8 @@ int main(int argc, char *argv[])
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
+   args.AddOption(&sharp, "-sharp", "--sharp", "-no-sharp", "--no-sharp",
+                  "Enable or disable profile sharpening.");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -357,8 +364,7 @@ int main(int argc, char *argv[])
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
-      VectorFunctionCoefficient vcoeff(dim, velocity_function);
-      v.ProjectCoefficient(vcoeff);
+      v.ProjectCoefficient(velocity);
 
       double t = 0.0;
       while (t < t_final)
@@ -367,7 +373,7 @@ int main(int argc, char *argv[])
          // Move the mesh nodes.
          x.Add(std::min(dt, t_final-t), v);
          // Update the node velocities.
-         v.ProjectCoefficient(vcoeff);
+         v.ProjectCoefficient(velocity);
       }
 
       // Pseudotime velocity.
@@ -376,6 +382,16 @@ int main(int argc, char *argv[])
       // Return the mesh to the initial configuration.
       x = x0;
    }
+
+   H1_FECollection lin_fec(1, dim);
+   ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec),
+                         lin_pfes_grad(&pmesh, &lin_fec, dim);
+   ParGridFunction u_max_bounds(&lin_pfes);
+   ParGridFunction u_max_bounds_grad_dir(&lin_pfes_grad);
+   u_max_bounds = 1.0;
+
+   ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
+   ParGridFunction v_new_vis(&lin_vec_pfes);
 
    // Define the discontinuous DG finite element space of the given
    // polynomial order on the refined mesh.
@@ -437,10 +453,19 @@ int main(int argc, char *argv[])
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
+   VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds,
+                                       u_max_bounds_grad_dir, 1.0, 0, false);
+   VelocityCoefficient v_new_coeff_rem(v_mesh_coeff, u_max_bounds,
+                                       u_max_bounds_grad_dir, 1.0, 1, false);
+
+   VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
+                                    u_max_bounds_grad_dir, 1.0, 1, true);
+
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
    if (exec_mode == 0)
    {
+      MFEM_VERIFY(sharp == false, "only remap tests now");
       k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
    }
@@ -452,10 +477,11 @@ int main(int argc, char *argv[])
 
    if (ho_type == HOSolverType::CG ||
        ho_type == HOSolverType::LocalInverse ||
-       fct_type == FCTSolverType::FluxBased)
+       fct_type == FCTSolverType::FluxBased || sharp == true)
    {
       if (exec_mode == 0)
       {
+         MFEM_VERIFY(sharp == false, "only remap tests now");
          DGTraceIntegrator *dgt_i = new DGTraceIntegrator(velocity, 1.0, -0.5);
          DGTraceIntegrator *dgt_b = new DGTraceIntegrator(velocity, 1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
@@ -467,6 +493,14 @@ int main(int argc, char *argv[])
          auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+
+         if (sharp == true)
+         {
+            auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
+            auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
+            K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
+            K_HO.AddInteriorFaceIntegrator(dgt);
+         }
       }
 
       K_HO.KeepNbrBlock(true);
@@ -507,7 +541,7 @@ int main(int argc, char *argv[])
    k.Finalize(skip_zeros);
 
    // Store topological dof data.
-   DofInfo dofs(pfes, bounds_type);
+   DofInfo dof_info(pfes, bounds_type);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -653,7 +687,7 @@ int main(int argc, char *argv[])
    }
    else { subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
+   Assembly asmbl(dof_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
@@ -690,7 +724,7 @@ int main(int argc, char *argv[])
    if (smth_ind_type)
    {
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
+                                               pfes, u, dof_info);
    }
 
    // Setup of the high-order solver (if any).
@@ -714,15 +748,24 @@ int main(int argc, char *argv[])
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lo_smap = SparseMatrix_Build_smap(k.SpMat());
-      lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+      if (sharp == true)
+      {
+         lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep, false);
+      }
+      else
+      {
+         lo_smap = SparseMatrix_Build_smap(k.SpMat());
+         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+                                        lumpedM, asmbl, time_dep, true);
+      }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
       lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
       lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
-                                     lumpedM, asmbl, time_dep);
+                                     lumpedM, asmbl, time_dep, true);
    }
    else if (lo_type == LOSolverType::ResDist)
    {
@@ -782,8 +825,9 @@ int main(int argc, char *argv[])
    {
       MFEM_VERIFY(ho_solver != nullptr,
                   "Mass-Based-LOR LO solver requires a choice of a HO solver.");
-      lo_solver = new MassBasedAvgLOR(pfes, *ho_solver,
-                                      (exec_mode == 1) ? &v_gf : nullptr);
+      //lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
+      //                           (exec_mode == 1) ? &v_gf : nullptr, v_sub_gf);
+      lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub, v_gf, v_sub_gf);
    }
 
    // Setup of the monolithic solver (if any).
@@ -831,7 +875,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_s, vis_us;
+   socketstream sout, vis_b, vis_v_new, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -897,7 +941,7 @@ int main(int argc, char *argv[])
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
@@ -949,6 +993,21 @@ int main(int argc, char *argv[])
 #endif
       }
 
+      // needed for velocity modifications.
+      dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
+      // needed for velocity visualization.
+      if (sharp == true)
+      {
+         if (exec_mode == 0)
+         {
+            v_new_vis.ProjectCoefficient(v_new_coeff_adv);
+         }
+         else
+         {
+            v_new_vis.ProjectCoefficient(v_new_coeff_rem);
+         }
+      }
+
       Sold = S;
       ode_solver->Step(S, t, dt_real);
       ti++;
@@ -972,7 +1031,14 @@ int main(int argc, char *argv[])
             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
          }
-         else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
+         else if (dt_est > 1.25 * dt_real)
+         {
+            if (myid == 0)
+            {
+               cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+            }
+            dt *= 1.02;
+         }
       }
 
       // S has been modified, update the alias
@@ -1084,8 +1150,15 @@ int main(int argc, char *argv[])
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
-            VisualizeField(sout, vishost, visport, u, "Solution",
+            VisualizeField(sout, vishost, visport, u, "Solution u",
                            Wx, Wy, Ww, Wh);
+            VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
+                           Wx+400, Wy, Ww, Wh);
+            if (sharp == true)
+            {
+               VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Vel",
+                              Wx+800, Wy, Ww, Wh);
+            }
             if (product_sync)
             {
                // Recompute s = u_s / u.
@@ -1170,11 +1243,23 @@ int main(int argc, char *argv[])
       }
    }
 
-   // Compute errors, if the initial condition is equal to the final solution
-   if (problem_num == 4) // solid body rotation
+   ConstantCoefficient zero(0.0);
+   double norm_u = u.ComputeL2Error(zero);
+   if (myid == 0)
    {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
+   }
+
+   // Compute errors, if the initial condition is equal to the final solution
+   if (problem_num == 4 || problem_num == 18) // solid body rotation
+   {
+     double err_L1 = u.ComputeLpError(1., u0),
+            err_L2 = u.ComputeL2Error(u0);
+     if (myid == 0)
+     {
+        cout << "L1-error: " << err_L1 << endl
+             << "L2-error: " << err_L2 << endl;
+     }
    }
    else if (problem_num == 7)
    {
@@ -1335,7 +1420,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    X.Read(); Y.Read();
 
    Vector u, d_u;
-   Vector* xptr = const_cast<Vector*>(&X);
+   Vector *xptr = const_cast<Vector*>(&X);
+
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
    Vector du_HO(u.Size()), du_LO(u.Size());
@@ -1379,8 +1465,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // user only wants to run LO, this order will give him the LO solution.
    else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
    else { MFEM_ABORT("No solver was chosen."); }
-
-   d_u.SyncAliasMemory(Y);
 
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
@@ -1583,20 +1667,41 @@ void velocity_function(const Vector &x, Vector &v)
       case 15:
       case 16:
       case 17:
+      case 18:
+      case 19:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 
          // Map [-1,1] to [0,1].
          for (int d = 0; d < dim; d++) { X(d) = X(d) * 0.5 + 0.5; }
 
-         if (dim == 1) { MFEM_ABORT("Not implemented."); }
-         v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
-         v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
-         if (dim == 3)
+         if (dim == 1)
          {
-            v(0) *= cos(M_PI*X(2));
-            v(1) *= cos(M_PI*X(2));
-            v(2) = 0.0;
+           v(0) = sin(M_PI*X(0));
+        }
+        else
+        {
+           if (problem_num == 18)
+           {
+              v(0) = 0.25 * sin(M_PI*X(0));
+              v(1) = 0.25 * sin(M_PI*X(1));
+              return;
+           }
+           if (problem_num == 19)
+           {
+              v(0) =  0.25 * sin(M_PI*X(0)) * cos(M_PI*X(1));
+              v(1) = -0.25 * cos(M_PI*X(0)) * sin(M_PI*X(1));
+              return;
+           }
+
+           v(0) =  sin(M_PI*X(0)) * cos(M_PI*X(1));
+           v(1) = -cos(M_PI*X(0)) * sin(M_PI*X(1));
+           if (dim == 3)
+           {
+              v(0) *= cos(M_PI*X(2));
+              v(1) *= cos(M_PI*X(2));
+              v(2) = 0.0;
+           }
          }
          break;
       }
@@ -1681,7 +1786,7 @@ double ring(double rin, double rout, Vector c, Vector y)
    }
 }
 
-// Initial condition: lua function or hard-coded functions
+// Initial condition: hard-coded functions
 double u0_function(const Vector &x)
 {
    int dim = x.Size();
@@ -1833,6 +1938,31 @@ double u0_function(const Vector &x)
          double r = x.Norml2();
          double a = 0.5, b = 3.e-2, c = 0.1;
          return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
+      }
+      case 8:
+      case 9:
+      {
+         switch (dim)
+         {
+            case 1:
+               return (x(0) > 0.3 && x(0) < 0.7) ? 1.0 : 0.0;
+            case 2:
+            {
+               if (problem_num == 18)
+               {
+                  double rad = std::sqrt((x(0)-0.2) * (x(0)-0.2) +
+                                         (x(1)-0.2) * (x(1)-0.2));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
+               }
+               if (problem_num == 19)
+               {
+                  double rad = std::sqrt(x(0) * x(0) + x(1) * x(1));
+                  return (rad <= 0.3) ? 1.0 : 0.0;
+               }
+               return 0.0;
+            }
+            case 3: MFEM_ABORT("not setup"); return 0.0;
+         }
       }
    }
    return 0.0;

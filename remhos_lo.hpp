@@ -28,9 +28,6 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
-  //ParFiniteElementSpace &pfes_LOR;
-  //ParGridFunction &u_LOR; // idk if this belongs here
-  //GridTransfer *gt;
    double dt = -1.0; // usually not known at creation, updated later.
 
 public:
@@ -55,14 +52,15 @@ protected:
    const Array<int> &K_smap;
    const Vector &M_lumped;
    Assembly &assembly;
-   const bool update_D;
+   const bool update_D, lump_flux;
 
    void ComputeDiscreteUpwindMatrix() const;
+   void ApplyDiscreteUpwindMatrix(ParGridFunction &u, Vector &du) const;
 
 public:
    DiscreteUpwind(ParFiniteElementSpace &space, const SparseMatrix &adv,
                   const Array<int> &adv_smap, const Vector &Mlump,
-                  Assembly &asmbly, bool updateD);
+                  Assembly &asmbly, bool updateD, bool lumpFlux);
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
@@ -109,12 +107,20 @@ class MassBasedAvgLOR : public LOSolver
 {
 protected:
   HOSolver &ho_solver;
-  const GridFunction *mesh_v;
+  GridFunction &mesh_pos;
+  GridFunction *submesh_pos;
+  GridFunction &mesh_v;
+  GridFunction &submesh_vel;
+  Vector start_mesh_pos, start_submesh_pos;
 
 public:
   MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
-		  const GridFunction *mesh_vel)
-    : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+		              GridFunction &pos, GridFunction *sub_pos,
+                  GridFunction &mesh_vel, GridFunction &sub_vel)
+    : LOSolver(space), ho_solver(hos),
+      start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
+      mesh_pos(pos), submesh_pos(sub_pos),
+      mesh_v(mesh_vel), submesh_vel(sub_vel) { }
 
   virtual void FCT_Project(DenseMatrix &M,
                            DenseMatrixInverse &M_inv,
