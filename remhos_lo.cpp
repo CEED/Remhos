@@ -340,6 +340,7 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
   // Mesh info
+  pfes.GetMesh()->DeleteGeometricFactors();
   Mesh *mesh = pfes.GetMesh();
   int dim = mesh->Dimension();
   GridFunction x(mesh->GetNodes()->FESpace());
@@ -356,7 +357,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   //u_new = u + dt * du_HO;
   Vector du_HO(u.Size());
-  Vector u_LOR_vec(subcell_num * u.Size());
+  Vector u_LOR_vec(subcell_num * pfes.GetMesh()->GetNE());
   Vector u_Proj_vec(u); u_Proj_vec = 0.0;
   ParGridFunction u_HO_new(&pfes);
   ho_solver.CalcHOSolution(u, du_HO);
@@ -397,34 +398,42 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // This is a check for bounds preservatoin
   // This assumes that the timestep is fixed
-  double eps = 1e-9;
+  double eps = 1e-6;
+
+  //cout << "Size of u_LOR_vec = " << u_LOR_vec.Size() << endl;
+//  cout << "NE * subcell_num = " << NE * subcell_num << endl;
+//  cout << "Size of dofs.xe_max = " << dofs.xe_max.Size() << endl;
+/*
   for (int k = 0; k < NE; k++) {
-    for (int s = 0; s < 4; s++) {
-      if (u_LOR_vec(s + 4 * k) - eps >= dofs.xe_max(k) ||
-          u_LOR_vec(s + 4 * k) + eps <= dofs.xe_min(k)) {
+    for (int s = 0; s < subcell_num; s++) {
+      if (u_LOR_vec(s + subcell_num * k) - eps >= dofs.xe_max(k) ||
+          u_LOR_vec(s + subcell_num * k) + eps <= dofs.xe_min(k)) {
         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
         cout << "Lower Bound = " << dofs.xe_min(k) << endl;
-        cout << "u_LOR_vec(s + 4 * k) = " << u_LOR_vec(s + 4 * k) << endl;
+        cout << "u_LOR_vec(" << s + subcell_num * k << ") = "
+             << u_LOR_vec(s + subcell_num * k) << endl;
         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
-        exit(0);
+        //exit(0);
       }
     }
   }
-
+*/
   // Here wa calculate the projected high order solutions
   // This is what will be merged with the HO solution in Remhos
   CalcLORProjection(x, u_HO_new, pfes, order, lref,
                     *mesh, dofs, u_LOR_vec, u_Proj_vec);
 
   // Another bounds preservation check
+
   for (int k = 0; k < NE; k++) {
     for (int i = 0; i < ndofs; i++) {
       if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
           u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k)) {
-        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
         cout << "Lower Bound = " << dofs.xe_min(k) << endl;
-        cout << "u_Proj_vec(i + k * ndofs) = " << u_Proj_vec(i + k * ndofs) << endl;
+        cout << "u_Proj_vec(" << i + k * ndofs << ") = "
+             << u_Proj_vec(i + k * ndofs) << endl;
         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
         exit(0);
       }
     }
@@ -473,6 +482,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
   }
 
   const double y_avg = m.Sum() / dMLX;
+
 
   if ((y_min > y_avg + 1e-12)) {
     std::cout << "Bottom - Average is out of bounds: "
@@ -638,6 +648,10 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
   // Function for the LOR solution, doesn't need to be seen outside this functions
   GridFunction u_LOR(&fes_LOR);
 
+  ofstream meshLOR("meshLOR_final.mesh");
+  meshLOR.precision(8);
+  mesh_LOR.Print(meshLOR);
+
   // Projecting from the HO space to the LOR space
   GridTransfer *gt;
   FiniteElementSpace fes_ho = fes;
@@ -645,6 +659,11 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
   gt = new L2ProjectionGridTransfer(fes_ho, fes_LOR);
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
+  delete gt;
+
+  ofstream sltnLOR("sltn_LOR_final.gf");
+  sltnLOR.precision(8);
+  u_LOR.Save(sltnLOR);
 
   for (int i = 0; i < u_LOR_vec.Size(); i++) {
     u_LOR_vec(i) = u_LOR(i);
