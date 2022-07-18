@@ -682,6 +682,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   int basis_LOR = BasisType::ClosedUniform;
   Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
   mesh_LOR.GetBoundingBox(bb_min, bb_max, max(order, 1));
+  mesh_LOR.SetCurvature(3, 1);
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
@@ -703,12 +704,12 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
 
   auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
   const FiniteElement *fe = u_HO.FESpace()->GetFE(0);
-  const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
+  const IntegrationRule &ir_HO = MassIntegrator::GetRule(*fe, *fe, *Tr);
   // Store important data in emat
   // It's stored such that emat[dof1 + height*(dof2 + elem*width)]
   Vector emat(ndofs * ndofs * NE);
 
-  MassIntegrator mass_int(&ir);
+  MassIntegrator mass_int(&ir_HO);
   mass_int.AssembleEA(fes, emat, false);
 
   Mesh *mesh_temp_LOR = fes_LOR.GetMesh();
@@ -722,9 +723,8 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
     subcell_num = lref * lref * lref;
   }
 
-  const IntegrationRule &ir_LOR = MassIntegrator::GetRule(*fe, *fe, *Tr);
-  const int nqp_LOR = ir_LOR.GetNPoints();
-  GeometricFactors geom_LOR(x_LOR, ir_LOR, GeometricFactors::DETERMINANTS);
+  const int nqp_HO = ir_HO.GetNPoints();
+  GeometricFactors geom_LOR(x_LOR, ir_HO, GeometricFactors::DETERMINANTS);
 
   Vector m_rhs(ndofs);
   Vector ip_trans(dim + 1);
@@ -742,9 +742,9 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
     double y_max = dofs.xe_max(k);
     for (int i = 0; i < ndofs; i++) {
       for (int s = 0; s < subcell_num; s++) {
-        IntegrationRule my_ir = ir_LOR;
-        for (int q = 0; q < nqp_LOR; q++) {
-          IntegrationPoint ip_LOR = ir_LOR.IntPoint(q);
+        IntegrationRule my_ir = ir_HO;
+        for (int q = 0; q < nqp_HO; q++) {
+          IntegrationPoint ip_LOR = ir_HO.IntPoint(q);
           NodeShift(ip_LOR, s, ip_trans, dim);
           if (dim == 2) {
             ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
@@ -756,7 +756,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
           fe->CalcShape(ip_LOR, shape);
           m_rhs(i) +=
               my_ir[q].weight *
-              geom_LOR.detJ(k * subcell_num * nqp_LOR + s * nqp_LOR + q) *
+              geom_LOR.detJ(k * subcell_num * nqp_HO + s * nqp_HO + q) *
               u_LOR(k * subcell_num + s) * shape(i);
         }
       }
