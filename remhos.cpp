@@ -53,7 +53,7 @@ enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
-int problem_num;
+int problem_num = 18;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -148,19 +148,19 @@ int main(int argc, char *argv[])
    const char *mesh_file = "data/periodic-square.mesh";
    int rs_levels = 2;
    int rp_levels = 0;
-   int order = 3;
-   int mesh_order = 2;
+   int order = 2;
+   int mesh_order = 1;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
    LOSolverType lo_type           = LOSolverType::MassBasedLOR;
-   FCTSolverType fct_type         = FCTSolverType::None;
+   FCTSolverType fct_type         = FCTSolverType::FCTProject;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
    bool sharp = false;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
-   double t_final = 4.0;
+   double t_final = 1.0;
    TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
    bool visualization = true;
