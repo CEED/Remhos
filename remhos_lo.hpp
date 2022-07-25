@@ -112,15 +112,16 @@ protected:
   GridFunction &mesh_v;
   GridFunction &submesh_vel;
   Vector start_mesh_pos, start_submesh_pos;
+  int lref;
 
 public:
   MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
 		              GridFunction &pos, GridFunction *sub_pos,
-                  GridFunction &mesh_vel, GridFunction &sub_vel)
+                  GridFunction &mesh_vel, GridFunction &sub_vel, int lref)
     : LOSolver(space), ho_solver(hos),
       start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
       mesh_pos(pos), submesh_pos(sub_pos),
-      mesh_v(mesh_vel), submesh_vel(sub_vel) { }
+      mesh_v(mesh_vel), submesh_vel(sub_vel), lref(lref) { }
 
   virtual void FCT_Project(DenseMatrix &M,
                            DenseMatrixInverse &M_inv,
@@ -129,7 +130,7 @@ public:
 
   virtual void NodeShift(const IntegrationPoint &ip,
                          const int &s, Vector &ip_trans,
-                         const int &dim) const;
+                         const int &dim, const int &lref) const;
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 

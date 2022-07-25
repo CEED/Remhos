@@ -341,18 +341,15 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
   // Mesh info
   pfes.GetMesh()->DeleteGeometricFactors();
-  //Mesh *mesh = pfes.GetMesh();
   ParMesh *mesh = pfes.GetParMesh();
   int dim = mesh->Dimension();
-  //GridFunction x(mesh->GetNodes()->FESpace());
   GridFunction x(mesh->GetNodes()->FESpace());
 
-  //ofstream meshLOR("test.mesh");
-  //meshLOR.precision(8);
-  //mesh->Print(meshLOR);
+  // Not sure if this does anything but put it in here to test
+  mesh->GetNodes(x);
+
 
   //Number of subcells
-  const int lref = 2;
   int subcell_num;
   if (dim == 2) {
     subcell_num = lref * lref;
@@ -575,59 +572,40 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 }
 
 void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
-                                Vector &ip_trans, const int &dim) const
+                                Vector &ip_trans, const int &dim,
+                                const int &lref) const
 {
   Vector temp(dim + 1);
   DenseMatrix trans(dim + 1);
+  double lref_temp = lref * 1.0;
+
   if (dim == 2) {
     ip_trans(0) = ip.x;
     ip_trans(1) = ip.y;
     ip_trans(2) = 1;
 
-    trans(0, 0) = 0.5;
-    trans(1, 1) = 0.5;
+    trans(0, 0) = 1.0 / lref_temp;
+    trans(1, 1) = 1.0 / lref_temp;
     trans(2, 2) = 1;
 
-    if (s == 1) {
-      trans(0, 2) = 0.5;
-    } else if (s == 2) {
-      trans(1, 2) = 0.5;
-    } else if (s == 3) {
-      trans(0, 2) = 0.5;
-      trans(1, 2) = 0.5;
-    }
+    trans(0, dim) = (s % lref) / lref_temp;
+    trans(1, dim) = (s / lref) / lref_temp;
   } else if (dim == 3) {
     ip_trans(0) = ip.x;
     ip_trans(1) = ip.y;
     ip_trans(2) = ip.z;
     ip_trans(3) = 1;
 
-    trans(0, 0) = 0.5;
-    trans(1, 1) = 0.5;
-    trans(2, 2) = 0.5;
+    trans(0, 0) = 1.0 / lref_temp;
+    trans(1, 1) = 1.0 / lref_temp;
+    trans(2, 2) = 1.0 / lref_temp;
     trans(3, 3) = 1;
 
-    if (s == 1) {
-      trans(0, 3) = 0.5;
-    } else if (s == 2) {
-      trans(1, 3) = 0.5;
-    } else if (s == 3) {
-      trans(0, 3) = 0.5;
-      trans(1, 3) = 0.5;
-    } else if (s == 4) {
-      trans(2, 3) = 0.5;
-    } else if (s == 5) {
-      trans(0, 3) = 0.5;
-      trans(2, 3) = 0.5;
-    } else if (s == 6) {
-      trans(1, 3) = 0.5;
-      trans(2, 3) = 0.5;
-    } else if (s == 7) {
-      trans(0, 3) = 0.5;
-      trans(1, 3) = 0.5;
-      trans(2, 3) = 0.5;
-    }
+    trans(0, dim) = ((s % lref) % lref) / lref_temp;
+    trans(1, dim) = ((s / lref) % lref) / lref_temp;
+    trans(2, dim) = ((s / lref) / lref) / lref_temp;
   }
+
   trans.Mult(ip_trans, temp);
 
   ip_trans = temp;
@@ -640,41 +618,24 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
 {
   // creating the LOR mesh
   int basis_LOR = BasisType::ClosedUniform;
-  //Mesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
-
-  //ofstream meshLOR("testLOR.mesh");
-  //meshLOR.precision(8);
-  //mesh_LOR.Print(meshLOR);
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
   int LOR_order = 0;
   DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
-  //FiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
   ParFiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
 
   // Function for the LOR solution, doesn't need to be seen outside this functions
-  //GridFunction u_LOR(&fes_LOR);
   ParGridFunction u_LOR(&fes_LOR);
 
-  //ofstream meshHO("test.mesh");
-  //meshHO.precision(8);
-  //mesh.Print(meshHO);
 
   // Projecting from the HO space to the LOR space
   GridTransfer *gt;
-  //FiniteElementSpace fes_ho = fes;
-
-  //gt = new L2ProjectionGridTransfer(const_cast<ParFiniteElementSpace &>(fes), fes_LOR);
   gt = new L2ProjectionGridTransfer(fes, fes_LOR);
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
   delete gt;
-
-  //ofstream sltnLOR("sltn_LOR_final.gf");
-  //sltnLOR.precision(8);
-//  u_LOR.Save(sltnLOR);
 
   for (int i = 0; i < u_LOR_vec.Size(); i++) {
     u_LOR_vec(i) = u_LOR(i);
@@ -754,7 +715,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
         IntegrationRule my_ir = ir_HO;
         for (int q = 0; q < nqp_HO; q++) {
           IntegrationPoint ip_LOR = ir_HO.IntPoint(q);
-          NodeShift(ip_LOR, s, ip_trans, dim);
+          NodeShift(ip_LOR, s, ip_trans, dim, lref);
           if (dim == 2) {
             ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
           } else if (dim == 3) {

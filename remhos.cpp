@@ -169,6 +169,7 @@ int main(int argc, char *argv[])
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
+   int lref = 2;
 
    int precision = 8;
    cout.precision(precision);
@@ -248,6 +249,7 @@ int main(int argc, char *argv[])
                   "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
+   args.AddOption(&lref, "-lref", "--lor-ref-level", "LOR refinement level.");
    args.Parse();
    if (!args.Good())
    {
@@ -827,7 +829,7 @@ int main(int argc, char *argv[])
                   "Mass-Based-LOR LO solver requires a choice of a HO solver.");
       //lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
       //                           (exec_mode == 1) ? &v_gf : nullptr, v_sub_gf);
-      lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub, v_gf, v_sub_gf);
+      lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub, v_gf, v_sub_gf, lref);
    }
 
    // Setup of the monolithic solver (if any).
