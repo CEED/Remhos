@@ -367,7 +367,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // time stuff for mesh remapping
   if (mesh_v) {
-    x.Add(dt, *mesh_v);
+    //x.Add(dt, *mesh_v);
+    add(mesh_pos, dt, *mesh_v, mesh_pos);
   }
 
   // Some useful constants
@@ -451,7 +452,9 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
     }
   }
-  //add(mesh_pos, -dt, mesh_v, mesh_pos);
+  if (mesh_v) {
+    add(mesh_pos, -dt, *mesh_v, mesh_pos);
+  }
 }
 
 void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
