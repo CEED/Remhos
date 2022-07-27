@@ -109,7 +109,7 @@ protected:
   HOSolver &ho_solver;
   GridFunction &mesh_pos;
   GridFunction *submesh_pos;
-  GridFunction &mesh_v;
+  const GridFunction *mesh_v;
   GridFunction &submesh_vel;
   Vector start_mesh_pos, start_submesh_pos;
   int lref;
@@ -117,7 +117,7 @@ protected:
 public:
   MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
 		              GridFunction &pos, GridFunction *sub_pos,
-                  GridFunction &mesh_vel, GridFunction &sub_vel, int lref)
+                  const GridFunction *mesh_vel, GridFunction &sub_vel, int lref)
     : LOSolver(space), ho_solver(hos),
       start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
       mesh_pos(pos), submesh_pos(sub_pos),

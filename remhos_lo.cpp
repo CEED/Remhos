@@ -366,7 +366,9 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   add(1.0, u, dt, du_HO, u_HO_new);
 
   // time stuff for mesh remapping
-  add(mesh_pos, dt, mesh_v, mesh_pos);
+  if (mesh_v) {
+    x.Add(dt, *mesh_v);
+  }
 
   // Some useful constants
   const int order = pfes.GetOrder(0);
@@ -449,7 +451,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
     }
   }
-  add(mesh_pos, -dt, mesh_v, mesh_pos);
+  //add(mesh_pos, -dt, mesh_v, mesh_pos);
 }
 
 void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
@@ -667,10 +669,15 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   const int NE = x.FESpace()->GetNE();
 
   int ndofs = (order + 1);
-  if (dim == 2)
+  int subcell_num;
+  if (dim == 2) {
     ndofs *= (order + 1);
-  if (dim == 3)
+    subcell_num = lref * lref;
+  }
+  if (dim == 3) {
     ndofs *= (order + 1) * (order + 1);
+    subcell_num = lref * lref * lref;
+  }
 
   auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
   const FiniteElement *fe = u_HO.FESpace()->GetFE(0);
@@ -685,13 +692,6 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   ParMesh *mesh_temp_LOR = fes_LOR.GetParMesh();
   GridFunction x_LOR(mesh_temp_LOR->GetNodes()->FESpace());
   mesh_temp_LOR->GetNodes(x_LOR);
-
-  int subcell_num;
-  if (dim == 2) {
-    subcell_num = lref * lref;
-  } else if (dim == 3) {
-    subcell_num = lref * lref * lref;
-  }
 
   const int nqp_HO = ir_HO.GetNPoints();
   GeometricFactors geom_LOR(x_LOR, ir_HO, GeometricFactors::DETERMINANTS);
