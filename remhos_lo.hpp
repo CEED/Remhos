@@ -17,6 +17,7 @@
 #ifndef MFEM_REMHOS_LO
 #define MFEM_REMHOS_LO
 
+#include <string>
 #include "mfem.hpp"
 #include "remhos_tools.hpp"
 
@@ -38,8 +39,6 @@ public:
    virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
-
-  //virtual void CalcLORSolution(const Vector &u, Vector &u_LOR) const;
 };
 
 class Assembly;
@@ -145,6 +144,9 @@ public:
                                  const int &order, const int &lref,
                                  ParMesh &mesh, DofInfo &dofs,
                                  Vector &u_LOR_vec, Vector &u_Proj_vec) const;
+
+  virtual double compute_mass(FiniteElementSpace *L2, double massL2,
+                              VisItDataCollection &dc, std::string prefix) const;
 
 };
 

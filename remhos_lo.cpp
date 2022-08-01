@@ -339,15 +339,24 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
+  //u_new = u + dt * du_HO;
+  Vector du_HO(u.Size());
+  ParGridFunction u_HO_new(&pfes);
+  ho_solver.CalcHOSolution(u, du_HO);
+  add(1.0, u, dt, du_HO, u_HO_new);
+
   // Mesh info
-  pfes.GetMesh()->DeleteGeometricFactors();
+  //pfes.GetMesh()->DeleteGeometricFactors();
   ParMesh *mesh = pfes.GetParMesh();
   int dim = mesh->Dimension();
   GridFunction x(mesh->GetNodes()->FESpace());
 
-  // Not sure if this does anything but put it in here to test
+  // time stuff for mesh remapping
   mesh->GetNodes(x);
-
+  if (mesh_v) {
+    x.Add(dt, *mesh_v);
+    //add(mesh_pos, dt, *mesh_v, mesh_pos);
+  }
 
   //Number of subcells
   int subcell_num;
@@ -357,19 +366,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     subcell_num = lref * lref * lref;
   }
 
-  //u_new = u + dt * du_HO;
-  Vector du_HO(u.Size());
   Vector u_LOR_vec(subcell_num * pfes.GetMesh()->GetNE());
   Vector u_Proj_vec(u); u_Proj_vec = 0.0;
-  ParGridFunction u_HO_new(&pfes);
-  ho_solver.CalcHOSolution(u, du_HO);
-  add(1.0, u, dt, du_HO, u_HO_new);
-
-  // time stuff for mesh remapping
-  if (mesh_v) {
-    //x.Add(dt, *mesh_v);
-    add(mesh_pos, dt, *mesh_v, mesh_pos);
-  }
 
   // Some useful constants
   const int order = pfes.GetOrder(0);
@@ -453,7 +451,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     }
   }
   if (mesh_v) {
-    add(mesh_pos, -dt, *mesh_v, mesh_pos);
+    //add(mesh_pos, -dt, *mesh_v, mesh_pos);
   }
 }
 
@@ -622,18 +620,19 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
                                       ParMesh &mesh, Vector &u_LOR_vec) const
 {
   // creating the LOR mesh
-  int basis_LOR = BasisType::ClosedUniform;
+  //int basis_LOR = BasisType::ClosedUniform;
+  int basis_LOR = BasisType::GaussLobatto;
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
   int LOR_order = 0;
   DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
+  //L2_FECollection fec_LOR(LOR_order, dim);
   ParFiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
 
   // Function for the LOR solution, doesn't need to be seen outside this functions
   ParGridFunction u_LOR(&fes_LOR);
-
 
   // Projecting from the HO space to the LOR space
   GridTransfer *gt;
@@ -641,6 +640,11 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
   delete gt;
+
+  VisItDataCollection LOR_dc("LOR", &mesh_LOR);
+  LOR_dc.RegisterField("density", &u_LOR);
+
+  double mass = compute_mass(&fes_LOR, -1.0, LOR_dc, "LOR ");
 
   for (int i = 0; i < u_LOR_vec.Size(); i++) {
     u_LOR_vec(i) = u_LOR(i);
@@ -763,6 +767,29 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   }
 }
 
+double MassBasedAvgLOR::compute_mass(FiniteElementSpace *L2, double massL2,
+                                     VisItDataCollection &dc, string prefix) const
+{
+   ConstantCoefficient one(1.0);
+   BilinearForm ML2(L2);
+   ML2.AddDomainIntegrator(new MassIntegrator(one));
+   ML2.Assemble();
+   string space = "space";
+
+   GridFunction rhoone(L2);
+   rhoone = 1.0;
+
+   double newmass = ML2.InnerProduct(*dc.GetField("density"),rhoone);
+   cout.precision(18);
+   cout << space << " " << prefix << " mass   = " << newmass;
+   if (massL2 >= 0)
+   {
+      cout.precision(4);
+      cout << " ("  << fabs(newmass-massL2)*100/massL2 << "%)";
+   }
+   cout << endl;
+   return newmass;
+}
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
 {
