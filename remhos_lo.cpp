@@ -624,6 +624,19 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
   int basis_LOR = BasisType::GaussLobatto;
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
 
+  // Additions from meeting
+  const bool periodic = mesh.GetNodes() != NULL &&
+                        dynamic_cast<const L2_FECollection *>
+                        (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
+
+  int mesh_order = 2;
+  mesh_LOR.SetCurvature(mesh_order, periodic);
+
+  OperatorPtr N;
+  mesh_LOR.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+
+  N->Mult(*mesh.GetNodes(), *mesh_LOR.GetNodes());
+
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
   int LOR_order = 0;
@@ -662,6 +675,19 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   int basis_LOR = BasisType::ClosedUniform;
   //Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
+
+  // Additions from meeting
+  const bool periodic = mesh.GetNodes() != NULL &&
+                        dynamic_cast<const L2_FECollection *>
+                        (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
+
+  int mesh_order = 2;
+  mesh_LOR.SetCurvature(mesh_order, periodic);
+
+  OperatorPtr N;
+  mesh_LOR.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+
+  N->Mult(*mesh.GetNodes(), *mesh_LOR.GetNodes());
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
