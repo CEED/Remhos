@@ -354,8 +354,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   // time stuff for mesh remapping
   mesh->GetNodes(x);
   if (mesh_v) {
-    x.Add(dt, *mesh_v);
-    //add(mesh_pos, dt, *mesh_v, mesh_pos);
+    //x.Add(dt, *mesh_v);
+    add(mesh_pos, dt, *mesh_v, mesh_pos);
   }
 
   //Number of subcells
@@ -451,7 +451,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     }
   }
   if (mesh_v) {
-    //add(mesh_pos, -dt, *mesh_v, mesh_pos);
+    add(mesh_pos, -dt, *mesh_v, mesh_pos);
   }
 }
 
@@ -614,35 +614,36 @@ void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
   ip_trans = temp;
 }
 
-void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
+void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
                                       ParFiniteElementSpace &fes,
                                       const int &order, const int &lref,
                                       ParMesh &mesh, Vector &u_LOR_vec) const
 {
   // creating the LOR mesh
-  //int basis_LOR = BasisType::ClosedUniform;
-  int basis_LOR = BasisType::GaussLobatto;
+  int basis_LOR = BasisType::ClosedUniform;
+  //int basis_LOR = BasisType::GaussLobatto;
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
 
-  // Additions from meeting
   const bool periodic = mesh.GetNodes() != NULL &&
                         dynamic_cast<const L2_FECollection *>
                         (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
 
   int mesh_order = 2;
-  mesh_LOR.SetCurvature(mesh_order, periodic);
+  if (mesh_order > 1) {
+    mesh_LOR.SetCurvature(mesh_order, periodic);
 
-  OperatorPtr N;
-  mesh_LOR.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+    OperatorPtr N;
+    mesh_LOR.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
 
-  N->Mult(*mesh.GetNodes(), *mesh_LOR.GetNodes());
+    N->Mult(*mesh.GetNodes(), *mesh_LOR.GetNodes());
+  }
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();
   int LOR_order = 0;
-  DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
-  //L2_FECollection fec_LOR(LOR_order, dim);
-  ParFiniteElementSpace fes_LOR(&mesh_LOR, &fec_LOR);
+  FiniteElementCollection *fec_LOR;
+  fec_LOR = new DG_FECollection(LOR_order, dim, BasisType::Positive);
+  ParFiniteElementSpace fes_LOR(&mesh_LOR, fec_LOR);
 
   // Function for the LOR solution, doesn't need to be seen outside this functions
   ParGridFunction u_LOR(&fes_LOR);
@@ -654,10 +655,21 @@ void MassBasedAvgLOR::CalcLORSolution(const ParGridFunction &u_HO,
   R.Mult(u_HO, u_LOR);
   delete gt;
 
+  VisItDataCollection HO_dc("HO", &mesh);
+  HO_dc.RegisterField("density", &u_HO);
   VisItDataCollection LOR_dc("LOR", &mesh_LOR);
   LOR_dc.RegisterField("density", &u_LOR);
 
-  double mass = compute_mass(&fes_LOR, -1.0, LOR_dc, "LOR ");
+  double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
+  compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
+
+  // Mesh outputs
+  ofstream meshHO("meshHO.mesh");
+  meshHO.precision(12);
+  mesh.Print(meshHO);
+  ofstream meshLOR("meshLOR.mesh");
+  meshLOR.precision(12);
+  mesh_LOR.Print(meshLOR);
 
   for (int i = 0; i < u_LOR_vec.Size(); i++) {
     u_LOR_vec(i) = u_LOR(i);
@@ -673,10 +685,12 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
                                         Vector &u_Proj_vec) const
 {
   int basis_LOR = BasisType::ClosedUniform;
+  //int basis_LOR = BasisType::GaussLobatto;
   //Mesh mesh_LOR = Mesh::MakeRefined(mesh, lref, basis_LOR);
   ParMesh mesh_LOR = ParMesh::MakeRefined(mesh, lref, basis_LOR);
 
   // Additions from meeting
+  /*
   const bool periodic = mesh.GetNodes() != NULL &&
                         dynamic_cast<const L2_FECollection *>
                         (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
@@ -688,6 +702,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   mesh_LOR.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
 
   N->Mult(*mesh.GetNodes(), *mesh_LOR.GetNodes());
+  */
 
   // Discontinuous FE space for LOR
   int dim = mesh.Dimension();

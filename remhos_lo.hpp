@@ -133,7 +133,7 @@ public:
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 
-  virtual void CalcLORSolution(const ParGridFunction &u_HO,
+  virtual void CalcLORSolution(ParGridFunction &u_HO,
                                ParFiniteElementSpace &fes,
                                const int &order, const int &lref,
                                ParMesh &mesh, Vector &u_LOR_vec) const;
