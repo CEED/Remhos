@@ -385,20 +385,6 @@ int main(int argc, char *argv[])
       x = x0;
    }
 
-   // Testing something
-   int basis_lor = BasisType::ClosedUniform;
-   Mesh mesh_lor = Mesh::MakeRefined(pmesh, lref, basis_lor);
-   mesh_lor.SetCurvature(mesh_order, periodic);
-
-   OperatorPtr N;
-   mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
-
-   N->Mult(*pmesh.GetNodes(), *mesh_lor.GetNodes());
-   ofstream meshLORtest("meshLORtest.mesh");
-   meshLORtest.precision(12);
-   mesh_lor.Print(meshLORtest);
-   // End of testing
-
    H1_FECollection lin_fec(1, dim);
    ParFiniteElementSpace lin_pfes(&pmesh, &lin_fec),
                          lin_pfes_grad(&pmesh, &lin_fec, dim);
