@@ -112,15 +112,18 @@ protected:
   GridFunction &submesh_vel;
   Vector start_mesh_pos, start_submesh_pos;
   int lref;
+  const int mesh_order;
 
 public:
   MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
 		              GridFunction &pos, GridFunction *sub_pos,
-                  const GridFunction *mesh_vel, GridFunction &sub_vel, int lref)
+                  const GridFunction *mesh_vel, GridFunction &sub_vel,
+                  int lref, const int mesh_order)
     : LOSolver(space), ho_solver(hos),
       start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
       mesh_pos(pos), submesh_pos(sub_pos),
-      mesh_v(mesh_vel), submesh_vel(sub_vel), lref(lref) { }
+      mesh_v(mesh_vel), submesh_vel(sub_vel), lref(lref),
+      mesh_order(mesh_order) { }
 
   virtual void FCT_Project(DenseMatrix &M,
                            DenseMatrixInverse &M_inv,
@@ -136,14 +139,16 @@ public:
   virtual void CalcLORSolution(ParGridFunction &u_HO,
                                ParFiniteElementSpace &fes,
                                const int &order, const int &lref,
-                               ParMesh &mesh, Vector &u_LOR_vec) const;
+                               ParMesh &mesh, Vector &u_LOR_vec,
+                               const int mesh_order) const;
 
   virtual void CalcLORProjection(const GridFunction &x,
                                  const ParGridFunction &u_HO,
                                  const ParFiniteElementSpace &fes,
                                  const int &order, const int &lref,
                                  ParMesh &mesh, DofInfo &dofs,
-                                 Vector &u_LOR_vec, Vector &u_Proj_vec) const;
+                                 Vector &u_LOR_vec, Vector &u_Proj_vec,
+                                 const int mesh_order) const;
 
   virtual double compute_mass(FiniteElementSpace *L2, double massL2,
                               VisItDataCollection &dc, std::string prefix) const;

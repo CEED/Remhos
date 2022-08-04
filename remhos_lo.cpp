@@ -292,10 +292,46 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    }
 
    const int NE = pfes.GetNE();
+   const int ndofs = u.Size() / NE;
    Vector el_mass(NE), el_vol(NE);
    MassesAndVolumesAtPosition(u_HO_new, x_new, el_mass, el_vol);
 
-   const int ndofs = u.Size() / NE;
+   // Checking bounds
+   // Dofinfo stuff
+   int bounds_type = 1;
+   double eps = 1e-9;
+   DofInfo dofs(pfes, bounds_type);
+   dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+
+   //Need this part to look at neighbors...
+   //Actually compute the bounds....
+   dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+   for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
+     const int n_dof = dofs.xi_min.Size()/NE;
+     double my_min = std::numeric_limits<double>::infinity();
+     double my_max = -std::numeric_limits<double>::infinity();
+     for(int i = 0; i<n_dof; ++i) {
+       my_min = fmin(my_min, dofs.xi_min(i + n_dof*e));
+       my_max = fmax(my_max, dofs.xi_max(i + n_dof*e));
+     }
+     dofs.xe_max(e) = my_max;
+     dofs.xe_min(e) = my_min;
+   }
+
+   for (int k = 0; k < NE; k++) {
+     for (int i = 0; i < ndofs; i++) {
+       if (u(i + k * ndofs) + eps <= dofs.xe_min(k) ||
+           u(i + k * ndofs) - eps >= dofs.xe_max(k)) {
+         cout << "Lower Bound = " << dofs.xe_min(k) << endl;
+         cout << "u(" << i + k * ndofs << ") = "
+              << u(i + k * ndofs) << endl;
+         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
+         exit(0);
+       }
+     }
+   }
+
    for (int k = 0; k < NE; k++)
    {
       double u_LO_new = el_mass(k) / el_vol(k);
@@ -397,7 +433,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   }
 
   // Here we calculate the low order refined solution
-  CalcLORSolution(u_HO_new, pfes, order, lref, *mesh, u_LOR_vec);
+  CalcLORSolution(u_HO_new, pfes, order, lref, *mesh, u_LOR_vec, mesh_order);
 
   // This is a check for bounds preservatoin
   // This assumes that the timestep is fixed
@@ -424,7 +460,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   // Here wa calculate the projected high order solutions
   // This is what will be merged with the HO solution in Remhos
   CalcLORProjection(x, u_HO_new, pfes, order, lref,
-                    *mesh, dofs, u_LOR_vec, u_Proj_vec);
+                    *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
 
   // Another bounds preservation check
 
@@ -618,12 +654,12 @@ void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
 void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
                                       ParFiniteElementSpace &fes,
                                       const int &order, const int &lref,
-                                      ParMesh &mesh, Vector &u_LOR_vec) const
+                                      ParMesh &mesh, Vector &u_LOR_vec,
+                                      const int mesh_order) const
 {
   int basis_lor = BasisType::ClosedUniform;
   ParMesh mesh_lor = ParMesh::MakeRefined(mesh, lref, basis_lor);
   int dim = mesh.Dimension();
-  int mesh_order = 2;
 
   const bool periodic = mesh.GetNodes() != NULL &&
                         dynamic_cast<const L2_FECollection *>
@@ -660,12 +696,12 @@ void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
      // End of testing
 */
 
-mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
+  mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
 
-OperatorPtr N;
-mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+  OperatorPtr N;
+  mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
 
-N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
+  N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
 
   // Discontinuous FE space for LOR
   int LOR_order = 0;
@@ -688,8 +724,8 @@ N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
   VisItDataCollection LOR_dc("LOR", &mesh_lor);
   LOR_dc.RegisterField("density", &u_LOR);
 
-  double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
-  compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
+  //double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
+  //compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
 
   // Mesh outputs
   ofstream meshHO("meshHO.mesh");
@@ -709,13 +745,12 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
                                         const ParFiniteElementSpace &fes,
                                         const int &order, const int &lref,
                                         ParMesh &mesh, DofInfo &dofs,
-                                        Vector &u_LOR_vec,
-                                        Vector &u_Proj_vec) const
+                                        Vector &u_LOR_vec, Vector &u_Proj_vec,
+                                        const int mesh_order) const
 {
   int basis_lor = BasisType::ClosedUniform;
   ParMesh mesh_lor = ParMesh::MakeRefined(mesh, lref, basis_lor);
   int dim = mesh.Dimension();
-  int mesh_order = 2;
 
   const bool periodic = mesh.GetNodes() != NULL &&
                         dynamic_cast<const L2_FECollection *>
@@ -726,32 +761,8 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
 
   ParFiniteElementSpace mesh_pfes(&mesh, mesh_fec, dim);
   ParGridFunction x_ho(&mesh_pfes);
-  //mesh.SetNodalGridFunction(&x_ho);
 
-/*
-//  if (mesh_order > 1) {
-     mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
-
-     OperatorPtr N;
-     //mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
-
-     mesh_lor.GetNodalFESpace()->GetTransferOperator(mesh_pfes,N);
-
-     ParFiniteElementSpace lor_fes(&mesh_lor, mesh_fec, dim);
-     ParGridFunction lor_x(&lor_fes);
-
-     //N->Mult(*pmesh.GetNodes(), *mesh_lor.GetNodes());
-
-     N->Mult(x_ho, lor_x);
-     mesh_lor.SetNodalGridFunction(&lor_x);
-  // }
-   //ofstream meshLORtest("meshLORtest.mesh");
-  // meshLORtest.precision(12);
-  // mesh_lor.Print(meshLORtest);
-     // End of testing
-*/
-
-
+  // Need this section for higher mesh order on the LOR mesh
   mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
 
   OperatorPtr N;

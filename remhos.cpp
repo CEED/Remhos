@@ -329,7 +329,7 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
    ParGridFunction x(&mesh_pfes);
    pmesh.SetNodalGridFunction(&x);
-{
+/*{
    int basis_lor = BasisType::ClosedUniform;
    Mesh mesh_lor = Mesh::MakeRefined(pmesh, lref, basis_lor);
    mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
@@ -344,7 +344,7 @@ int main(int argc, char *argv[])
    meshLORtest.precision(12);
    mesh_lor.Print(meshLORtest);
    //exit(1);
-}
+}*/
 
    // Store initial mesh positions.
    Vector x0(x.Size());
@@ -846,7 +846,8 @@ int main(int argc, char *argv[])
       //lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
       //                           (exec_mode == 1) ? &v_gf : nullptr, v_sub_gf);
       lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
-                                      (exec_mode == 1) ? &v_gf : nullptr, v_sub_gf, lref);
+                                      (exec_mode == 1) ? &v_gf : nullptr,
+                                       v_sub_gf, lref, mesh_order);
    }
 
    // Setup of the monolithic solver (if any).
