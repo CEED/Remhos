@@ -314,7 +314,7 @@ int main(int argc, char *argv[])
    const bool periodic = pmesh.GetNodes() != NULL &&
                          dynamic_cast<const L2_FECollection *>
                          (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
-   pmesh.SetCurvature(mesh_order, periodic);
+   //pmesh.SetCurvature(mesh_order, periodic);
 
    FiniteElementCollection *mesh_fec;
    if (periodic)
@@ -329,6 +329,22 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
    ParGridFunction x(&mesh_pfes);
    pmesh.SetNodalGridFunction(&x);
+{
+   int basis_lor = BasisType::ClosedUniform;
+   Mesh mesh_lor = Mesh::MakeRefined(pmesh, lref, basis_lor);
+   mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
+
+   OperatorPtr N;
+   mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
+
+   N->Mult(*pmesh.GetNodes(), *mesh_lor.GetNodes());
+
+
+   ofstream meshLORtest("meshLORtest.mesh");
+   meshLORtest.precision(12);
+   mesh_lor.Print(meshLORtest);
+   //exit(1);
+}
 
    // Store initial mesh positions.
    Vector x0(x.Size());

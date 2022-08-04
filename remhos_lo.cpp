@@ -354,8 +354,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   // time stuff for mesh remapping
   mesh->GetNodes(x);
   if (mesh_v) {
-    x.Add(dt, *mesh_v);
-    //add(mesh_pos, dt, *mesh_v, mesh_pos);
+    //x.Add(dt, *mesh_v);
+    add(mesh_pos, dt, *mesh_v, mesh_pos);
   }
 
   //Number of subcells
@@ -452,7 +452,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   }
   if (mesh_v) {
     //x.Add(-dt, *mesh_v);
-    //add(mesh_pos, -dt, *mesh_v, mesh_pos);
+    add(mesh_pos, -dt, *mesh_v, mesh_pos);
   }
 }
 
@@ -636,7 +636,7 @@ void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
   ParGridFunction x(&mesh_pfes);
   //mesh.SetNodalGridFunction(&x);
 
-
+/*
 //  {
      mesh_lor.SetCurvature(mesh_order, periodic);
 
@@ -653,11 +653,19 @@ void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
      N->Mult(x, lor_x);
      mesh_lor.SetNodalGridFunction(&lor_x);
 
-     ofstream meshLORtest("meshLORtest.mesh");
-     meshLORtest.precision(12);
-     mesh_lor.Print(meshLORtest);
+     //ofstream meshLORtest("meshLORtest.mesh");
+     //meshLORtest.precision(12);
+     //mesh_lor.Print(meshLORtest);
   // }
      // End of testing
+*/
+
+mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
+
+OperatorPtr N;
+mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+
+N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
 
   // Discontinuous FE space for LOR
   int LOR_order = 0;
@@ -720,9 +728,9 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   ParGridFunction x_ho(&mesh_pfes);
   //mesh.SetNodalGridFunction(&x_ho);
 
-
+/*
 //  if (mesh_order > 1) {
-     mesh_lor.SetCurvature(mesh_order, periodic);
+     mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
 
      OperatorPtr N;
      //mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
@@ -737,10 +745,19 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
      N->Mult(x_ho, lor_x);
      mesh_lor.SetNodalGridFunction(&lor_x);
   // }
-   ofstream meshLORtest("meshLORtest.mesh");
-   meshLORtest.precision(12);
-   mesh_lor.Print(meshLORtest);
+   //ofstream meshLORtest("meshLORtest.mesh");
+  // meshLORtest.precision(12);
+  // mesh_lor.Print(meshLORtest);
      // End of testing
+*/
+
+
+  mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
+
+  OperatorPtr N;
+  mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
+
+  N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
 
   // Discontinuous FE space for LOR
   //int dim = mesh.Dimension();
