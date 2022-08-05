@@ -1459,8 +1459,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
+
+      const int n_iters = 2; // @ Sean play with this parameter
+      for(int i = 0; i<n_iters; ++i) {
+        d_u = 0.0;
+        fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                    dofs.xi_min, dofs.xi_max, d_u);
+        du_LO = d_u;
+      }
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
