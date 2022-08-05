@@ -143,8 +143,8 @@ public:
                                const int mesh_order) const;
 
   virtual void CalcLORProjection(const GridFunction &x,
-                                 const ParGridFunction &u_HO,
-                                 const ParFiniteElementSpace &fes,
+                                 ParGridFunction &u_HO,
+                                 ParFiniteElementSpace &fes,
                                  const int &order, const int &lref,
                                  ParMesh &mesh, DofInfo &dofs,
                                  Vector &u_LOR_vec, Vector &u_Proj_vec,

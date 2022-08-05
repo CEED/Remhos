@@ -305,6 +305,7 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 
    //Need this part to look at neighbors...
    //Actually compute the bounds....
+   /*
    dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
    for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
      const int n_dof = dofs.xi_min.Size()/NE;
@@ -317,24 +318,30 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
      dofs.xe_max(e) = my_max;
      dofs.xe_min(e) = my_min;
    }
+   */
 
-   for (int k = 0; k < NE; k++) {
-     for (int i = 0; i < ndofs; i++) {
-       if (u(i + k * ndofs) + eps <= dofs.xe_min(k) ||
-           u(i + k * ndofs) - eps >= dofs.xe_max(k)) {
-         cout << "Lower Bound = " << dofs.xe_min(k) << endl;
-         cout << "u(" << i + k * ndofs << ") = "
-              << u(i + k * ndofs) << endl;
-         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
-         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-         exit(0);
-       }
-     }
-   }
 
    for (int k = 0; k < NE; k++)
    {
       double u_LO_new = el_mass(k) / el_vol(k);
+      /*
+      for (int i = 0; i < ndofs; i++) {
+        if (u_LO_new + eps <= dofs.xe_min(k) ||
+            u_LO_new - eps >= dofs.xe_max(k)) {
+          cout << "Lower Bound = " << dofs.xe_min(k) << endl;
+          cout << "u(" << i + k * ndofs << ") = "
+               << u_LO_new << endl;
+          cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+          cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
+          exit(0);
+        }
+      }
+      */
+
+      if (u_LO_new < 1e-14) {
+        u_LO_new = 1e-14;
+      }
+
       for (int i = 0; i < ndofs; i++)
       {
          du(k*ndofs + i) = (u_LO_new - u(k*ndofs + i)) / dt;
@@ -432,6 +439,42 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     dofs.xe_min(e) = my_min;
   }
 
+  //----------------------------------------------------------------------
+  /*
+  // Stuff I added From CalcLORSolution
+  int basis_lor = BasisType::ClosedUniform;
+  ParMesh mesh_lor = ParMesh::MakeRefined(*mesh, lref, basis_lor);
+  //int dim = mesh.Dimension();
+
+  const bool periodic = mesh->GetNodes() != NULL &&
+                        dynamic_cast<const L2_FECollection *>
+                        (mesh->GetNodes()->FESpace()->FEColl()) != NULL;
+
+  FiniteElementCollection *mesh_fec;
+  mesh_fec = new DG_FECollection(mesh_order, dim, BasisType::Positive);
+
+  ParFiniteElementSpace mesh_pfes(mesh, mesh_fec, dim);
+  //ParGridFunction x_HO(&mesh_pfes);
+
+
+  mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
+
+  OperatorPtr N;
+  mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh->GetNodalFESpace(),N);
+
+  N->Mult(*mesh->GetNodes(), *mesh_lor.GetNodes());
+
+  // Discontinuous FE space for LOR
+  int LOR_order = 0;
+  FiniteElementCollection *fec_LOR;
+  fec_LOR = new DG_FECollection(LOR_order, dim, BasisType::Positive);
+  ParFiniteElementSpace fes_LOR(&mesh_lor, fec_LOR);
+
+  // Function for the LOR solution, doesn't need to be seen outside this functions
+  ParGridFunction u_LOR(&fes_LOR);
+  */
+  //----------------------------------------------------------------------------
+
   // Here we calculate the low order refined solution
   CalcLORSolution(u_HO_new, pfes, order, lref, *mesh, u_LOR_vec, mesh_order);
 
@@ -439,9 +482,6 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   // This assumes that the timestep is fixed
   double eps = 1e-9;
 
-  //cout << "Size of u_LOR_vec = " << u_LOR_vec.Size() << endl;
-//  cout << "NE * subcell_num = " << NE * subcell_num << endl;
-//  cout << "Size of dofs.xe_max = " << dofs.xe_max.Size() << endl;
 /*
   for (int k = 0; k < NE; k++) {
     for (int s = 0; s < subcell_num; s++) {
@@ -463,7 +503,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
                     *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
 
   // Another bounds preservation check
-
+/*
   for (int k = 0; k < NE; k++) {
     for (int i = 0; i < ndofs; i++) {
       if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
@@ -477,6 +517,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       }
     }
   }
+  */
 
   // Calculating du
   for (int k = 0; k < NE; k++)
@@ -525,7 +566,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 
   const double y_avg = m.Sum() / dMLX;
 
-
+/*
   if ((y_min > y_avg + 1e-12)) {
     std::cout << "Bottom - Average is out of bounds: "
     << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
@@ -536,7 +577,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
     std::cout << "Top - Average is out of bounds: "
               << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " <<
       y_avg << " " << y_max << std::endl;
-  }
+  }*/
 
   Vector z(s);
   Vector beta(s);
@@ -670,31 +711,7 @@ void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
 
   ParFiniteElementSpace mesh_pfes(&mesh, mesh_fec, dim);
   ParGridFunction x(&mesh_pfes);
-  //mesh.SetNodalGridFunction(&x);
 
-/*
-//  {
-     mesh_lor.SetCurvature(mesh_order, periodic);
-
-     OperatorPtr N;
-     //mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
-
-     mesh_lor.GetNodalFESpace()->GetTransferOperator(mesh_pfes,N);
-
-     ParFiniteElementSpace lor_fes(&mesh_lor, mesh_fec, dim);
-     ParGridFunction lor_x(&lor_fes);
-
-     //N->Mult(*pmesh.GetNodes(), *mesh_lor.GetNodes());
-
-     N->Mult(x, lor_x);
-     mesh_lor.SetNodalGridFunction(&lor_x);
-
-     //ofstream meshLORtest("meshLORtest.mesh");
-     //meshLORtest.precision(12);
-     //mesh_lor.Print(meshLORtest);
-  // }
-     // End of testing
-*/
 
   mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
 
@@ -741,8 +758,8 @@ void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
 }
 
 void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
-                                        const ParGridFunction &u_HO,
-                                        const ParFiniteElementSpace &fes,
+                                        ParGridFunction &u_HO,
+                                        ParFiniteElementSpace &fes,
                                         const int &order, const int &lref,
                                         ParMesh &mesh, DofInfo &dofs,
                                         Vector &u_LOR_vec, Vector &u_Proj_vec,
@@ -863,15 +880,27 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
 
     //m = int{u(x) * phi(x)}
     //y = dofs of ho space
-    //A is Mass matrix from ho space
+    //A is Mass matrix from ho Space
 
 
     FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
 
     for (int i = 0; i < xy.Size(); i++) {
       u_Proj_vec(i + k * ndofs) = xy(i);
+      if (u_Proj_vec(i + k * ndofs) < 1e-14) {
+        u_Proj_vec(i + k * ndofs) = 1e-14;
+      }
     }
   }
+  /*
+  VisItDataCollection HO_dc("HO", &mesh);
+  HO_dc.RegisterField("density", &u_HO);
+  VisItDataCollection LOR_dc("LOR", &mesh_lor);
+  LOR_dc.RegisterField("density", &u_LOR);
+
+  double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
+  compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
+*/
 }
 
 double MassBasedAvgLOR::compute_mass(FiniteElementSpace *L2, double massL2,
