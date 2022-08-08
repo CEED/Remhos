@@ -156,6 +156,21 @@ public:
 };
 
 
+class LumpedHO : public LOSolver
+{
+protected:
+  HOSolver &ho_solver;
+  const GridFunction *mesh_v;
+
+public:
+  LumpedHO(ParFiniteElementSpace &space, HOSolver &hos,
+               const GridFunction *mesh_vel)
+     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+
+  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+};
+
+
 //PA based Residual Distribution
 class PAResidualDistribution : public ResidualDistribution
 {

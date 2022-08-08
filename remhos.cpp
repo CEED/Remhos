@@ -46,7 +46,8 @@ enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
                           NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased, MassBasedLOR};
+                         ResDist, ResDistSubcell, MassBased,
+                         MassBasedLOR, LumpedHO};
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
@@ -201,7 +202,9 @@ int main(int argc, char *argv[])
                   "                  2 - Preconditioned Discrete Upwind,\n\t"
                   "                  3 - Residual Distribution,\n\t"
                   "                  4 - Subcell Residual Distribution,\n\t"
-                  "                  5 - Mass-Based Element Average.");
+                  "                  5 - Mass-Based Element Average,\n\t"
+                  "                  6 - Mass-Based LOR Element Average,\n\t"
+                  "                  7 - Lumped HO.");
    args.AddOption((int*)(&fct_type), "-fct", "--fct-type",
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
@@ -329,22 +332,6 @@ int main(int argc, char *argv[])
    ParFiniteElementSpace mesh_pfes(&pmesh, mesh_fec, dim);
    ParGridFunction x(&mesh_pfes);
    pmesh.SetNodalGridFunction(&x);
-/*{
-   int basis_lor = BasisType::ClosedUniform;
-   Mesh mesh_lor = Mesh::MakeRefined(pmesh, lref, basis_lor);
-   mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
-
-   OperatorPtr N;
-   mesh_lor.GetNodalFESpace()->GetTransferOperator(*pmesh.GetNodalFESpace(),N);
-
-   N->Mult(*pmesh.GetNodes(), *mesh_lor.GetNodes());
-
-
-   ofstream meshLORtest("meshLORtest.mesh");
-   meshLORtest.precision(12);
-   mesh_lor.Print(meshLORtest);
-   //exit(1);
-}*/
 
    // Store initial mesh positions.
    Vector x0(x.Size());
@@ -838,16 +825,20 @@ int main(int argc, char *argv[])
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
                                    (exec_mode == 1) ? &v_gf : nullptr);
    }
-
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
       MFEM_VERIFY(ho_solver != nullptr,
                   "Mass-Based-LOR LO solver requires a choice of a HO solver.");
-      //lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
-      //                           (exec_mode == 1) ? &v_gf : nullptr, v_sub_gf);
       lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
                                       (exec_mode == 1) ? &v_gf : nullptr,
                                        v_sub_gf, lref, mesh_order);
+   }
+   else if (lo_type == LOSolverType::LumpedHO)
+   {
+      MFEM_VERIFY(ho_solver != nullptr,
+                  "LumpedHO LO solver requires a choice of a HO solver.");
+      lo_solver = new LumpedHO(pfes, *ho_solver,
+                               (exec_mode == 1) ? &v_gf : nullptr);
    }
 
    // Setup of the monolithic solver (if any).
@@ -1460,7 +1451,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
-      const int n_iters = 2; // @ Sean play with this parameter
+      const int n_iters = 1; // @ Sean play with this parameter
       for(int i = 0; i<n_iters; ++i) {
         d_u = 0.0;
         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,

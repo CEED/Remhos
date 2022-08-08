@@ -324,19 +324,6 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    for (int k = 0; k < NE; k++)
    {
       double u_LO_new = el_mass(k) / el_vol(k);
-      /*
-      for (int i = 0; i < ndofs; i++) {
-        if (u_LO_new + eps <= dofs.xe_min(k) ||
-            u_LO_new - eps >= dofs.xe_max(k)) {
-          cout << "Lower Bound = " << dofs.xe_min(k) << endl;
-          cout << "u(" << i + k * ndofs << ") = "
-               << u_LO_new << endl;
-          cout << "Upper Bound = " << dofs.xe_max(k) << endl;
-          cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-          exit(0);
-        }
-      }
-      */
 
       if (u_LO_new < 1e-14) {
         u_LO_new = 1e-14;
@@ -392,10 +379,10 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   //pfes.GetMesh()->DeleteGeometricFactors();
   ParMesh *mesh = pfes.GetParMesh();
   int dim = mesh->Dimension();
-  GridFunction x(mesh->GetNodes()->FESpace());
+  //GridFunction x(mesh->GetNodes()->FESpace());
 
   // time stuff for mesh remapping
-  mesh->GetNodes(x);
+  //mesh->GetNodes(x);
   if (mesh_v) {
     //x.Add(dt, *mesh_v);
     add(mesh_pos, dt, *mesh_v, mesh_pos);
@@ -499,7 +486,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 */
   // Here wa calculate the projected high order solutions
   // This is what will be merged with the HO solution in Remhos
-  CalcLORProjection(x, u_HO_new, pfes, order, lref,
+  CalcLORProjection(mesh_pos, u_HO_new, pfes, order, lref,
                     *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
 
   // Another bounds preservation check
@@ -843,9 +830,9 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
     double y_max = dofs.xe_max(k);
     for (int i = 0; i < ndofs; i++) {
       for (int s = 0; s < subcell_num; s++) {
-        IntegrationRule my_ir = ir_HO;
+        const IntegrationRule &my_ir = ir_HO;
         for (int q = 0; q < nqp_HO; q++) {
-          IntegrationPoint ip_LOR = ir_HO.IntPoint(q);
+          IntegrationPoint ip_LOR = my_ir.IntPoint(q);
           NodeShift(ip_LOR, s, ip_trans, dim, lref);
           if (dim == 2) {
             ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
@@ -857,7 +844,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
           fe->CalcShape(ip_LOR, shape);
           m_rhs(i) +=
               my_ir[q].weight *
-              geom_LOR.detJ(k * subcell_num * nqp_HO + s * nqp_HO + q) *
+              geom_LOR.detJ((k * subcell_num + s) * nqp_HO + q) *
               u_LOR(k * subcell_num + s) * shape(i);
         }
       }
@@ -872,16 +859,7 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
     }
 
     DenseMatrixInverse M_inv(M);
-    DenseMatrix M_temp;
     M_inv.Factor();
-    M_inv.GetInverseMatrix(M_temp);
-
-    //Ay = m
-
-    //m = int{u(x) * phi(x)}
-    //y = dofs of ho space
-    //A is Mass matrix from ho Space
-
 
     FCT_Project(M, M_inv, m_rhs, x_FCT, y_min, y_max, xy);
 
@@ -892,15 +870,19 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
       }
     }
   }
-  /*
+
+  GridFunction u_Proj(&fes, u_Proj_vec);
+/*
   VisItDataCollection HO_dc("HO", &mesh);
   HO_dc.RegisterField("density", &u_HO);
-  VisItDataCollection LOR_dc("LOR", &mesh_lor);
-  LOR_dc.RegisterField("density", &u_LOR);
+  VisItDataCollection LOR_dc("LOR", &mesh);
+  LOR_dc.RegisterField("density", &u_Proj);
 
   double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
-  compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
-*/
+  compute_mass(&fes, ho_mass, LOR_dc, "u_Proj_vec ");
+  */
+  //exit(1);
+
 }
 
 double MassBasedAvgLOR::compute_mass(FiniteElementSpace *L2, double massL2,
@@ -925,6 +907,68 @@ double MassBasedAvgLOR::compute_mass(FiniteElementSpace *L2, double massL2,
    }
    cout << endl;
    return newmass;
+}
+
+void LumpedHO::CalcLOSolution(const Vector &u, Vector &du) const
+{
+  // Compute the new HO solution.
+  Vector du_HO(u.Size());
+  ParGridFunction u_HO_new(&pfes);
+  ho_solver.CalcHOSolution(u, du_HO);
+  add(1.0, u, dt, du_HO, u_HO_new);
+
+  // Mesh positions for the new HO solution.
+  ParMesh *pmesh = pfes.GetParMesh();
+  int dim = pmesh->Dimension();
+  GridFunction x_new(pmesh->GetNodes()->FESpace());
+
+  const int NE = x_new.FESpace()->GetNE();
+  const int ndofs = u.Size() / NE;
+  // Copy the current nodes into x.
+  pmesh->GetNodes(x_new);
+  if (mesh_v)
+  {
+     // Remap mode - get the positions of the mesh at time [t + dt].
+     x_new.Add(dt, *mesh_v);
+  }
+
+  // Need to recover the mass matrix M
+  auto *Tr = x_new.FESpace()->GetMesh()->GetElementTransformation(0);
+  const FiniteElement *fe = u_HO_new.FESpace()->GetFE(0);
+  const IntegrationRule &ir_HO = MassIntegrator::GetRule(*fe, *fe, *Tr);
+  // Store important data in emat
+  // It's stored such that emat[dof1 + height*(dof2 + elem*width)]
+  Vector emat(ndofs * ndofs * NE);
+
+  MassIntegrator mass_int(&ir_HO);
+  mass_int.AssembleEA(pfes, emat, false);
+
+  // u.Size() = NE * ndofs, obvious but it helps to look at
+  DenseMatrix M(u.Size()), LumpedMinv(u.Size());
+  double rowsum;
+  for (int k = 0; k < NE; k++) {
+    for (int j = 0; j < ndofs; j++) {
+      rowsum = 0.0;
+      for (int i = 0; i < ndofs; i++) {
+        M(j + k * ndofs, i + k * ndofs) = emat(i + ndofs * (j + ndofs * k));
+        rowsum += emat(i + ndofs * (j + ndofs * k));
+      }
+      LumpedMinv(j + k * ndofs, j + k * ndofs) = 1 / rowsum;
+    }
+  }
+
+  // Goal is u_LO = LumpedM^{-1} * M * u_HO
+  Vector y(u.Size()), u_LO(u.Size());
+  M.Mult(u,y); // y = M * u_HO
+  LumpedMinv.Mult(y,u_LO); // u_LO = LumpedM^{-1} * y
+
+  for (int k = 0; k < NE; k++)
+  {
+    for (int i = 0; i < ndofs; i++)
+    {
+      du(k*ndofs + i) = (u_LO(i + k * ndofs) - u(k*ndofs + i)) / dt;
+    }
+  }
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
