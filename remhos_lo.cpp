@@ -944,7 +944,7 @@ void LumpedHO::CalcLOSolution(const Vector &u, Vector &du) const
   mass_int.AssembleEA(pfes, emat, false);
 
   // u.Size() = NE * ndofs, obvious but it helps to look at
-  DenseMatrix M(u.Size()), LumpedMinv(u.Size());
+  DenseMatrix LumpedMinv(u.Size()), M(u.Size());
   double rowsum;
   for (int k = 0; k < NE; k++) {
     for (int j = 0; j < ndofs; j++) {
@@ -959,7 +959,8 @@ void LumpedHO::CalcLOSolution(const Vector &u, Vector &du) const
 
   // Goal is u_LO = LumpedM^{-1} * M * u_HO
   Vector y(u.Size()), u_LO(u.Size());
-  M.Mult(u,y); // y = M * u_HO
+  Vector u_H(u_HO_new);
+  M.Mult(u_H,y); // y = M * u_HO
   LumpedMinv.Mult(y,u_LO); // u_LO = LumpedM^{-1} * y
 
   for (int k = 0; k < NE; k++)
