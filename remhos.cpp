@@ -1027,18 +1027,21 @@ int main(int argc, char *argv[])
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
+         cout << "dt_est  = " << dt_est << endl;
+         cout << "dt_real = " << dt_real << endl;
+         cout << "difference = " << dt_est - dt_real << endl;
          if (dt_est < dt_real)
          {
             // Repeat with the proper time step.
             if (myid == 0)
             {
                cout << "Repeat / decrease dt: "
-                    << dt_real << " --> " << 0.85 * dt << endl;
+                    << dt_real << " --> " << 0.75 * dt << endl;
             }
             ti--;
             t -= dt_real;
             S  = Sold;
-            dt = 0.85 * dt;
+            dt = 0.75 * dt;
             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
          }
@@ -1558,11 +1561,13 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
 {
    if (dt_control == TimeStepControl::FixedTimeStep) { return; }
 
-   std::cout<<"AdvectionOperator::UpdateTimeStepEstimate"<<std::endl;
+   //std::cout<<"AdvectionOperator::UpdateTimeStepEstimate"<<std::endl;
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
    const double eps = 1e-12;
    double dt = numeric_limits<double>::infinity();
+
+
 
    for (int i = 0; i < n; i++)
    {

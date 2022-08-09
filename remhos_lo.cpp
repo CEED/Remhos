@@ -484,13 +484,14 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     }
   }
 */
+
   // Here wa calculate the projected high order solutions
   // This is what will be merged with the HO solution in Remhos
   CalcLORProjection(mesh_pos, u_HO_new, pfes, order, lref,
                     *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
 
   // Another bounds preservation check
-/*
+
   for (int k = 0; k < NE; k++) {
     for (int i = 0; i < ndofs; i++) {
       if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
@@ -500,11 +501,12 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
              << u_Proj_vec(i + k * ndofs) << endl;
         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-        exit(0);
+        //exit(0);
       }
     }
   }
-  */
+  
+
 
   // Calculating du
   for (int k = 0; k < NE; k++)
@@ -865,9 +867,11 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
 
     for (int i = 0; i < xy.Size(); i++) {
       u_Proj_vec(i + k * ndofs) = xy(i);
+      /*
       if (u_Proj_vec(i + k * ndofs) < 1e-14) {
         u_Proj_vec(i + k * ndofs) = 1e-14;
       }
+      */
     }
   }
 
