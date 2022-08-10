@@ -32,6 +32,7 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
@@ -1027,9 +1028,9 @@ int main(int argc, char *argv[])
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
-         cout << "dt_est  = " << dt_est << endl;
-         cout << "dt_real = " << dt_real << endl;
-         cout << "difference = " << dt_est - dt_real << endl;
+         //cout << setprecision(16) << "dt_est  = " << dt_est << endl;
+         //cout << "dt_real = " << dt_real << endl;
+         //cout << "difference = " << dt_est - dt_real << endl;
          if (dt_est < dt_real)
          {
             // Repeat with the proper time step.
@@ -1564,9 +1565,10 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    //std::cout<<"AdvectionOperator::UpdateTimeStepEstimate"<<std::endl;
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
-   const double eps = 1e-12;
+   const double eps = 1e-7;
    double dt = numeric_limits<double>::infinity();
 
+   //cout << setprecision(16) << "beginning of function dt = " << dt << endl;
 
 
    for (int i = 0; i < n; i++)
@@ -1574,10 +1576,16 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
       if (dx(i) > eps)
       {
          dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
+         //cout << "x_max(" << i << ") = " << x_max(i) << endl;
+         //cout << "x(" << i << ") = " << x(i) << endl;
+         //cout << "dt = " << dt << endl;
       }
       else if (dx(i) < -eps)
       {
          dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
+         //cout << "x_min(" << i << ") = " << x_min(i) << endl;
+         //cout << "x(" << i << ") = " << x(i) << endl;
+         //cout << "dt = " << dt << endl;
       }
    }
 
@@ -1585,6 +1593,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                  Kbf.ParFESpace()->GetComm());
 
    dt_est = fmin(dt_est, dt);
+   cout << setprecision(16) << "end of function dt = " << dt_est << endl;
 }
 
 // Velocity coefficient

@@ -505,7 +505,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       }
     }
   }
-  
+
 
 
   // Calculating du
@@ -555,7 +555,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 
   const double y_avg = m.Sum() / dMLX;
 
-/*
+
   if ((y_min > y_avg + 1e-12)) {
     std::cout << "Bottom - Average is out of bounds: "
     << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
@@ -566,7 +566,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
     std::cout << "Top - Average is out of bounds: "
               << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " <<
       y_avg << " " << y_max << std::endl;
-  }*/
+  }
 
   Vector z(s);
   Vector beta(s);
