@@ -1129,7 +1129,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    const double max = u_max.GetValue(T, ip);
 
    Vector grad_dir(vdim);
-   double eta = u_max.GetValue(T, ip); 
+   double eta = u_max.GetValue(T, ip);
    u_max_grad_dir.GetVectorValue(T, ip, grad_dir);
 
    /*
@@ -1163,25 +1163,27 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    }
    else { v = v_new; }
    */
-   double vmag = std::sqrt(v * v);                                                                                         
+   double vmag = std::sqrt(v * v);
 
    double eps = 1e-10;
    double transition_power = 2;
 
-   double etaf = (1.0 - std::pow(eta, transition_power));                                                                  
-   if (eta < eps) etaf = 0.0;  
-   etaf = std::max(etaf, 0.0);                                                                                             
+   double etaf = (1.0 - std::pow(eta, transition_power));
+   if (eta < eps) etaf = 0.0;
+   etaf = std::max(etaf, 0.0);
 
+   // Make this an input parameter future Sean
+   //double scale_interface_val = 1.0;
    double scale_interface_val = 1.0;
-   
 
-   for (int d = 0; d < vdim; d++)                                                                                          
-   {                                                                                                                       
 
-      v(d) = -scale_interface_val * etaf * vmag * grad_dir(d);                                                             
+   for (int d = 0; d < vdim; d++)
+   {
 
-   }     
-   
+      v(d) = -scale_interface_val * etaf * vmag * grad_dir(d);
+
+   }
+
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,

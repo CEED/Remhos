@@ -305,8 +305,8 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 
    //Need this part to look at neighbors...
    //Actually compute the bounds....
-   /*
    dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
    for(int e = 0; e < pfes.GetMesh()->GetNE(); ++e){
      const int n_dof = dofs.xi_min.Size()/NE;
      double my_min = std::numeric_limits<double>::infinity();
@@ -318,15 +318,23 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
      dofs.xe_max(e) = my_max;
      dofs.xe_min(e) = my_min;
    }
-   */
 
 
    for (int k = 0; k < NE; k++)
    {
       double u_LO_new = el_mass(k) / el_vol(k);
 
-      if (u_LO_new < 1e-14) {
-        u_LO_new = 1e-14;
+      if (u_LO_new + eps < dofs.xe_min(k) ||
+          u_LO_new - eps > dofs.xe_max(k))
+      {
+        dt_check_loc = true;
+
+        cout << "WARNING: You're out of bounds nerd" << endl;
+        cout << setprecision(16) << "Minimum    = " << dofs.xe_min(k) << endl;
+        cout << "u_LO_new(" << k << ") = " << u_LO_new << endl;
+        cout << "Maximum    = " << dofs.xe_max(k) << endl;
+
+        //exit(1);
       }
 
       for (int i = 0; i < ndofs; i++)
@@ -491,20 +499,23 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
                     *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
 
   // Another bounds preservation check
-
+/*
   for (int k = 0; k < NE; k++) {
     for (int i = 0; i < ndofs; i++) {
       if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
           u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k)) {
+
         cout << "Lower Bound = " << dofs.xe_min(k) << endl;
         cout << "u_Proj_vec(" << i + k * ndofs << ") = "
              << u_Proj_vec(i + k * ndofs) << endl;
         cout << "Upper Bound = " << dofs.xe_max(k) << endl;
         cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-        //exit(0);
+
+        dt_check_loc = true;
+        //exit(1);
       }
     }
-  }
+  }*/
 
 
 
@@ -514,8 +525,22 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     for (int i = 0; i < ndofs; i++)
     {
       du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
+
+      if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
+          u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k)) {
+/*
+        cout << "Lower Bound = " << dofs.xe_min(k) << endl;
+        cout << "u_Proj_vec(" << i + k * ndofs << ") = "
+             << u_Proj_vec(i + k * ndofs) << endl;
+        cout << "Upper Bound = " << dofs.xe_max(k) << endl;
+        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
+*/
+        dt_check_loc = true;
+        //exit(1);
+      }
     }
   }
+  //cout << "after iter dt_check_loc = " << dt_check_loc << endl;
   if (mesh_v) {
     //x.Add(-dt, *mesh_v);
     add(mesh_pos, -dt, *mesh_v, mesh_pos);
@@ -555,7 +580,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
 
   const double y_avg = m.Sum() / dMLX;
 
-
+/*
   if ((y_min > y_avg + 1e-12)) {
     std::cout << "Bottom - Average is out of bounds: "
     << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " << y_min
@@ -566,7 +591,7 @@ void MassBasedAvgLOR::FCT_Project(DenseMatrix &M, DenseMatrixInverse &M_inv,
     std::cout << "Top - Average is out of bounds: "
               << "y_min < y_avg + 1e-12 && y_avg < y_max + 1e-12 " <<
       y_avg << " " << y_max << std::endl;
-  }
+  }*/
 
   Vector z(s);
   Vector beta(s);

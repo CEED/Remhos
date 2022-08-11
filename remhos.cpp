@@ -173,6 +173,9 @@ int main(int argc, char *argv[])
    const char *device_config = "cpu";
    int lref = 2;
 
+   // For dt Stuff
+   bool dt_check_loc = false;
+
    int precision = 8;
    cout.precision(precision);
 
@@ -824,7 +827,8 @@ int main(int argc, char *argv[])
       MFEM_VERIFY(ho_solver != nullptr,
                   "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvg(pfes, *ho_solver,
-                                   (exec_mode == 1) ? &v_gf : nullptr);
+                                   (exec_mode == 1) ? &v_gf : nullptr,
+                                   dt_check_loc);
    }
    else if (lo_type == LOSolverType::MassBasedLOR)
    {
@@ -832,7 +836,8 @@ int main(int argc, char *argv[])
                   "Mass-Based-LOR LO solver requires a choice of a HO solver.");
       lo_solver = new MassBasedAvgLOR(pfes, *ho_solver, x, xsub,
                                       (exec_mode == 1) ? &v_gf : nullptr,
-                                       v_sub_gf, lref, mesh_order);
+                                       v_sub_gf, lref, mesh_order,
+                                       dt_check_loc);
    }
    else if (lo_type == LOSolverType::LumpedHO)
    {
@@ -1027,32 +1032,71 @@ int main(int argc, char *argv[])
 
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
-         double dt_est = adv.GetTimeStepEstimate();
-         //cout << setprecision(16) << "dt_est  = " << dt_est << endl;
-         //cout << "dt_real = " << dt_real << endl;
-         //cout << "difference = " << dt_est - dt_real << endl;
-         if (dt_est < dt_real)
+         if (lo_type == LOSolverType::MassBased ||
+             lo_type == LOSolverType::MassBasedLOR)
          {
-            // Repeat with the proper time step.
-            if (myid == 0)
-            {
-               cout << "Repeat / decrease dt: "
-                    << dt_real << " --> " << 0.75 * dt << endl;
-            }
-            ti--;
-            t -= dt_real;
-            S  = Sold;
-            dt = 0.75 * dt;
-            if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
-            continue;
+           DofInfo dofs(pfes, bounds_type);
+           dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+
+           bool dt_check;
+          // cout << "dt_check_loc = " << dt_check_loc << endl;
+           MPI_Allreduce(&dt_check_loc, &dt_check, 1, MPI_C_BOOL, MPI_LOR, comm);
+           int count = 0;
+           //cout << "dt_check = " << dt_check << endl;
+
+           if (dt_check)
+           {
+             // Repeat with the proper time step.
+             if (myid == 0)
+             {
+                cout << "Repeat / decrease dt: "
+                     << dt_real << " --> " << 0.85 * dt << endl;
+             }
+             ti--;
+             t -= dt_real;
+             S  = Sold;
+             dt = 0.85 * dt;
+             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
+             dt_check_loc = false;
+             continue;
+           }
+           else
+           {
+              if (myid == 0)
+              {
+                 cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+              }
+              dt *= 1.02;
+           }
+           //cout << endl;
          }
-         else if (dt_est > 1.25 * dt_real)
+         else
          {
-            if (myid == 0)
-            {
-               cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
-            }
-            dt *= 1.02;
+           double dt_est = adv.GetTimeStepEstimate();
+
+           if (dt_est < dt_real)
+           {
+              // Repeat with the proper time step.
+              if (myid == 0)
+              {
+                 cout << "Repeat / decrease dt: "
+                      << dt_real << " --> " << 0.75 * dt << endl;
+              }
+              ti--;
+              t -= dt_real;
+              S  = Sold;
+              dt = 0.75 * dt;
+              if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
+              continue;
+           }
+           else if (dt_est > 1.25 * dt_real)
+           {
+              if (myid == 0)
+              {
+                 cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+              }
+              dt *= 1.02;
+           }
          }
       }
 
@@ -1455,13 +1499,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
-      const int n_iters = 1; // @ Sean play with this parameter
-      for(int i = 0; i<n_iters; ++i) {
-        d_u = 0.0;
-        fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                    dofs.xi_min, dofs.xi_max, d_u);
-        du_LO = d_u;
-      }
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
@@ -1469,6 +1506,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
          //We need a version of this for the LOR refine solution
          //make sure subcells are within bounds of of dofs.xe_min, dofs.xe_max
+      }
+
+      const int n_iters = 1; // @ Sean play with this parameter
+      for(int i = 0; i<n_iters; ++i) {
+        d_u = 0.0;
+        fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                    dofs.xi_min, dofs.xi_max, d_u);
+        du_LO = d_u;
       }
    }
    else if (lo_solver)
@@ -1566,7 +1611,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    // x_min <= x + dt * dx <= x_max.
    int n = x.Size();
    const double eps = 1e-7;
-   double dt = numeric_limits<double>::infinity();
+   double dt_temp = numeric_limits<double>::infinity();
 
    //cout << setprecision(16) << "beginning of function dt = " << dt << endl;
 
@@ -1575,25 +1620,25 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    {
       if (dx(i) > eps)
       {
-         dt = fmin(dt, (x_max(i) - x(i)) / dx(i) );
+         dt_temp = fmin(dt_temp, (x_max(i) - x(i)) / dx(i) );
          //cout << "x_max(" << i << ") = " << x_max(i) << endl;
          //cout << "x(" << i << ") = " << x(i) << endl;
          //cout << "dt = " << dt << endl;
       }
       else if (dx(i) < -eps)
       {
-         dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
+         dt_temp = fmin(dt_temp, (x_min(i) - x(i)) / dx(i) );
          //cout << "x_min(" << i << ") = " << x_min(i) << endl;
          //cout << "x(" << i << ") = " << x(i) << endl;
          //cout << "dt = " << dt << endl;
       }
    }
 
-   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+   MPI_Allreduce(MPI_IN_PLACE, &dt_temp, 1, MPI_DOUBLE, MPI_MIN,
                  Kbf.ParFESpace()->GetComm());
 
-   dt_est = fmin(dt_est, dt);
-   cout << setprecision(16) << "end of function dt = " << dt_est << endl;
+   dt_est = fmin(dt_est, dt_temp);
+   //cout << setprecision(16) << "end of function dt = " << dt_est << endl;
 }
 
 // Velocity coefficient

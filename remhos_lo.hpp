@@ -88,6 +88,7 @@ class MassBasedAvg : public LOSolver
 protected:
    HOSolver &ho_solver;
    const GridFunction *mesh_v;
+   bool &dt_check_loc;
 
    void MassesAndVolumesAtPosition(const ParGridFunction &u,
                                    const GridFunction &x,
@@ -95,8 +96,9 @@ protected:
 
 public:
   MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
-               const GridFunction *mesh_vel)
-     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+               const GridFunction *mesh_vel, bool &dt_check_loc)
+     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel),
+       dt_check_loc(dt_check_loc) { }
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
@@ -113,17 +115,18 @@ protected:
   Vector start_mesh_pos, start_submesh_pos;
   int lref;
   const int mesh_order;
+  bool &dt_check_loc;
 
 public:
   MassBasedAvgLOR(ParFiniteElementSpace &space, HOSolver &hos,
 		              GridFunction &pos, GridFunction *sub_pos,
                   const GridFunction *mesh_vel, GridFunction &sub_vel,
-                  int lref, const int mesh_order)
+                  int lref, const int mesh_order, bool &dt_check_loc)
     : LOSolver(space), ho_solver(hos),
       start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
       mesh_pos(pos), submesh_pos(sub_pos),
       mesh_v(mesh_vel), submesh_vel(sub_vel), lref(lref),
-      mesh_order(mesh_order) { }
+      mesh_order(mesh_order), dt_check_loc(dt_check_loc) { }
 
   virtual void FCT_Project(DenseMatrix &M,
                            DenseMatrixInverse &M_inv,
