@@ -237,6 +237,8 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    fij_el = 0.0;
    Array<int> dofs;
    int dof_id;
+   auto ea_flux_mat = mfem::Reshape(EA_flux_mat.Write(), ndofs, ndofs, NE);
+#if 1
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }
@@ -260,10 +262,19 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
             fij_el(i, j) = beta(j) * flux_el(i) - beta(i) * flux_el(j);
          }
       }
+
+      for(int j=1; j<ndofs; ++j) {
+        for(int i=0; i<j; ++i) {
+          ea_flux_mat(j, i, k) += fij_el(i, j);
+        }
+      }
+
       pfes.GetElementDofs(k, dofs);
       flux_ij.AddSubMatrix(dofs, dofs, fij_el);
    }
+#endif
 
+   //std:cout<<"Here... "<<std::endl;
    // Iterated FCT correction.
    // To get the LO compatible product solution (with s_avg), just do
    // d_us = dus_lo_fct instead of the loop below.
