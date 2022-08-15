@@ -606,6 +606,51 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
 
    du = du_lo;
 
+   Vector my_du(du);
+   //----[Element Based]-----
+
+   const int NE = pfes.GetParMesh()->GetNE();
+   const int ndofs = du.Size() / NE;
+   auto ea_flux_mat = mfem::Reshape(EA_flux_mat.ReadWrite(), ndofs, ndofs, NE);
+
+   for(int e=0; e<NE; ++e)
+   {
+     const int s = du.Size();
+     for(int i_loc = 0; i_loc < ndofs; ++i_loc) {
+       for(int j_loc = 0; j_loc < ndofs; ++j_loc) {
+
+         int i = e*ndofs + i_loc;
+         int j = e*ndofs + j_loc;
+
+         if(j_loc <= i_loc) {continue;}
+
+         double fij = ea_flux_mat(j_loc, i_loc, e);
+         double a_ij;
+
+         if(fij >= 0.0)
+         {
+           a_ij = (j < s) ? min(coeff_pos(i), coeff_neg(j))
+                          : min(coeff_pos(i), a_neg_n(j - s));
+         }else{
+           a_ij = (j < s) ? min(coeff_neg(i), coeff_pos(j))
+             : min(coeff_neg(i), a_pos_n(j - s));
+         }
+
+         fij *= a_ij;
+         my_du(i) += fij / m(i) / dt;
+         if (j < s) { my_du(j) -= fij / m(j) / dt; }
+
+         ea_flux_mat(j_loc, i_loc, e) -= fij;
+       }
+     }
+   }
+
+   
+
+
+
+
+   //------[Traditional]-----
    coeff_pos.HostReadWrite();
    coeff_neg.HostReadWrite();
    du.HostReadWrite();
