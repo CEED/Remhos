@@ -327,6 +327,60 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
                                      const Vector &du_ho,
                                      SparseMatrix &flux_mat) const
 {
+
+
+   //Element based version
+   pfes.GetParMesh()->DeleteGeometricFactors();
+
+   Elem_K.Assemble();
+   if( auto EA_ptr = dynamic_cast<EABilinearFormExtension * >(Elem_K.GetBilinearFormExtension()))
+   {
+     K_EA.SetSize(EA_ptr->GetEAData().Size());
+     EA_flux_mat.SetSize(EA_ptr->GetEAData().Size());
+
+     K_EA = EA_ptr->GetEAData();
+   }
+
+
+   int NE = pfes.GetParMesh()->GetNE();
+   int ndofs = u.Size() / NE;
+   auto ea_k = mfem::Reshape(K_EA.Read(), ndofs, ndofs, NE);
+   auto ea_flux_mat = mfem::Reshape(EA_flux_mat.Write(), ndofs, ndofs, NE);
+
+   for(int e = 0; e < NE; ++e)
+   {
+     for(int r=0; r<ndofs; ++r) {
+       for(int c=r+1; c<ndofs; ++c) {
+         double kij = ea_k(r, c, e);
+         double kji = ea_k(c, r, e);
+         double dij = fmax(fmax(0.0, (-kij)), (-kji));
+         ea_flux_mat(r, c, e) = dij;
+         ea_flux_mat(c, r, e) = dij;
+       }
+       ea_flux_mat(r,r,e) = 0.0;
+     }
+
+     for(int r=0; r<ndofs; r++) {
+       double rowsum(0);
+       for(int c=0; c<ndofs; ++c){
+         rowsum += ea_flux_mat(r, c, e);
+       }
+       ea_flux_mat(r,r,e) = -rowsum;
+     }
+
+     //Dij(pi - pj)
+     for(int r=0; r<ndofs; ++r) {
+       for(int c=0; c<ndofs; ++c) {
+
+         int i = r + ndofs*e;
+         int j = c + ndofs*e;
+         ea_flux_mat(c, r, e) *= dt*(u(i) - u(j));
+       }
+     }
+   }//Element loop
+
+
+
    const int s = u.Size();
    double *flux_data = flux_mat.HostReadWriteData();
    flux_mat.HostReadI(); flux_mat.HostReadJ();
@@ -351,24 +405,60 @@ void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
       }
    }
 
-   const int NE = pfes.GetMesh()->GetNE();
+   //const int NE = pfes.GetMesh()->GetNE();
    const int ndof = s / NE;
    Array<int> dofs;
    DenseMatrix Mz(ndof);
+   DenseMatrix M_loc(ndof);
+   DenseMatrix K_loc(ndof);
    Vector du_z(ndof);
    for (int k = 0; k < NE; k++)
    {
       pfes.GetElementDofs(k, dofs);
       M.GetSubMatrix(dofs, dofs, Mz);
+      //M.GetSubMatrix(dofs, dofs, M_loc);
+      M_loc = Mz;
+
+      //Check correctness
+      /*
+      flux_mat.GetSubMatrix(dofs, dofs, K_loc);
+      double error = 0.0;
+      for(int r=0; r<ndofs; ++r) {
+        for(int c=0; c<ndofs; ++c) {
+          error += (K_loc(r,c) - ea_flux_mat(c, r, k))*(K_loc(r,c) - ea_flux_mat(c, r, k));
+          std::cout<<std::setprecision(15)<<K_loc(r,c) <<" "<<ea_flux_mat(c, r, k)<<std::endl;
+          std::cout<<std::setprecision(15)<<"error = "<<error<<std::endl;
+        }
+      }
+      if(error > 1e-13) {
+        std::cout<<"Error too high "<<error<<std::endl; exit(-1);
+      }else{
+        //std::cout<<"Error is good "<<error<<std::endl;
+      }
+      std::cout<<" -- "<<std::endl;
+      */
+
       du_ho.GetSubVector(dofs, du_z);
       for (int i = 0; i < ndof; i++)
       {
          int j = 0;
          for (; j <= i; j++) { Mz(i, j) = 0.0; }
          for (; j < ndof; j++) { Mz(i, j) *= dt * (du_z(i) - du_z(j)); }
+
       }
       flux_mat.AddSubMatrix(dofs, dofs, Mz, 0);
+
+
+      for(int r=0; r<ndofs; ++r) {
+        for(int c=0; c<ndofs; ++c) {
+          int i = r + ndofs*k;
+          int j = c + ndofs*k;
+          ea_flux_mat(c, r, k) += M_loc(c, r)* dt * (du_ho(i) - du_ho(j));
+          //ea_flux_mat(c, r, k) += M_loc(c, r);//* dt * (du_ho(i) - du_ho(j));
+        }
+      }
    }
+
 }
 
 // Compute sums of incoming fluxes for every DOF.

@@ -148,8 +148,8 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
-   FCTSolverType fct_type         = FCTSolverType::None;
+   LOSolverType lo_type           = LOSolverType::DiscrUpwind;
+   FCTSolverType fct_type         = FCTSolverType::FluxBased;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
    bool pa = false;
