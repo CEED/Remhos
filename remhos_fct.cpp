@@ -501,6 +501,34 @@ void FluxBasedFCT::AddFluxesAtDofs(const SparseMatrix &flux_mat,
    //  }
    //
    //
+   const int NE = pfes.GetParMesh()->GetNE();
+   const int ndofs = flux_pos.Size() / NE;
+   Vector my_flux_pos(flux_pos), my_flux_neg(flux_neg);
+   auto ea_flux_mat = mfem::Reshape(EA_flux_mat.ReadWrite(), ndofs, ndofs, NE);
+
+   for(int e=0; e<NE; ++e)
+   {
+     for(int i_loc = 0; i_loc < ndofs; ++i_loc) {
+       for(int j_loc = 0; j_loc < ndofs; ++j_loc) {
+
+         int i = e*ndofs + i_loc;
+         int j = e*ndofs + j_loc;
+
+         if(j_loc <= i_loc) {continue;}
+
+         const double f_ij = ea_flux_mat(j_loc, i_loc, e);
+
+         if(f_ij >= 0.0)
+         {
+           my_flux_pos(i) += f_ij;
+           my_flux_neg(j) -= f_ij;
+         }else{
+           my_flux_neg(i) += f_ij;
+           my_flux_pos(j) -= f_ij;
+         }
+       }
+     }
+   }
 
    for (int i = 0; i < s; i++)
    {
@@ -528,6 +556,23 @@ void FluxBasedFCT::AddFluxesAtDofs(const SparseMatrix &flux_mat,
          }
       }
    }
+
+   my_flux_pos -= flux_pos;
+   my_flux_neg -= flux_neg;
+
+   //my_flux_pos.Print();
+   //std::cout<<"---"<<std::endl;
+   //flux_pos.Print();
+   double error_pos = my_flux_pos.Norml2();
+   double error_neg = my_flux_neg.Norml2();
+   double tol = 1e-13;
+   if(error_pos > tol || error_neg > tol) {
+     std::cout<<"error too high "<<error_pos<<" "<<error_neg<<std::endl;
+     exit(-1);
+   }
+
+
+
 }
 
 // Compute the so-called alpha coefficients that scale the fluxes into gp, gm.
