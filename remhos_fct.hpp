@@ -90,6 +90,7 @@ class FluxBasedFCT : public FCTSolver
 protected:
    const SparseMatrix &K, &M;
    const Array<int> &K_smap;
+   const BilinearForm &Elem_K;
 
    // Temporary computation objects.
    mutable SparseMatrix flux_ij;
@@ -111,10 +112,11 @@ protected:
 public:
    FluxBasedFCT(ParFiniteElementSpace &space,
                 SmoothnessIndicator *si, double delta_t,
+                const ParBilinearForm &elem_k,
                 const SparseMatrix &adv_mat, const Array<int> &adv_smap,
                 const SparseMatrix &mass_mat, int fct_iterations = 1)
       : FCTSolver(space, si, delta_t, true),
-        K(adv_mat), M(mass_mat), K_smap(adv_smap), flux_ij(adv_mat),
+        Elem_K(elem_k), K(adv_mat), M(mass_mat), K_smap(adv_smap), flux_ij(adv_mat),
         gp(&pfes), gm(&pfes), iter_cnt(fct_iterations) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,

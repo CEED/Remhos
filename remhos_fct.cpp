@@ -382,6 +382,36 @@ void FluxBasedFCT::AddFluxesAtDofs(const SparseMatrix &flux_mat,
    flux_neg = 0.0;
    flux_pos.HostReadWrite();
    flux_neg.HostReadWrite();
+
+   //For e = 0, NE
+   //
+   //  //loop over col
+   //  for i_loc = 0, ndof
+   //    for j_loc = 0, ndof
+   //      i = e*ndof + i_loc
+   //      j = e*ndof + j_loc
+   //
+   //// The skipped fluxes will be added when the outer loop is at j as
+   //// the flux matrix is always symmetric.
+   //if (j <= i) { continue; } or (j_loc <= i_loc)
+   //
+   //const double f_ij = flux_data(i_loc, j_loc, e)
+   //
+   ////if (f_ij >= 0.0)
+   //  {
+   //    flux_pos(i) += f_ij;
+   //     Modify j if it's on the same MPI task (prevents x2 counting).
+   //    flux_neg(j) -= f_ij;  -- no need to check, always true
+   //  }
+   //  else
+   //  {
+   //   flux_neg(i) += f_ij;
+   //    Modify j if it's on the same MPI task (prevents x2 counting).
+   //    flux_pos(j) -= f_ij;  -- no need to check, always true for positive basis function
+   //  }
+   //
+   //
+
    for (int i = 0; i < s; i++)
    {
       for (int k = flux_I[i]; k < flux_I[i + 1]; k++)
