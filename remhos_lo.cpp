@@ -328,12 +328,12 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
           u_LO_new - eps > dofs.xe_max(k))
       {
         dt_check_loc = true;
-
+/*
         cout << "WARNING: You're out of bounds nerd" << endl;
         cout << setprecision(16) << "Minimum    = " << dofs.xe_min(k) << endl;
         cout << "u_LO_new(" << k << ") = " << u_LO_new << endl;
         cout << "Maximum    = " << dofs.xe_max(k) << endl;
-
+*/
         //exit(1);
       }
 
@@ -377,7 +377,8 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 
 void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 {
-  //u_new = u + dt * du_HO;
+  //----------------------------------------------------------------------
+  // This section is for the high order section
   Vector du_HO(u.Size());
   ParGridFunction u_HO_new(&pfes);
   ho_solver.CalcHOSolution(u, du_HO);
@@ -404,7 +405,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     subcell_num = lref * lref * lref;
   }
 
-  Vector u_LOR_vec(subcell_num * pfes.GetMesh()->GetNE());
+  //Vector u_LOR_vec(subcell_num * pfes.GetMesh()->GetNE());
   Vector u_Proj_vec(u); u_Proj_vec = 0.0;
 
   // Some useful constants
@@ -435,8 +436,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
   }
 
   //----------------------------------------------------------------------
-  /*
-  // Stuff I added From CalcLORSolution
+  // This section is for the LOR space
   int basis_lor = BasisType::ClosedUniform;
   ParMesh mesh_lor = ParMesh::MakeRefined(*mesh, lref, basis_lor);
   //int dim = mesh.Dimension();
@@ -459,6 +459,7 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   N->Mult(*mesh->GetNodes(), *mesh_lor.GetNodes());
 
+
   // Discontinuous FE space for LOR
   int LOR_order = 0;
   FiniteElementCollection *fec_LOR;
@@ -467,11 +468,11 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // Function for the LOR solution, doesn't need to be seen outside this functions
   ParGridFunction u_LOR(&fes_LOR);
-  */
-  //----------------------------------------------------------------------------
 
-  // Here we calculate the low order refined solution
-  CalcLORSolution(u_HO_new, pfes, order, lref, *mesh, u_LOR_vec, mesh_order);
+  //----------------------------------------------------------------------------
+  // This section is for calculating the LOR solution and projection
+
+  CalcLORSolution(u_HO_new, u_LOR, pfes, fes_LOR, *mesh, mesh_lor);
 
   // This is a check for bounds preservatoin
   // This assumes that the timestep is fixed
@@ -495,8 +496,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   // Here wa calculate the projected high order solutions
   // This is what will be merged with the HO solution in Remhos
-  CalcLORProjection(mesh_pos, u_HO_new, pfes, order, lref,
-                    *mesh, dofs, u_LOR_vec, u_Proj_vec, mesh_order);
+  CalcLORProjection(mesh_pos, u_LOR, pfes, fes_LOR, order, lref,
+                    dim, dofs, u_Proj_vec);
 
   // Another bounds preservation check
 /*
@@ -527,22 +528,14 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
       du(k*ndofs + i) = (u_Proj_vec(k*ndofs + i) - u(k*ndofs + i)) / dt;
 
       if (u_Proj_vec(i + k * ndofs) + eps <= dofs.xe_min(k) ||
-          u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k)) {
-/*
-        cout << "Lower Bound = " << dofs.xe_min(k) << endl;
-        cout << "u_Proj_vec(" << i + k * ndofs << ") = "
-             << u_Proj_vec(i + k * ndofs) << endl;
-        cout << "Upper Bound = " << dofs.xe_max(k) << endl;
-        cout << "WARNING: Bounds are not preserved, choose a smaller dt." << endl;
-*/
+          u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k))
+      {
         dt_check_loc = true;
-        //exit(1);
       }
     }
   }
-  //cout << "after iter dt_check_loc = " << dt_check_loc << endl;
+
   if (mesh_v) {
-    //x.Add(-dt, *mesh_v);
     add(mesh_pos, -dt, *mesh_v, mesh_pos);
   }
 }
@@ -707,109 +700,28 @@ void MassBasedAvgLOR::NodeShift(const IntegrationPoint &ip, const int &s,
 }
 
 void MassBasedAvgLOR::CalcLORSolution(ParGridFunction &u_HO,
+                                      ParGridFunction &u_LOR,
                                       ParFiniteElementSpace &fes,
-                                      const int &order, const int &lref,
-                                      ParMesh &mesh, Vector &u_LOR_vec,
-                                      const int mesh_order) const
+                                      ParFiniteElementSpace &fes_LOR,
+                                      ParMesh &mesh,
+                                      ParMesh &mesh_lor) const
 {
-  int basis_lor = BasisType::ClosedUniform;
-  ParMesh mesh_lor = ParMesh::MakeRefined(mesh, lref, basis_lor);
-  int dim = mesh.Dimension();
-
-  const bool periodic = mesh.GetNodes() != NULL &&
-                        dynamic_cast<const L2_FECollection *>
-                        (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
-
-  FiniteElementCollection *mesh_fec;
-  mesh_fec = new DG_FECollection(mesh_order, dim, BasisType::Positive);
-
-  ParFiniteElementSpace mesh_pfes(&mesh, mesh_fec, dim);
-  ParGridFunction x(&mesh_pfes);
-
-
-  mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
-
-  OperatorPtr N;
-  mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
-
-  N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
-
-  // Discontinuous FE space for LOR
-  int LOR_order = 0;
-  FiniteElementCollection *fec_LOR;
-  fec_LOR = new DG_FECollection(LOR_order, dim, BasisType::Positive);
-  ParFiniteElementSpace fes_LOR(&mesh_lor, fec_LOR);
-
-  // Function for the LOR solution, doesn't need to be seen outside this functions
-  ParGridFunction u_LOR(&fes_LOR);
-
   // Projecting from the HO space to the LOR space
   GridTransfer *gt;
   gt = new L2ProjectionGridTransfer(fes, fes_LOR);
   const Operator &R = gt->ForwardOperator();
   R.Mult(u_HO, u_LOR);
   delete gt;
-
-  VisItDataCollection HO_dc("HO", &mesh);
-  HO_dc.RegisterField("density", &u_HO);
-  VisItDataCollection LOR_dc("LOR", &mesh_lor);
-  LOR_dc.RegisterField("density", &u_LOR);
-
-  //double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
-  //compute_mass(&fes_LOR, ho_mass, LOR_dc, "LOR ");
-
-  // Mesh outputs
-  ofstream meshHO("meshHO.mesh");
-  meshHO.precision(12);
-  mesh.Print(meshHO);
-  ofstream meshLOR("meshLOR.mesh");
-  meshLOR.precision(12);
-  mesh_lor.Print(meshLOR);
-
-  for (int i = 0; i < u_LOR_vec.Size(); i++) {
-    u_LOR_vec(i) = u_LOR(i);
-  }
 }
 
 void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
-                                        ParGridFunction &u_HO,
+                                        ParGridFunction &u_LOR,
                                         ParFiniteElementSpace &fes,
+                                        ParFiniteElementSpace &fes_LOR,
                                         const int &order, const int &lref,
-                                        ParMesh &mesh, DofInfo &dofs,
-                                        Vector &u_LOR_vec, Vector &u_Proj_vec,
-                                        const int mesh_order) const
+                                        int &dim, DofInfo &dofs,
+                                        Vector &u_Proj_vec) const
 {
-  int basis_lor = BasisType::ClosedUniform;
-  ParMesh mesh_lor = ParMesh::MakeRefined(mesh, lref, basis_lor);
-  int dim = mesh.Dimension();
-
-  const bool periodic = mesh.GetNodes() != NULL &&
-                        dynamic_cast<const L2_FECollection *>
-                        (mesh.GetNodes()->FESpace()->FEColl()) != NULL;
-
-  FiniteElementCollection *mesh_fec;
-  mesh_fec = new DG_FECollection(mesh_order, dim, BasisType::Positive);
-
-  ParFiniteElementSpace mesh_pfes(&mesh, mesh_fec, dim);
-  ParGridFunction x_ho(&mesh_pfes);
-
-  // Need this section for higher mesh order on the LOR mesh
-  mesh_lor.SetCurvature(mesh_order, periodic, -1, Ordering::byNODES);
-
-  OperatorPtr N;
-  mesh_lor.GetNodalFESpace()->GetTransferOperator(*mesh.GetNodalFESpace(),N);
-
-  N->Mult(*mesh.GetNodes(), *mesh_lor.GetNodes());
-
-  // Discontinuous FE space for LOR
-  //int dim = mesh.Dimension();
-  int LOR_order = 0;
-  DG_FECollection fec_LOR(LOR_order, dim, BasisType::Positive);
-  ParFiniteElementSpace fes_LOR(&mesh_lor, &fec_LOR);
-
-  // Function for the LOR solution, doesn't need to be seen outside this functions
-  ParGridFunction u_LOR(&fes_LOR, u_LOR_vec);
-
   // Setup for projecting back to the HO space
   const int NE = x.FESpace()->GetNE();
 
@@ -825,8 +737,9 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   }
 
   auto *Tr = x.FESpace()->GetMesh()->GetElementTransformation(0);
-  const FiniteElement *fe = u_HO.FESpace()->GetFE(0);
+  const FiniteElement *fe = fes.GetFE(0);
   const IntegrationRule &ir_HO = MassIntegrator::GetRule(*fe, *fe, *Tr);
+
   // Store important data in emat
   // It's stored such that emat[dof1 + height*(dof2 + elem*width)]
   Vector emat(ndofs * ndofs * NE);
@@ -901,16 +814,6 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   }
 
   GridFunction u_Proj(&fes, u_Proj_vec);
-/*
-  VisItDataCollection HO_dc("HO", &mesh);
-  HO_dc.RegisterField("density", &u_HO);
-  VisItDataCollection LOR_dc("LOR", &mesh);
-  LOR_dc.RegisterField("density", &u_Proj);
-
-  double ho_mass = compute_mass(&fes, -1.0, HO_dc, "HO  ");
-  compute_mass(&fes, ho_mass, LOR_dc, "u_Proj_vec ");
-  */
-  //exit(1);
 
 }
 

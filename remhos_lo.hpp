@@ -140,18 +140,19 @@ public:
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 
   virtual void CalcLORSolution(ParGridFunction &u_HO,
+                               ParGridFunction &u_LOR,
                                ParFiniteElementSpace &fes,
-                               const int &order, const int &lref,
-                               ParMesh &mesh, Vector &u_LOR_vec,
-                               const int mesh_order) const;
+                               ParFiniteElementSpace &fes_LOR,
+                               ParMesh &mesh,
+                               ParMesh &mesh_lor) const;
 
   virtual void CalcLORProjection(const GridFunction &x,
-                                 ParGridFunction &u_HO,
+                                 ParGridFunction &u_LOR,
                                  ParFiniteElementSpace &fes,
+                                 ParFiniteElementSpace &fes_LOR,
                                  const int &order, const int &lref,
-                                 ParMesh &mesh, DofInfo &dofs,
-                                 Vector &u_LOR_vec, Vector &u_Proj_vec,
-                                 const int mesh_order) const;
+                                 int &dim,
+                                 DofInfo &dofs, Vector &u_Proj_vec) const;
 
   virtual double compute_mass(FiniteElementSpace *L2, double massL2,
                               VisItDataCollection &dc, std::string prefix) const;

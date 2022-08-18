@@ -33,12 +33,14 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <vector>
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
+#include <time.h>
 
 using namespace std;
 using namespace mfem;
@@ -158,7 +160,7 @@ int main(int argc, char *argv[])
    FCTSolverType fct_type         = FCTSolverType::FCTProject;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
-   bool sharp = false;
+   bool sharp = true;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -463,12 +465,12 @@ int main(int argc, char *argv[])
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
    VelocityCoefficient v_new_coeff_adv(velocity, u_max_bounds,
-                                       u_max_bounds_grad_dir, 1.0, 0, false);
+                                       u_max_bounds_grad_dir, 1.0, 0, false, 1.0);
    VelocityCoefficient v_new_coeff_rem(v_mesh_coeff, u_max_bounds,
-                                       u_max_bounds_grad_dir, 1.0, 1, false);
+                                       u_max_bounds_grad_dir, 1.0, 1, false, 1.0);
 
    VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
-                                    u_max_bounds_grad_dir, 1.0, 1, true);
+                                    u_max_bounds_grad_dir, 1.0, 1, true, 1.0);
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -986,6 +988,27 @@ int main(int argc, char *argv[])
    bool done = false;
    BlockVector Sold(S);
    int ti_total = 0, ti = 0;
+
+   // For recording things
+   double scale_interface_val = 1.0;
+
+   std::vector<double> time_vec;
+   time_vec.push_back(dt);
+   std::vector<double> sharp_vec;
+   sharp_vec.push_back(scale_interface_val);
+
+   double time_cap = dt;
+   double sharp_cap = 1.0;
+   double sharp_min = 0.0;
+
+   double dt_dec = 0.85;
+   double dt_inc = 1.05;
+   double sharp_dec = 0.75;
+   double sharp_inc = 1.02;
+
+   // timing stuff
+   clock_t start = clock();
+
    while (done == false)
    {
       double dt_real = min(dt, t_final - t);
@@ -1044,31 +1067,64 @@ int main(int argc, char *argv[])
            int count = 0;
            //cout << "dt_check = " << dt_check << endl;
 
+           //cout << scale_interface_val << endl;
+
            if (dt_check)
            {
              // Repeat with the proper time step.
              if (myid == 0)
              {
                 cout << "Repeat / decrease dt: "
-                     << dt_real << " --> " << 0.85 * dt << endl;
+                     << dt_real << " --> " << dt_dec * dt << endl;
+                if (scale_interface_val > sharp_min)
+                {
+                cout << "Decrease sharpness scale: " << scale_interface_val
+                     << " -> " << sharp_dec * scale_interface_val << endl;
+                }
              }
              ti--;
              t -= dt_real;
              S  = Sold;
-             dt = 0.85 * dt;
+             dt = dt_dec * dt;
              if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
              dt_check_loc = false;
+
+             if (scale_interface_val > sharp_min)
+             {
+               scale_interface_val = sharp_dec * scale_interface_val;
+               v_new_coeff_rem.change_scale(scale_interface_val);
+               v_diff_coeff.change_scale(scale_interface_val);
+             }
+
              continue;
            }
            else
            {
               if (myid == 0)
               {
-                 cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+                 if (dt < time_cap)
+                 {
+                   cout << "Increase dt: " << dt << " --> " << dt_inc * dt << endl;
+                 }
+                 if (scale_interface_val < sharp_cap)
+                 {
+                   cout << "Increase sharpness scale: " << scale_interface_val
+                        << " -> " << sharp_inc * scale_interface_val << endl;
+                 }
               }
-              dt *= 1.02;
+              if (dt < time_cap)
+              {
+                dt *= dt_inc;
+              }
+              if (scale_interface_val < sharp_cap)
+              {
+                scale_interface_val = sharp_inc * scale_interface_val;
+                v_new_coeff_rem.change_scale(scale_interface_val);
+                v_diff_coeff.change_scale(scale_interface_val);
+              }
            }
-           //cout << endl;
+           time_vec.push_back(dt);
+           sharp_vec.push_back(scale_interface_val);
          }
          else
          {
@@ -1128,7 +1184,7 @@ int main(int argc, char *argv[])
          ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
          if (myid == 0)
          {
-            std::cout << "   out: ";
+            std::cout << "   ou t: ";
             std::cout << std::scientific << std::setprecision(5);
             std::cout << "min_s: " << s_min_glob
                       << "; max_s: " << s_max_glob << std::endl;
@@ -1238,6 +1294,31 @@ int main(int argc, char *argv[])
       }
    }
 
+   // timing Stuff
+   clock_t end = clock();
+   double elapsed = double(end - start)/CLOCKS_PER_SEC;
+   if (myid == 0)
+   {
+     cout << "Time elapsed: " << elapsed << endl;
+   }
+
+/*
+   for (int i = 0; i < time_vec.size(); i++)
+   {
+     if (myid == 0)
+     {
+       cout << time_vec[i] << endl;
+     }
+   }
+   cout << endl;
+   for (int i = 0; i < sharp_vec.size(); i++)
+   {
+     if (myid == 0)
+     {
+       cout << sharp_vec[i] << endl;
+     }
+   }
+*/
    if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
    {
       cout << "Total time steps: " << ti_total
@@ -1508,8 +1589,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          //make sure subcells are within bounds of of dofs.xe_min, dofs.xe_max
       }
 
-      const int n_iters = 1; // @ Sean play with this parameter
-      for(int i = 0; i<n_iters; ++i) {
+      const int fct_iters = 10; // @ Sean play with this parameter
+      for(int i = 0; i < fct_iters; ++i) {
         d_u = 0.0;
         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                     dofs.xi_min, dofs.xi_max, d_u);

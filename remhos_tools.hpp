@@ -270,19 +270,24 @@ private:
    const double interface_val;
    int exec_mode;
    bool take_v_difference;
+   double scale_interface_val;
 
 public:
    VelocityCoefficient(VectorCoefficient &vc,
                        const ParGridFunction &umax,
                        const ParGridFunction &umgd,
-                       double interface, int mode, bool take_v_diff)
+                       double interface, int mode, bool take_v_diff,
+                       double scale_interface_val)
       : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
         v_coeff(vc), u_max(umax), u_max_grad_dir(umgd),
         interface_val(interface), exec_mode(mode),
-        take_v_difference(take_v_diff) { }
+        take_v_difference(take_v_diff),
+        scale_interface_val(scale_interface_val) { }
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
+
+   virtual void change_scale(const double &new_scale_interface_val);
 };
 
 class NormalGradCoeff : public VectorCoefficient

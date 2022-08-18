@@ -1118,6 +1118,9 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    T.SetIntPoint(&ip);
    v_coeff.Eval(v, T, ip);
 
+   // Only for causing segfaults
+   //*(int*)0 = 0;
+
    Vector v_new(v);
    const double trans_01_power = 3;
 
@@ -1174,8 +1177,7 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
 
    // Make this an input parameter future Sean
    //double scale_interface_val = 1.0;
-   double scale_interface_val = 1.0;
-
+   //cout << "scale_interface_val = " << scale_interface_val << endl;
 
    for (int d = 0; d < vdim; d++)
    {
@@ -1184,6 +1186,11 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
 
    }
 
+}
+
+void VelocityCoefficient::change_scale(const double &new_scale_interface_val)
+{
+  scale_interface_val = new_scale_interface_val;
 }
 
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
