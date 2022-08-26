@@ -328,13 +328,6 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
           u_LO_new - eps > dofs.xe_max(k))
       {
         dt_check_loc = true;
-/*
-        cout << "WARNING: You're out of bounds nerd" << endl;
-        cout << setprecision(16) << "Minimum    = " << dofs.xe_min(k) << endl;
-        cout << "u_LO_new(" << k << ") = " << u_LO_new << endl;
-        cout << "Maximum    = " << dofs.xe_max(k) << endl;
-*/
-        //exit(1);
       }
 
       for (int i = 0; i < ndofs; i++)
@@ -471,8 +464,8 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
 
   //----------------------------------------------------------------------------
   // This section is for calculating the LOR solution and projection
-
   CalcLORSolution(u_HO_new, u_LOR, pfes, fes_LOR, *mesh, mesh_lor);
+
 
   // This is a check for bounds preservatoin
   // This assumes that the timestep is fixed
@@ -518,7 +511,9 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
     }
   }*/
 
-
+  auto *Tr = mesh_pos.FESpace()->GetMesh()->GetElementTransformation(0);
+  const FiniteElement *fe = pfes.GetFE(0);
+  const IntegrationRule &ir = MassIntegrator::GetRule(*fe, *fe, *Tr);
 
   // Calculating du
   for (int k = 0; k < NE; k++)
@@ -531,6 +526,18 @@ void MassBasedAvgLOR::CalcLOSolution(const Vector &u, Vector &du) const
           u_Proj_vec(i + k * ndofs) - eps >= dofs.xe_max(k))
       {
         dt_check_loc = true;
+
+        if (i == 0)
+        {
+          cout << "Element number = " << k << endl;
+          const IntegrationPoint *ip = &ir.IntPoint(i);
+          Tr->SetIntPoint(ip);
+          DenseMatrix Jac = Tr->Jacobian();
+          cout << Jac(0,0) << " " << Jac(0,1) << endl;
+          cout << Jac(1,0) << " " << Jac(1,1) << endl;
+          cout << endl;
+        }
+
       }
     }
   }
@@ -761,6 +768,28 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
   Vector x_FCT(ndofs);
   x_FCT = 1.0;
   Vector xy(ndofs);
+  Vector shape(ndofs);
+
+  // Precomputing some things
+  DenseMatrix shape_mat(ndofs, subcell_num * nqp_HO);
+  for (int s = 0; s < subcell_num; s++) {
+    const IntegrationRule &my_ir = ir_HO;
+    for (int q = 0; q < nqp_HO; q++) {
+      IntegrationPoint ip_LOR = my_ir.IntPoint(q);
+      NodeShift(ip_LOR, s, ip_trans, dim, lref);
+      if (dim == 2) {
+        ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
+      } else if (dim == 3) {
+        ip_LOR.Set(ip_trans(0), ip_trans(1), ip_trans(2), ip_LOR.weight);
+      }
+
+      fe->CalcShape(ip_LOR, shape);
+      for (int i = 0; i < ndofs; i++)
+      {
+        shape_mat(i, q + nqp_HO * s) = shape(i);
+      }
+    }
+  }
 
 
   // Integration loop for the LOR projection
@@ -773,19 +802,11 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
         const IntegrationRule &my_ir = ir_HO;
         for (int q = 0; q < nqp_HO; q++) {
           IntegrationPoint ip_LOR = my_ir.IntPoint(q);
-          NodeShift(ip_LOR, s, ip_trans, dim, lref);
-          if (dim == 2) {
-            ip_LOR.Set(ip_trans(0), ip_trans(1), 0, ip_LOR.weight);
-          } else if (dim == 3) {
-            ip_LOR.Set(ip_trans(0), ip_trans(1), ip_trans(2), ip_LOR.weight);
-          }
 
-          Vector shape(ndofs);
-          fe->CalcShape(ip_LOR, shape);
           m_rhs(i) +=
               my_ir[q].weight *
               geom_LOR.detJ((k * subcell_num + s) * nqp_HO + q) *
-              u_LOR(k * subcell_num + s) * shape(i);
+              u_LOR(k * subcell_num + s) * shape_mat(i, q + nqp_HO * s);
         }
       }
     }
@@ -805,14 +826,8 @@ void MassBasedAvgLOR::CalcLORProjection(const GridFunction &x,
 
     for (int i = 0; i < xy.Size(); i++) {
       u_Proj_vec(i + k * ndofs) = xy(i);
-      /*
-      if (u_Proj_vec(i + k * ndofs) < 1e-14) {
-        u_Proj_vec(i + k * ndofs) = 1e-14;
-      }
-      */
     }
   }
-
   GridFunction u_Proj(&fes, u_Proj_vec);
 
 }

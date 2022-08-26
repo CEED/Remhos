@@ -1062,12 +1062,10 @@ int main(int argc, char *argv[])
            dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
 
            bool dt_check;
-          // cout << "dt_check_loc = " << dt_check_loc << endl;
+
            MPI_Allreduce(&dt_check_loc, &dt_check, 1, MPI_C_BOOL, MPI_LOR, comm);
            int count = 0;
-           //cout << "dt_check = " << dt_check << endl;
 
-           //cout << scale_interface_val << endl;
 
            if (dt_check)
            {
@@ -1302,23 +1300,7 @@ int main(int argc, char *argv[])
      cout << "Time elapsed: " << elapsed << endl;
    }
 
-/*
-   for (int i = 0; i < time_vec.size(); i++)
-   {
-     if (myid == 0)
-     {
-       cout << time_vec[i] << endl;
-     }
-   }
-   cout << endl;
-   for (int i = 0; i < sharp_vec.size(); i++)
-   {
-     if (myid == 0)
-     {
-       cout << sharp_vec[i] << endl;
-     }
-   }
-*/
+
    if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
    {
       cout << "Total time steps: " << ti_total
@@ -1577,6 +1559,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       lo_solver->CalcLOSolution(u, du_LO);
       ho_solver->CalcHOSolution(u, du_HO);
 
+      for (int i = 0; i < u.Size(); i++)
+      {
+        if (u(i) <= 1e-14)
+        {
+          u(i) = 1e-14;
+        }
+      }
+
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
 
@@ -1589,7 +1579,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          //make sure subcells are within bounds of of dofs.xe_min, dofs.xe_max
       }
 
-      const int fct_iters = 10; // @ Sean play with this parameter
+      const int fct_iters = 1; // @ Sean play with this parameter
       for(int i = 0; i < fct_iters; ++i) {
         d_u = 0.0;
         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
