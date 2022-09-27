@@ -126,7 +126,8 @@ public:
    void SetDt(double _dt)
    {
       dt = _dt;
-      dt_est = std::numeric_limits<double>::infinity();
+      dt_est = dt;
+      //dt_est = 1.0;//std::numeric_limits<double>::max();
    }
    double GetTimeStepEstimate() { return dt_est; }
 
@@ -152,10 +153,10 @@ int main(int argc, char *argv[])
    int mesh_order = 2;
    int ode_solver_type = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
-   LOSolverType lo_type           = LOSolverType::None;
-   FCTSolverType fct_type         = FCTSolverType::None;
+   LOSolverType lo_type           = LOSolverType::MassBased;
+   FCTSolverType fct_type         = FCTSolverType::FCTProject;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
-   int bounds_type = 0;
+   int bounds_type = 1;
    bool sharp = false;
    bool pa = false;
    bool next_gen_full = false;
@@ -1432,11 +1433,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
-         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+        std::cout<<"checking time step"<<std::endl;
+         UpdateTimeStepEstimate(u, du_HO, dofs.xi_min, dofs.xi_max);
       }
    }
    else if (lo_solver)
    {
+      mfem::mfem_error("Unsupported path");
       lo_solver->CalcLOSolution(u, d_u);
 
       if (dt_control == TimeStepControl::LOBoundsError)
@@ -1520,7 +1523,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 }
 
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
-                                               const Vector &dx,
+                                               const Vector &dx_ho,
                                                const Vector &x_min,
                                                const Vector &x_max) const
 {
@@ -1530,8 +1533,10 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    int n = x.Size();
    const double eps = 1e-12;
 
-   double dt = numeric_limits<double>::infinity();
+   //double dt = numeric_limits<double>::infinity();
+   //double dt = dt_est;
 
+   /*
    for (int i = 0; i < n; i++)
    {
       if (dx(i) > eps)
@@ -1543,11 +1548,61 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
          dt = fmin(dt, (x_min(i) - x(i)) / dx(i) );
       }
    }
+   */
+   auto MassBased_ptr = dynamic_cast<const MassBasedAvg*>(lo_solver);
 
-   MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
+   Vector du_HO = dx_ho;
+   Vector dx(du_HO);
+
+   std::cout<<"restart with dt = "<<dt_est<<std::endl;
+   MassBased_ptr->RecomputeLOSolution(x, dx, dt_est);
+
+   int bounds_violations = -1;
+
+   while (bounds_violations != 0) {
+
+     bounds_violations = 0;
+
+     for(int i=0; i<n; ++i) {
+
+       double x_new_i = x(i) + dt_est*dx(i);
+       //std::cout<<x_new_i<<" = "<<x(i)<<" "<<dt<<" "<<dx(i)<<" "<<x_max(i) + eps<<std::endl;
+       if(x_new_i > x_max(i) + eps) {
+         bounds_violations += 1;
+       }
+
+     }
+
+     for(int i=0; i<n; ++i) {
+
+       double x_new_i = x(i) + dt_est*dx(i);
+       //std::cout<<x_new_i<<" "<<x_min(i) - eps<<std::endl;
+       //std::cout<<x_new_i<<" = "<<x(i)<<" "<<dt<<" "<<dx(i)<<" "<<x_min(i) - eps<<std::endl;
+       if(x_new_i < x_min(i) - eps) {
+         bounds_violations += 1;
+       }
+     }
+
+     if(bounds_violations > 0) {
+       std::cout<<"bounds violations = "<<bounds_violations<<std::endl;
+       double old_dt = dt_est;
+       dt_est *= 0.85;
+       //std::cout<<"shrink dt : "<<old_dt<<" ---> "<<dt<<std::endl;
+       dx = dx_ho;
+       MassBased_ptr->RecomputeLOSolution(x, dx, dt_est);
+     }
+
+   }
+
+   //std::cout<<"bounds_violations = "<<bounds_violations<<" with dt = "<<dt<<std::endl;
+   //exit(-1);
+
+   MPI_Allreduce(MPI_IN_PLACE, &dt_est, 1, MPI_DOUBLE, MPI_MIN,
                  Kbf.ParFESpace()->GetComm());
 
-   dt_est = fmin(dt_est, dt);
+   //dt_est = fmin(dt_est, dt);
+
+   //std::cout<<"using dt_est = "<<dt_est<<std::endl;
 }
 
 // Velocity coefficient

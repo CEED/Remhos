@@ -96,6 +96,8 @@ public:
                const GridFunction *mesh_vel)
      : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
 
+  void RecomputeLOSolution(const Vector &u, Vector &du, const double t_dt) const;
+
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
