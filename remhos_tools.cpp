@@ -664,6 +664,8 @@ void DofInfo::FillNeighborDofs()
          }
       }
    }
+
+   delete face_to_el;
 }
 
 void DofInfo::FillSubcell2CellDof()

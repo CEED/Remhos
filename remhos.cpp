@@ -909,7 +909,7 @@ int main(int argc, char *argv[])
    }
 
    ParGridFunction res = u;
-   double residual;
+   double residual = 0.0;
    double s_min_glob = numeric_limits<double>::infinity(),
           s_max_glob = -numeric_limits<double>::infinity();
 
@@ -1136,7 +1136,7 @@ int main(int argc, char *argv[])
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
-   double mass_u, mass_us, s_max;
+   double mass_u, mass_us = 0.0, s_max = 0.0;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
@@ -1212,6 +1212,7 @@ int main(int argc, char *argv[])
    delete mono_solver;
    delete fct_solver;
    delete smth_indicator;
+   delete lo_solver;
    delete ho_solver;
 
    delete ode_solver;

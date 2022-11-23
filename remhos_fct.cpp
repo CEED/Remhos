@@ -152,6 +152,8 @@ void FCTSolver::ScaleProductBounds(const Vector &s_min, const Vector &s_max,
    const int NE = pfes.GetNE();
    const int ndofs = u_new.Size() / NE;
    int dof_id;
+   us_min = 0.0;
+   us_max = 0.0;
    for (int k = 0; k < NE; k++)
    {
       if (active_el[k] == false) { continue; }
