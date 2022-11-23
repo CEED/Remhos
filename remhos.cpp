@@ -138,7 +138,7 @@ public:
 int main(int argc, char *argv[])
 {
    // Initialize MPI.
-   MPI_Session mpi(argc, argv);
+   mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
    const char *mesh_file = "data/periodic-square.mesh";
