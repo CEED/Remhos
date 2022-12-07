@@ -1375,6 +1375,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
    {
+      MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
+      MFEM_VERIFY(dt_control == TimeStepControl::FixedTimeStep,
+                  "Automatic time step is not implemented for product remap.");
+
       Vector us, d_us;
       us.MakeRef(*xptr, size, size);
       d_us.MakeRef(Y, size, size);
