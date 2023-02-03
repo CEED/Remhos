@@ -38,6 +38,7 @@
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
+#include "remhos_gslib.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -47,7 +48,8 @@ enum class FCTSolverType {None, FluxBased, ClipScale,
                           NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
-enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
+enum class MonolithicSolverType {None, ResDistMono,
+                                 ResDistMonoSubcell, Interpolation};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -204,7 +206,8 @@ int main(int argc, char *argv[])
    args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
                   "                   1 - Residual Distribution,\n\t"
-                  "                   2 - Subcell Residual Distribution.");
+                  "                   2 - Subcell Residual Distribution,\n\t"
+                  "                   3 - Interpolation with GSLIB.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
@@ -323,7 +326,11 @@ int main(int argc, char *argv[])
 
    // Store initial mesh positions.
    Vector x0(x.Size());
+   ParGridFunction x_final(&mesh_pfes);
    x0 = x;
+
+   FindPointsGSLIB finder(MPI_COMM_WORLD);
+   finder.Setup(pmesh);
 
    // Velocity for the problem. Depending on the execution mode, this is the
    // advective velocity (transport) or mesh velocity (remap).
@@ -374,6 +381,7 @@ int main(int argc, char *argv[])
       add(x, -1.0, x0, v_gf);
 
       // Return the mesh to the initial configuration.
+      x_final = x;
       x = x0;
    }
 
@@ -908,6 +916,44 @@ int main(int argc, char *argv[])
       t_final = 1.0;
    }
 
+   if (mono_type == MonolithicSolverType::Interpolation)
+   {
+      InterpolationRemap interpolator;
+      ParGridFunction uu(&pfes);
+      interpolator.Remap(u, x_final, uu);
+      if (visualization)
+      {
+         socketstream sock_u, sock_uu;
+
+         VisualizeField(sock_u, "localhost", 19916, u, "Solution u",
+                        0, 0, 400, 400);
+         x = x_final;
+         VisualizeField(sock_uu, "localhost", 19916, uu, "Solution uu",
+                        400, 0, 400, 400);
+      }
+      // Check for mass conservation.
+      double mss = 0.0;
+      if (exec_mode == 1)
+      {
+         x = x_final;
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostRead();
+         ml.SpMat().GetDiag(lumpedM);
+         mss = lumpedM * uu;
+      }
+      double mss_u;
+      MPI_Allreduce(&mss, &mss_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+      if (myid == 0)
+      {
+         cout << setprecision(10)
+              << "Final mass u:  " << mss_u << endl
+              << "Mass loss u:   " << abs(mass0_u - mss_u) << endl
+              << "Mass loss %:   " << abs(mass0_u - mss_u)/mass0_u << endl;
+      }
+      return 0;
+   }
+
    ParGridFunction res = u;
    double residual = 0.0;
    double s_min_glob = numeric_limits<double>::infinity(),
@@ -1165,8 +1211,8 @@ int main(int argc, char *argv[])
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
    {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      double error = u.ComputeLpError(1., u0);
+      if (myid == 0) { cout << "L1-error: " << error << "." << endl; }
    }
    else if (problem_num == 7)
    {

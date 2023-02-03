@@ -307,7 +307,7 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
 {
    const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceGeometry(0));
    return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
@@ -610,7 +610,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -751,7 +751,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
