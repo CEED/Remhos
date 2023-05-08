@@ -44,6 +44,7 @@ protected:
                                 const Array<bool> &active_el,
                                 const Array<bool> &active_dofs,
                                 Vector &d_us_LO_new);
+public:
    void ScaleProductBounds(const Vector &s_min, const Vector &s_max,
                            const Vector &u_new, const Array<bool> &active_el,
                            const Array<bool> &active_dofs,

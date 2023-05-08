@@ -75,9 +75,9 @@ Vector bb_min, bb_max;
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
-   BilinearForm &Mbf, &ml;
-   ParBilinearForm &Kbf;
-   ParBilinearForm &M_HO, &K_HO;
+   BilinearForm &ml;
+   ParBilinearForm &K_sharp, &K_bound;
+   ParBilinearForm &M_HO;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -88,28 +88,28 @@ private:
    double dt;
    TimeStepControl dt_control;
    mutable double dt_est;
-   Assembly &asmbl;
 
-   LowOrderMethod &lom;
    DofInfo &dofs;
 
-   HOSolver *ho_solver;
-   LOSolver *lo_solver;
-   FCTSolver *fct_solver;
+   HOSolver *ho_solver_b, *ho_solver_s;
+   LOSolver *lo_solver_b, *lo_solver_s;
+   FCTSolver *fct_solver_b, *fct_solver_s;
    MonolithicSolver *mono_solver;
 
    void UpdateTimeStepEstimate(const Vector &x, const Vector &dx,
                                const Vector &x_min, const Vector &x_max) const;
 
 public:
-   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
+   AdvectionOperator(int size, BilinearForm &_ml,
                      Vector &_lumpedM,
-                     ParBilinearForm &Kbf_,
-                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                     ParBilinearForm &K_s, ParBilinearForm &K_b,
+                     ParBilinearForm &M_HO_,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
-                     Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                     DofInfo &_dofs,
+                     HOSolver *hos_b, HOSolver *hos_s,
+                     LOSolver *los_b, LOSolver *los_s,
+                     FCTSolver *fct_b, FCTSolver *fct_s,
                      MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
@@ -118,7 +118,7 @@ public:
    {
       if (tsc == TimeStepControl::LOBoundsError)
       {
-         MFEM_VERIFY(lo_solver,
+         MFEM_VERIFY(lo_solver_b,
                      "The selected time step control requires a LO solver.");
       }
       dt_control = tsc;
@@ -447,9 +447,6 @@ int main(int argc, char *argv[])
 
    // Set up the bilinear and linear forms corresponding to the DG
    // discretization.
-   ParBilinearForm m(&pfes);
-   m.AddDomainIntegrator(new MassIntegrator);
-
    ParBilinearForm M_HO(&pfes);
    M_HO.AddDomainIntegrator(new MassIntegrator);
 
@@ -461,70 +458,39 @@ int main(int argc, char *argv[])
    VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
                                     u_max_bounds_grad_dir, 1.0, 1, true);
 
-   ParBilinearForm k(&pfes);
-   ParBilinearForm K_HO(&pfes);
-   if (exec_mode == 0)
-   {
-      MFEM_VERIFY(sharp == false, "only remap tests now");
-      k.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(velocity, -1.0));
-   }
-   else if (exec_mode == 1)
-   {
-      k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
-      K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
-   }
+   ParBilinearForm K_bound(&pfes), K_sharp(&pfes);
+   MFEM_VERIFY(exec_mode == 1, "remap only branch");
+   K_bound.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
+   K_sharp.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
 
-   if (ho_type == HOSolverType::CG ||
-       ho_type == HOSolverType::LocalInverse ||
-       fct_type == FCTSolverType::FluxBased || sharp == true)
+   auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+   auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+   K_bound.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
+   K_bound.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+   auto dgt_ii = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+   auto dgt_bb = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+   K_sharp.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_ii));
+   K_sharp.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_bb));
+
+   if (sharp == true)
    {
-      if (exec_mode == 0)
-      {
-         MFEM_VERIFY(sharp == false, "only remap tests now");
-         DGTraceIntegrator *dgt_i = new DGTraceIntegrator(velocity, 1.0, -0.5);
-         DGTraceIntegrator *dgt_b = new DGTraceIntegrator(velocity, 1.0, -0.5);
-         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-      }
-      else if (exec_mode == 1)
-      {
-         auto dgt_i = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
-         auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
-         K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
-         K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
-
-         if (sharp == true)
-         {
-            auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
-            auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
-            K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-            K_HO.AddInteriorFaceIntegrator(dgt);
-         }
-      }
-
-      K_HO.KeepNbrBlock(true);
+      auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
+      auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
+      K_sharp.AddDomainIntegrator(new TransposeIntegrator(ci));
+      K_sharp.AddInteriorFaceIntegrator(dgt);
    }
 
-   if (pa)
-   {
-      M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
-      K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
-   }
+   K_bound.KeepNbrBlock(true);
+   K_sharp.KeepNbrBlock(true);
 
-   if (next_gen_full)
-   {
-      K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
-   }
+   MFEM_VERIFY(pa == false, "no pa");
 
    M_HO.Assemble();
-   K_HO.Assemble(0);
-
-   if (pa == false)
-   {
-      M_HO.Finalize();
-      K_HO.Finalize(0);
-   }
+   K_bound.Assemble(0);
+   K_sharp.Assemble(0);
+   M_HO.Finalize();
+   K_bound.Finalize(0);
+   K_sharp.Finalize(0);
 
    // Compute the lumped mass matrix.
    Vector lumpedM;
@@ -534,11 +500,7 @@ int main(int argc, char *argv[])
    ml.Finalize();
    ml.SpMat().GetDiag(lumpedM);
 
-   m.Assemble();
-   m.Finalize();
    int skip_zeros = 0;
-   k.Assemble(skip_zeros);
-   k.Finalize(skip_zeros);
 
    // Store topological dof data.
    DofInfo dof_info(pfes, bounds_type);
@@ -552,12 +514,12 @@ int main(int argc, char *argv[])
    lom.pk = NULL;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      lom.smap = SparseMatrix_Build_smap(k.SpMat());
-      lom.D = k.SpMat();
+      lom.smap = SparseMatrix_Build_smap(K_sharp.SpMat());
+      lom.D = K_sharp.SpMat();
 
       if (exec_mode == 0)
       {
-         ComputeDiscreteUpwindingMatrix(k.SpMat(), lom.smap, lom.D);
+         ComputeDiscreteUpwindingMatrix(K_sharp.SpMat(), lom.smap, lom.D);
       }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
@@ -728,43 +690,39 @@ int main(int argc, char *argv[])
    }
 
    // Setup of the high-order solver (if any).
-   HOSolver *ho_solver = NULL;
+   HOSolver *ho_solver_b = NULL, *ho_solver_s = NULL;
    if (ho_type == HOSolverType::Neumann)
    {
-      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
+      ho_solver_b = new NeumannHOSolver(pfes, M_HO, K_sharp, lumpedM, asmbl);
    }
    else if (ho_type == HOSolverType::CG)
    {
-      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
+      ho_solver_b = new CGHOSolver(pfes, M_HO, K_bound);
    }
    else if (ho_type == HOSolverType::LocalInverse)
    {
-      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      ho_solver_b = new LocalInverseHOSolver(pfes, M_HO, K_bound);
+      ho_solver_s= new LocalInverseHOSolver(pfes, M_HO, K_sharp);
    }
 
    // Setup the low order solver (if any).
-   LOSolver *lo_solver = NULL;
-   Array<int> lo_smap;
+   LOSolver *lo_solver_b = NULL, *lo_solver_s = NULL;
+   Array<int> lo_smap_b, lo_smap_s;
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
-      if (sharp == true)
-      {
-         lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-         lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
+         lo_smap_b = SparseMatrix_Build_smap(K_bound.SpMat());
+         lo_solver_b = new DiscreteUpwind(pfes, K_bound.SpMat(), lo_smap_b,
                                         lumpedM, asmbl, time_dep, false);
-      }
-      else
-      {
-         lo_smap = SparseMatrix_Build_smap(k.SpMat());
-         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
-                                        lumpedM, asmbl, time_dep, true);
-      }
+
+         lo_smap_s = SparseMatrix_Build_smap(K_sharp.SpMat());
+         lo_solver_s = new DiscreteUpwind(pfes, K_sharp.SpMat(), lo_smap_s,
+                                        lumpedM, asmbl, time_dep, false);
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
-      lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
+      lo_smap_b = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lo_solver_b = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap_b,
                                      lumpedM, asmbl, time_dep, true);
    }
    else if (lo_type == LOSolverType::ResDist)
@@ -772,12 +730,12 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = false;
       if (pa)
       {
-         lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new PAResidualDistribution(pfes, K_sharp, asmbl, lumpedM,
                                                 subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
             const PAResidualDistribution *RD_ptr =
-               dynamic_cast<const PAResidualDistribution*>(lo_solver);
+               dynamic_cast<const PAResidualDistribution*>(lo_solver_b);
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
             RD_ptr->SetupPA(FaceType::Interior);
@@ -786,7 +744,7 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new ResidualDistribution(pfes, K_sharp, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
       }
    }
@@ -795,12 +753,12 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = true;
       if (pa)
       {
-         lo_solver = new PAResidualDistributionSubcell(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new PAResidualDistributionSubcell(pfes, K_sharp, asmbl, lumpedM,
                                                        subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
             const PAResidualDistributionSubcell *RD_ptr =
-               dynamic_cast<const PAResidualDistributionSubcell*>(lo_solver);
+               dynamic_cast<const PAResidualDistributionSubcell*>(lo_solver_b);
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
             RD_ptr->SetupPA(FaceType::Interior);
@@ -809,15 +767,15 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new ResidualDistribution(pfes, K_sharp, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
       }
    }
    else if (lo_type == LOSolverType::MassBased)
    {
-      MFEM_VERIFY(ho_solver != nullptr,
+      MFEM_VERIFY(ho_solver_b != nullptr,
                   "Mass-Based LO solver requires a choice of a HO solver.");
-      lo_solver = new MassBasedAvg(pfes, *ho_solver,
+      lo_solver_b = new MassBasedAvg(pfes, *ho_solver_b,
                                    (exec_mode == 1) ? &v_gf : nullptr);
    }
 
@@ -827,14 +785,14 @@ int main(int argc, char *argv[])
    if (mono_type == MonolithicSolverType::ResDistMono)
    {
       const bool subcell_scheme = false;
-      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+      mono_solver = new MonoRDSolver(pfes, K_sharp.SpMat(), M_HO.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       const bool subcell_scheme = true;
-      mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
+      mono_solver = new MonoRDSolver(pfes, K_sharp.SpMat(), M_HO.SpMat(), lumpedM,
                                      asmbl, smth_indicator, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
@@ -887,9 +845,9 @@ int main(int argc, char *argv[])
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
-                        Wx + Ww, Wy, Ww, Wh);
+                        Wx, Wy + 500, Ww, Wh);
          VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
-                        Wx + 2*Ww, Wy, Ww, Wh);
+                        Wx + Ww, Wy = 500, Ww, Wh);
       }
    }
 
@@ -906,34 +864,37 @@ int main(int argc, char *argv[])
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
-   FCTSolver *fct_solver = NULL;
+   FCTSolver *fct_solver_b = NULL, *fct_solver_s = NULL;
    if (fct_type == FCTSolverType::FluxBased)
    {
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
-      K_HO.SpMat().HostReadI();
-      K_HO.SpMat().HostReadJ();
-      K_HO.SpMat().HostReadData();
-      K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+      K_bound.SpMat().HostReadI();
+      K_bound.SpMat().HostReadJ();
+      K_bound.SpMat().HostReadData();
+      K_HO_smap = SparseMatrix_Build_smap(K_bound.SpMat());
       const int fct_iterations = 1;
-      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+      fct_solver_b = new FluxBasedFCT(pfes, smth_indicator, dt, K_bound.SpMat(),
                                     K_HO_smap, M_HO.SpMat(), fct_iterations);
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      fct_solver_b = new ClipScaleSolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
-      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      fct_solver_b = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::FCTProject)
    {
-      fct_solver = new ElementFCTProjection(pfes, dt);
+      fct_solver_b = new ElementFCTProjection(pfes, dt);
+      fct_solver_s = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
-                         ho_solver, lo_solver, fct_solver, mono_solver);
+   AdvectionOperator adv(S.Size(), ml, lumpedM, K_sharp, M_HO, K_bound,
+                         x, xsub, v_gf, v_sub_gf, dof_info,
+                         ho_solver_b, ho_solver_s,
+                         lo_solver_b, lo_solver_s,
+                         fct_solver_b, fct_solver_s, mono_solver);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -966,8 +927,8 @@ int main(int argc, char *argv[])
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      if (lo_solver_b)  { lo_solver_b->UpdateTimeStep(dt_real); }
+      if (fct_solver_b) { fct_solver_b->UpdateTimeStep(dt_real); }
 
       if (product_sync)
       {
@@ -1155,9 +1116,9 @@ int main(int argc, char *argv[])
                // Recompute s = u_s / u.
                ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
-                              Wx + Ww, Wy, Ww, Wh);
+                              Wx, Wy + 500, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
-                              Wx + 2*Ww, Wy, Ww, Wh);
+                              Wx + Ww, Wy = 500, Ww, Wh);
             }
          }
 
@@ -1294,9 +1255,11 @@ int main(int argc, char *argv[])
 
    // Free the used memory.
    delete mono_solver;
-   delete fct_solver;
+   delete fct_solver_b;
+   delete fct_solver_s;
    delete smth_indicator;
-   delete ho_solver;
+   delete ho_solver_b;
+   delete ho_solver_s;
 
    delete ode_solver;
    delete mesh_fec;
@@ -1317,25 +1280,102 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
+AdvectionOperator::AdvectionOperator(int size,
                                      BilinearForm &_ml, Vector &_lumpedM,
-                                     ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     ParBilinearForm &K_s, ParBilinearForm &K_b,
+                                     ParBilinearForm &M_HO_,
                                      GridFunction &pos, GridFunction *sub_pos,
-                                     GridFunction &vel, GridFunction &sub_vel,
-                                     Assembly &_asmbl,
-                                     LowOrderMethod &_lom, DofInfo &_dofs,
-                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                                     GridFunction &vel, GridFunction &sub_vel, DofInfo &_dofs,
+                                     HOSolver *hos_b, HOSolver *hos_s,
+                                     LOSolver *los_b, LOSolver *los_s,
+                                     FCTSolver *fct_b, FCTSolver *fct_s,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_),
+   TimeDependentOperator(size), ml(_ml),
+   K_sharp(K_s), K_bound(K_b), M_HO(M_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
-   x_gf(Kbf.ParFESpace()),
-   asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
+   x_gf(K_sharp.ParFESpace()), dofs(_dofs),
+   ho_solver_b(hos_b), ho_solver_s(hos_s),
+   lo_solver_b(los_b), lo_solver_s(los_s),
+   fct_solver_b(fct_b), fct_solver_s(fct_s), mono_solver(mos) { }
+
+void blend_global(const Vector &u_b, const Vector &u_s, const Vector &m,
+                  const Vector &u_min, const Vector &u_max, Vector &u)
+{
+   const double eps = 1e-12;
+   const int size = u_b.Size();
+
+   Vector f_clip(size);
+   u.SetSize(size);
+
+   // Clip.
+   double Sp = 0.0, Sn = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      double f_clip_min = u_min(i) - u_b(i);
+      double f_clip_max = u_max(i) - u_b(i);
+
+      f_clip(i) = u_s(i) - u_b(i);
+      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
+      Sp += fmax(m(i) * f_clip(i), 0.0);
+      Sn += fmin(m(i) * f_clip(i), 0.0);
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double S = Sp + Sn;
+
+   for (int i = 0; i < size; i++)
+   {
+      if (S > eps && f_clip(i) > 0.0)
+      {
+         f_clip(i) *= - Sn / Sp;
+      }
+      if (S < -eps && f_clip(i) < 0.0)
+      {
+         f_clip(i) *= - Sp / Sn;
+      }
+
+      u(i) = u_b(i) + f_clip(i);
+   }
+}
+
+void check_violation(const Vector &u, const Vector &d_u, double dt,
+                     const Vector &u_min, const Vector &u_max, string info,
+                     Array<bool> *active_dofs = nullptr)
+{
+   const double eps = 1e-12;
+   const int size = u.Size();
+   Vector u_new(size);
+   add(1.0, u, dt, d_u, u_new);
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs && (*active_dofs)[i] == false) { continue; }
+
+      if (u_new(i) + eps < u_min(i) || u_new(i) > u_max(i) + eps)
+      {
+         cout << info << " bounds violation: "
+              << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+      }
+   }
+}
+
+void check_violation(const Vector &u_new,
+                     const Vector &u_min, const Vector &u_max, string info)
+{
+   const double eps = 1e-12;
+   const int size = u_new.Size();
+   for (int i = 0; i < size; i++)
+   {
+      if (u_new(i) + eps < u_min(i) || u_new(i) > u_max(i) + eps)
+      {
+         cout << info << " bounds violation: "
+              << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+      }
+   }
+}
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
@@ -1348,63 +1388,25 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       {
          add(start_submesh_pos, t, submesh_vel, *submesh_pos);
       }
-      // Reset precomputed geometric data.
-      Mbf.FESpace()->GetMesh()->DeleteGeometricFactors();
 
       // Reassemble on the new mesh. Element contributions.
       // Currently needed to have the sparse matrices used by the LO methods.
-      Mbf.BilinearForm::operator=(0.0);
-      Mbf.Assemble();
-      Kbf.BilinearForm::operator=(0.0);
-      Kbf.Assemble(0);
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       lumpedM.HostReadWrite();
       ml.SpMat().GetDiag(lumpedM);
 
+      M_HO.FESpace()->GetMesh()->DeleteGeometricFactors();
       M_HO.BilinearForm::operator=(0.0);
       M_HO.Assemble();
-      K_HO.BilinearForm::operator=(0.0);
-      K_HO.Assemble(0);
-
-      if (lom.pk)
-      {
-         lom.pk->BilinearForm::operator=(0.0);
-         lom.pk->Assemble();
-      }
-
-      // Face contributions.
-      asmbl.bdrInt = 0.;
-      Mesh *mesh = M_HO.FESpace()->GetMesh();
-      const int dim = mesh->Dimension(), ne = mesh->GetNE();
-      Array<int> bdrs, orientation;
-      FaceElementTransformations *Trans;
-      if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
-      {
-         RD_ptr->SampleVelocity(FaceType::Interior);
-         RD_ptr->SampleVelocity(FaceType::Boundary);
-         RD_ptr->SetupPA(FaceType::Interior);
-         RD_ptr->SetupPA(FaceType::Boundary);
-      }
-      else
-      {
-         for (int k = 0; k < ne; k++)
-         {
-            if (dim == 1)      { mesh->GetElementVertices(k, bdrs); }
-            else if (dim == 2) { mesh->GetElementEdges(k, bdrs, orientation); }
-            else if (dim == 3) { mesh->GetElementFaces(k, bdrs, orientation); }
-
-            for (int i = 0; i < dofs.numBdrs; i++)
-            {
-               Trans = mesh->GetFaceElementTransformations(bdrs[i]);
-               asmbl.ComputeFluxTerms(k, i, Trans, lom);
-            }
-         }
-      }
+      K_bound.BilinearForm::operator=(0.0);
+      K_bound.Assemble(0);
+      K_sharp.BilinearForm::operator=(0.0);
+      K_sharp.Assemble(0);
    }
 
-   const int size = Kbf.ParFESpace()->GetVSize();
-   const int NE   = Kbf.ParFESpace()->GetNE();
+   const int size = K_sharp.ParFESpace()->GetVSize();
+   const int NE   = K_sharp.ParFESpace()->GetNE();
 
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
@@ -1414,42 +1416,45 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    u.MakeRef(*xptr, 0, size);
    d_u.MakeRef(Y, 0, size);
-   Vector du_HO(u.Size()), du_LO(u.Size());
+   Vector d_u_b(size), d_u_b_HO(size), d_u_b_LO(size);
    x_gf = u;
    x_gf.ExchangeFaceNbrData();
-   if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
-   else if (fct_solver)
+
+   MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
+
+   // Bounded solution.
+   lo_solver_b->CalcLOSolution(u, d_u_b_LO);
+   ho_solver_b->CalcHOSolution(u, d_u_b_HO);
+   dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+   dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+   fct_solver_b->CalcFCTSolution(x_gf, lumpedM, d_u_b_HO, d_u_b_LO,
+                                 dofs.xi_min, dofs.xi_max, d_u_b);
+   if (dt_control == TimeStepControl::LOBoundsError)
    {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
-
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
-
-      if (dt_control == TimeStepControl::LOBoundsError)
-      {
-         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      }
+      UpdateTimeStepEstimate(u, d_u_b_LO, dofs.xi_min, dofs.xi_max);
    }
-   else if (lo_solver)
-   {
-      lo_solver->CalcLOSolution(u, d_u);
+   check_violation(u, d_u_b, dt, dofs.xi_min, dofs.xi_max, "bounded");
 
-      if (dt_control == TimeStepControl::LOBoundsError)
-      {
-         dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-         UpdateTimeStepEstimate(u, d_u, dofs.xi_min, dofs.xi_max);
-      }
-   }
-   // The HO option must be last, since some LO solvers use the HO. Then if the
-   // user only wants to run LO, this order will give him the LO solution.
-   else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
-   else { MFEM_ABORT("No solver was chosen."); }
+   // Sharp solution.
+   Vector d_u_s(size), d_u_s_LO(size), d_u_s_HO(size);
+   lo_solver_s->CalcLOSolution(u, d_u_s_LO);
+   ho_solver_s->CalcHOSolution(u, d_u_s_HO);
+   fct_solver_s->CalcFCTSolution(x_gf, lumpedM, d_u_s_HO, d_u_s_LO,
+                                 dofs.xi_min, dofs.xi_max, d_u_s);
+   //check_violation(u, du_s, dt, dofs.xi_min, dofs.xi_max, "sharp");
+
+   Vector u_b(size), u_s(size), u_new(size);
+   add(1.0, u, dt, d_u_b, u_b);
+   add(1.0, u, dt, d_u_s, u_s);
+   blend_global(u_b, u_s, lumpedM, dofs.xi_min, dofs.xi_max, u_new);
+
+   check_violation(u_new, dofs.xi_min, dofs.xi_max, "blended");
+
+   d_u = d_u_b;
+//   for (int i = 0; i < size; i++)
+//   {
+//      d_u(i) = (u_new(i) - u(i)) / dt;
+//   }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
@@ -1461,59 +1466,45 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       x_gf = us;
       x_gf.ExchangeFaceNbrData();
 
-      if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
-      else if (fct_solver)
+      MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
+
+      Vector d_us_HO(us.Size()), d_us_LO;
+      if (fct_solver_b->NeedsLOProductInput())
       {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
-         Vector d_us_HO(us.Size()), d_us_LO;
-         if (fct_solver->NeedsLOProductInput())
-         {
-            d_us_LO.SetSize(us.Size());
-            lo_solver->CalcLOSolution(us, d_us_LO);
-         }
-         ho_solver->CalcHOSolution(us, d_us_HO);
-
-         // Compute the ratio s = us_old / u_old, and old active dofs.
-         Vector s(size);
-         Array<bool> s_bool_el, s_bool_dofs;
-         ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-         const int myid = x_gf.ParFESpace()->GetMyRank();
-         if (myid == 0) { std::cout << "      --- RK stage" << std::endl; }
-         std::cout << "      in:  ";
-         ComputeMinMaxS(s, s_bool_dofs, myid);
-#endif
-
-         // Bounds for s, based on the old values (and old active dofs).
-         // This doesn't consider s values from the old inactive dofs, because
-         // there were no bounds restriction on them at the previous time step.
-         dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
-                                    &s_bool_el, &s_bool_dofs);
-         dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
-                            dofs.xi_min, dofs.xi_max, &s_bool_el);
-
-         // Evolve u and get the new active dofs.
-         Vector u_new(size);
-         add(1.0, u, dt, d_u, u_new);
-         Array<bool> s_bool_el_new, s_bool_dofs_new;
-         ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
-
-         fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
-                                    dofs.xi_min, dofs.xi_max,
-                                    u_new,
-                                    s_bool_el_new, s_bool_dofs_new, d_us);
-
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-         Vector us_new(size);
-         add(1.0, us, dt, d_us, us_new);
-         std::cout << "      out: ";
-         ComputeMinMaxS(NE, us_new, u_new, myid);
-#endif
+         d_us_LO.SetSize(us.Size());
+         lo_solver_b->CalcLOSolution(us, d_us_LO);
       }
-      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
-      else { MFEM_ABORT("No solver was chosen."); }
+      ho_solver_b->CalcHOSolution(us, d_us_HO);
+
+      // Compute the ratio s = us_old / u_old, and old active dofs.
+      Vector s(size);
+      Array<bool> s_bool_el, s_bool_dofs;
+      ComputeRatio(NE, us, u, s, s_bool_el, s_bool_dofs);
+
+      // Bounds for s, based on the old values (and old active dofs).
+      // This doesn't consider s values from the old inactive dofs, because
+      // there were no bounds restriction on them at the previous time step.
+      dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+                                 &s_bool_el, &s_bool_dofs);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                         dofs.xi_min, dofs.xi_max, &s_bool_el);
+
+      // Evolve u and get the new active dofs.
+      Vector u_new(size);
+      add(1.0, u, dt, d_u_b, u_new);
+      Array<bool> s_bool_el_new, s_bool_dofs_new;
+      ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
+
+      fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
+                                   dofs.xi_min, dofs.xi_max, u_new,
+                                   s_bool_el_new, s_bool_dofs_new, d_us);
+
+      Vector us_min(size), us_max(size);
+      fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_new,
+                                       s_bool_el_new, s_bool_dofs_new,
+                                       us_min, us_max);
+      check_violation(us, d_us, dt, us_min, us_max,
+                      "product", &s_bool_dofs_new);
 
       d_us.SyncAliasMemory(Y);
    }
@@ -1545,7 +1536,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    }
 
    MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN,
-                 Kbf.ParFESpace()->GetComm());
+                 K_sharp.ParFESpace()->GetComm());
 
    dt_est = fmin(dt_est, dt);
 }
