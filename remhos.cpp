@@ -112,6 +112,8 @@ public:
                      FCTSolver *fct_b, FCTSolver *fct_s,
                      MonolithicSolver *mos);
 
+   bool sharp = false;
+
    virtual void Mult(const Vector &x, Vector &y) const;
 
    void SetTimeStepControl(TimeStepControl tsc)
@@ -895,6 +897,7 @@ int main(int argc, char *argv[])
                          ho_solver_b, ho_solver_s,
                          lo_solver_b, lo_solver_s,
                          fct_solver_b, fct_solver_s, mono_solver);
+   adv.sharp = sharp;
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1400,6 +1403,8 @@ void sharp_product_sync(const Vector &u_b, const Vector &u,
    const double S = Sp + Sn;
    if (fabs(S) < eps) { return; }
 
+   return;
+
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { us(i) = 0.0; continue; }
@@ -1492,6 +1497,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    check_violation(u_new, dofs.xi_min, dofs.xi_max, "blended");
 
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u(i)) / dt; }
+   if (sharp == false) { d_u = d_u_b; }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
@@ -1525,14 +1531,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                          dofs.xi_min, dofs.xi_max, &s_bool_el);
 
       // Evolve u and get the new active dofs.
-      Vector u_new(size);
-      add(1.0, u, dt, d_u_b, u_new);
       Array<bool> s_bool_el_new, s_bool_dofs_new;
       ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
       Vector d_us_b(size);
       fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
-                                   dofs.xi_min, dofs.xi_max, u_new,
+                                   dofs.xi_min, dofs.xi_max, u_b,
                                    s_bool_el_new, s_bool_dofs_new, d_us_b);
 
       Vector us_b(size), us_new(size);
@@ -1542,6 +1546,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                          us_b, s_bool_dofs_new, us_new);
 
       for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us(i)) / dt; }
+      if (sharp == false) { d_us = d_us_b; }
 
       Vector us_min(size), us_max(size);
       fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_new,
