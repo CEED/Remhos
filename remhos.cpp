@@ -1377,6 +1377,47 @@ void check_violation(const Vector &u_new,
    }
 }
 
+void sharp_product_sync(const Vector &u_b, const Vector &u,
+                        const Vector &s_min, const Vector &s_max,
+                        const Vector &us_b, const Array<bool> &active_dofs,
+                        Vector &us)
+{
+   const double eps = 1e-12;
+   const int size = u.Size();
+   double Sp = 0.0, Sn = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { us(i) = 0.0; continue; }
+      if (fabs(u_b(i) - u(i)) < eps) { us(i) = us_b(i); continue; }
+
+      us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
+      Sp += fmax(us(i) - us_b(i), 0.0);
+      Sn += fmin(us(i) - us_b(i), 0.0);
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double S = Sp + Sn;
+   if (fabs(S) < eps) { return; }
+
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { us(i) = 0.0; continue; }
+      if (fabs(u_b(i) - u(i)) < eps) { us(i) = us_b(i); continue; }
+
+      if (S > 0.0 && us(i) > us_b(i))
+      {
+         double r = us(i) - us_b(i);
+         us(i) = us_b(i) + fabs(Sn / Sp) * r;
+      }
+      if (S < 0.0 && us(i) < us_b(i))
+      {
+         double r = us_b(i) - us(i);
+         us(i) = us_b(i) - fabs(Sp / Sn) * r;
+      }
+   }
+}
+
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
    if (exec_mode == 1)
@@ -1420,7 +1461,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    x_gf = u;
    x_gf.ExchangeFaceNbrData();
 
-   MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
+   MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO & LO solvers.");
 
    // Bounded solution.
    lo_solver_b->CalcLOSolution(u, d_u_b_LO);
@@ -1450,11 +1491,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    check_violation(u_new, dofs.xi_min, dofs.xi_max, "blended");
 
-   d_u = d_u_b;
-//   for (int i = 0; i < size; i++)
-//   {
-//      d_u(i) = (u_new(i) - u(i)) / dt;
-//   }
+   for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u(i)) / dt; }
 
    // Remap the product field, if there is a product field.
    if (X.Size() > size)
@@ -1465,8 +1502,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       x_gf = us;
       x_gf.ExchangeFaceNbrData();
-
-      MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
 
       Vector d_us_HO(us.Size()), d_us_LO;
       if (fct_solver_b->NeedsLOProductInput())
@@ -1495,9 +1530,18 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<bool> s_bool_el_new, s_bool_dofs_new;
       ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
+      Vector d_us_b(size);
       fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                    dofs.xi_min, dofs.xi_max, u_new,
-                                   s_bool_el_new, s_bool_dofs_new, d_us);
+                                   s_bool_el_new, s_bool_dofs_new, d_us_b);
+
+      Vector us_b(size), us_new(size);
+      add(1.0, us, dt, d_us_b, us_b);
+
+      sharp_product_sync(u_b, u_new, dofs.xi_min, dofs.xi_max,
+                         us_b, s_bool_dofs_new, us_new);
+
+      for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us(i)) / dt; }
 
       Vector us_min(size), us_max(size);
       fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_new,
