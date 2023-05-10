@@ -1361,6 +1361,7 @@ void check_violation(const Vector &u, const Vector &d_u, double dt,
       {
          cout << info << " bounds violation: "
               << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+         MFEM_ABORT("bounds");
       }
    }
 }
@@ -1376,6 +1377,7 @@ void check_violation(const Vector &u_new,
       {
          cout << info << " bounds violation: "
               << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+         MFEM_ABORT("bounds");
       }
    }
 }
@@ -1391,7 +1393,7 @@ void sharp_product_sync(const Vector &u_b, const Vector &u,
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { us(i) = 0.0; continue; }
-      if (fabs(u_b(i) - u(i)) < eps) { us(i) = us_b(i); continue; }
+      if (u_b(i) == u(i))          { us(i) = us_b(i); continue; }
 
       us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
       Sp += fmax(us(i) - us_b(i), 0.0);
@@ -1403,12 +1405,10 @@ void sharp_product_sync(const Vector &u_b, const Vector &u,
    const double S = Sp + Sn;
    if (fabs(S) < eps) { return; }
 
-   return;
-
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { us(i) = 0.0; continue; }
-      if (fabs(u_b(i) - u(i)) < eps) { us(i) = us_b(i); continue; }
+      if (u_b(i) == u(i))          { us(i) = us_b(i); continue; }
 
       if (S > 0.0 && us(i) > us_b(i))
       {
