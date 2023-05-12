@@ -846,10 +846,10 @@ int main(int argc, char *argv[])
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       if (product_sync)
       {
-         VisualizeField(vis_s, vishost, visport, s, "Solution s",
-                        Wx, Wy + 500, Ww, Wh);
          VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
-                        Wx + Ww, Wy = 500, Ww, Wh);
+                        Wx, 500, Ww, Wh);
+         VisualizeField(vis_s, vishost, visport, s, "Solution s",
+                        Wx + Ww, 500, Ww, Wh);
       }
    }
 
@@ -1117,11 +1117,11 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                // Recompute s = u_s / u.
+               VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
+                              Wx, 500, Ww, Wh);
                ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
-                              Wx, Wy + 500, Ww, Wh);
-               VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
-                              Wx + Ww, Wy = 500, Ww, Wh);
+                              Wx + Ww, 500, Ww, Wh);
             }
          }
 
@@ -1382,45 +1382,117 @@ void check_violation(const Vector &u_new,
    }
 }
 
-void sharp_product_sync(const Vector &u_b, const Vector &u,
+void sharp_product_sync(const Vector &u_b, const Vector &u, const Vector &m,
                         const Vector &s_min, const Vector &s_max,
                         const Vector &us_b, const Array<bool> &active_dofs,
                         Vector &us)
 {
    const double eps = 1e-12;
    const int size = u.Size();
-   double Sp = 0.0, Sn = 0.0;
+   double Sp = 0.0, Sn = 0.0, S_to_min = 0.0, S_to_max = 0.0;
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { us(i) = 0.0; continue; }
       if (u_b(i) == u(i))          { us(i) = us_b(i); continue; }
 
       us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
-      Sp += fmax(us(i) - us_b(i), 0.0);
-      Sn += fmin(us(i) - us_b(i), 0.0);
+      Sp += m(i) * fmax(us(i) - us_b(i), 0.0);
+      Sn += m(i) * fmin(us(i) - us_b(i), 0.0);
+      S_to_min += m(i) * (us(i) - u(i) * s_min(i));
+      S_to_max += m(i) * (u(i) * s_max(i) - us(i));
+
+      MFEM_VERIFY(m(i) > 0, "m");
    }
 
    MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
    MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &S_to_min, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &S_to_max, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
    const double S = Sp + Sn;
    if (fabs(S) < eps) { return; }
+
+   // Check if mass restoration is possible.
+   if (S > 0.0)
+   {
+      double S_max_decr = 0.0;
+      for (int i = 0; i < size; i++)
+      {
+         if (active_dofs[i] == false) { continue; }
+         if (u_b(i) == u(i))          { continue; }
+
+         double r = us(i) - u(i) * s_min(i);
+         if (r > 0.0) { S_max_decr += m(i) * r; }
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &S_max_decr, 1, MPI_DOUBLE,
+                    MPI_SUM, MPI_COMM_WORLD);
+
+      MFEM_VERIFY(S_max_decr > S, "Gained mass - impossible to fix!!!");
+   }
+   if (S < 0.0)
+   {
+      double S_max_incr = 0.0;
+      for (int i = 0; i < size; i++)
+      {
+         if (active_dofs[i] == false) { continue; }
+         if (u_b(i) == u(i))          { continue; }
+
+         double r = u(i) * s_max(i) - us(i);
+         if (r > 0.0) { S_max_incr += m(i) * r; }
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &S_max_incr, 1, MPI_DOUBLE,
+                    MPI_SUM, MPI_COMM_WORLD);
+
+      MFEM_VERIFY(S_max_incr > fabs(S), "Lost mass - impossible to fix!!!");
+   }
+
+   //return;
 
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { us(i) = 0.0; continue; }
       if (u_b(i) == u(i))          { us(i) = us_b(i); continue; }
 
-      if (S > 0.0 && us(i) > us_b(i))
+      if (S > 0.0)
       {
-         double r = us(i) - us_b(i);
-         us(i) = us_b(i) + fabs(Sn / Sp) * r;
+         double r = us(i) - u(i) * s_min(i);
+         MFEM_VERIFY(r >= 0, "r");
+         us(i) = us(i) - S / S_to_min * r;
+
+         if (us(i) < u(i) * s_min(i))
+         {
+            cout << "below min: " << us(i) << " " << u(i) * s_min(i) << endl;
+            cout << r << " " << us(i) - fabs(Sn / Sp) * r << " " << fabs(Sn / Sp) * r << endl;
+            MFEM_ABORT("min bounds");
+         }
       }
-      if (S < 0.0 && us(i) < us_b(i))
+      if (S < 0.0)
       {
-         double r = us_b(i) - us(i);
-         us(i) = us_b(i) - fabs(Sp / Sn) * r;
+         double r = u(i) * s_max(i) - us(i);
+         MFEM_VERIFY(r >= 0, "r");
+         us(i) = us(i) + fabs(S / S_to_max) * r;
+
+         if (us(i) > u(i) * s_max(i))
+         {
+            cout << "above max: " << us(i) << " " << u(i) * s_max(i) << endl;
+            cout << r << " " << us(i) + fabs(Sn / Sp) * r << " " << fabs(Sn / Sp) * r << endl;
+            MFEM_ABORT("max bounds");
+         }
       }
    }
+
+   double m_bound = 0.0, m_blend = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { continue; }
+
+      m_bound += m(i) * us(i);
+      m_blend += m(i) * us_b(i);
+   }
+   MPI_Allreduce(MPI_IN_PLACE, &m_bound, 1, MPI_DOUBLE,
+                 MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &m_blend, 1, MPI_DOUBLE,
+                 MPI_SUM, MPI_COMM_WORLD);
+   //cout << fabs(m_bound - m_blend) << endl;
 }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
@@ -1534,6 +1606,17 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Array<bool> s_bool_el_new, s_bool_dofs_new;
       ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
+      Vector new_m(size);
+      ParMesh *pmesh = M_HO.ParFESpace()->GetParMesh();
+      GridFunction x_new(pmesh->GetNodes()->FESpace());
+      // Copy the current nodes into x.
+      pmesh->GetNodes(x_new);
+      x_new.Add(dt, mesh_vel);
+      ml.BilinearForm::operator=(0.0);
+      ml.Assemble();
+      lumpedM.HostReadWrite();
+      ml.SpMat().GetDiag(new_m);
+
       Vector d_us_b(size);
       fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                    dofs.xi_min, dofs.xi_max, u_b,
@@ -1542,7 +1625,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Vector us_b(size), us_new(size);
       add(1.0, us, dt, d_us_b, us_b);
 
-      sharp_product_sync(u_b, u_new, dofs.xi_min, dofs.xi_max,
+      sharp_product_sync(u_b, u_new, new_m, dofs.xi_min, dofs.xi_max,
                          us_b, s_bool_dofs_new, us_new);
 
       for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us(i)) / dt; }
