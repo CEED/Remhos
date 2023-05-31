@@ -406,14 +406,14 @@ void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
          if (face_nbr_el[n] < NE)
          {
             // Local neighbor.
-            el_min = std::min(el_min, x_min(face_nbr_el[n]));
-            el_max = std::max(el_max, x_max(face_nbr_el[n]));
+            el_min = fmin(el_min, x_min(face_nbr_el[n]));
+            el_max = fmax(el_max, x_max(face_nbr_el[n]));
          }
          else
          {
             // MPI face neighbor.
-            el_min = std::min(el_min, minv(face_nbr_el[n] - NE));
-            el_max = std::max(el_max, maxv(face_nbr_el[n] - NE));
+            el_min = fmin(el_min, minv(face_nbr_el[n] - NE));
+            el_max = fmax(el_max, maxv(face_nbr_el[n] - NE));
          }
       }
 
