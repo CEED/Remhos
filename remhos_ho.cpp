@@ -71,8 +71,9 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
-                                           ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf) { }
+                                           ParBilinearForm &Kbf,
+                                           ParBilinearForm *K_sharp)
+   : HOSolver(space), M(Mbf), K(Kbf), K_sharp(K_sharp) { }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
@@ -80,12 +81,25 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
                "PA for DG is not supported for Local Inverse.");
 
    Vector rhs(u.Size());
+   Vector rhsSharp(u.Size());
 
    K.SpMat().HostReadWriteI();
    K.SpMat().HostReadWriteJ();
    K.SpMat().HostReadWriteData();
    HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
    K_mat->Mult(u, rhs);
+
+   // if defined, apply the sharpening matrix
+   if(K_sharp != nullptr){
+      K_sharp->SpMat().HostReadWriteI();
+      K_sharp->SpMat().HostReadWriteJ();
+      K_sharp->SpMat().HostReadWriteData();
+      HypreParMatrix *K_sharp_mat = K_sharp->ParallelAssemble(&K_sharp->SpMat());
+      K_sharp_mat->Mult(u, rhsSharp);
+
+      delete K_sharp_mat; // cleanup
+   }
+   rhs.Add(1.0, rhsSharp);
 
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();

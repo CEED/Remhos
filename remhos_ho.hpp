@@ -52,11 +52,12 @@ public:
 class LocalInverseHOSolver : public HOSolver
 {
 protected:
-   ParBilinearForm &M, &K;
+   ParBilinearForm &M, &K, *K_sharp;
 
 public:
    LocalInverseHOSolver(ParFiniteElementSpace &space,
-                        ParBilinearForm &Mbf, ParBilinearForm &Kbf);
+                        ParBilinearForm &Mbf, ParBilinearForm &Kbf,
+                        ParBilinearForm *K_sharp = nullptr);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };

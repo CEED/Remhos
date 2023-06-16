@@ -77,7 +77,7 @@ class AdvectionOperator : public TimeDependentOperator
 private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
-   ParBilinearForm &M_HO, &K_HO;
+   ParBilinearForm &M_HO, &K_HO, &K_sharp;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -105,7 +105,7 @@ public:
    AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
-                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm &K_sharp_,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
@@ -463,6 +463,7 @@ int main(int argc, char *argv[])
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
+   ParBilinearForm K_sharp(&pfes);
    if (exec_mode == 0)
    {
       MFEM_VERIFY(sharp == false, "only remap tests now");
@@ -498,32 +499,37 @@ int main(int argc, char *argv[])
          {
             auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
             auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
-            K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-            K_HO.AddInteriorFaceIntegrator(dgt);
+            K_sharp.AddDomainIntegrator(new TransposeIntegrator(ci));
+            K_sharp.AddInteriorFaceIntegrator(dgt);
          }
       }
 
       K_HO.KeepNbrBlock(true);
+      K_sharp.KeepNbrBlock(true);
    }
 
    if (pa)
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      K_sharp.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
    if (next_gen_full)
    {
       K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
+      K_sharp.SetAssemblyLevel(AssemblyLevel::FULL);
    }
 
    M_HO.Assemble();
    K_HO.Assemble(0);
+   K_sharp.Assemble(0);
 
    if (pa == false)
    {
       M_HO.Finalize();
       K_HO.Finalize(0);
+      K_sharp.Finalize(0);
    }
 
    // Compute the lumped mass matrix.
@@ -739,7 +745,11 @@ int main(int argc, char *argv[])
    }
    else if (ho_type == HOSolverType::LocalInverse)
    {
-      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      if(sharp){
+         ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO, &K_sharp);
+      } else {
+         ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      }
    }
 
    // Setup the low order solver (if any).
@@ -931,7 +941,7 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO, K_sharp, 
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -1320,7 +1330,7 @@ int main(int argc, char *argv[])
 AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm &K_sharp_,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
                                      Assembly &_asmbl,
@@ -1328,7 +1338,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_),
+   M_HO(M_HO_), K_HO(K_HO_), K_sharp(K_sharp_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
@@ -1366,6 +1376,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       M_HO.Assemble();
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
+      K_sharp.BilinearForm::operator=(0.0);
+      K_sharp.Assemble(0);
 
       if (lom.pk)
       {
