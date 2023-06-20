@@ -26,12 +26,12 @@ MonoRDSolver::MonoRDSolver(ParFiniteElementSpace &space,
                            const SparseMatrix &adv_mat,
                            const SparseMatrix &mass_mat, const Vector &Mlump,
                            Assembly &asmbly,
-                           SmoothnessIndicator *si,
+                           std::vector<SmoothnessIndicator> &sis,
                            VectorFunctionCoefficient &velocity,
                            bool subcell, bool timedep, bool masslim)
    : MonolithicSolver(space),
      K_mat(adv_mat), M_mat(mass_mat), M_lumped(Mlump),
-     assembly(asmbly), smth_indicator(si), scale(pfes.GetNE()),
+     assembly(asmbly), smth_indicators(sis), scale(pfes.GetNE()),
      subcell_scheme(subcell), time_dep(timedep), mass_lim(masslim)
 {
    const int ne = pfes.GetNE(), dim = pfes.GetMesh()->Dimension();
@@ -57,7 +57,7 @@ MonoRDSolver::MonoRDSolver(ParFiniteElementSpace &space,
    }
 }
 
-void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
+void MonoRDSolver::CalcSolution(const Vector &u, int imat, Vector &du) const
 {
    const int ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
@@ -100,9 +100,9 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
 
    // Smoothness indicator.
    ParGridFunction si_val;
-   if (smth_indicator)
+   if (smth_indicators.size() > 0)
    {
-      smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+      smth_indicators[imat].ComputeSmoothnessIndicator(u, si_val);
    }
 
    // Discretization terms.
@@ -130,9 +130,9 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
                          / (max(assembly.dofs.xi_max(dof_id) - u(dof_id),
                                 u(dof_id) - assembly.dofs.xi_min(dof_id)) + eps) );
 
-         if (smth_indicator)
+         if (smth_indicators.size() > 0)
          {
-            tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+            tmp = smth_indicators[imat].DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicators[imat].DG2CG(
                                                                       dof_id));
             bndN = max( 0., tmp * (2.*u(dof_id) - assembly.dofs.xi_max(dof_id)) +
                         (1.-tmp) * assembly.dofs.xi_min(dof_id) );
@@ -292,9 +292,9 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
             diff = d(dof_id) - du(dof_id);
 
             tmp = 0.;
-            if (smth_indicator)
+            if (smth_indicators.size() > 0)
             {
-               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+               tmp = smth_indicators[imat].DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicators[imat].DG2CG(
                                                                          dof_id));
             }
             m_it(i) += min( 1., max(tmp, abs(m_it(i)) / (abs(diff) + eps)) )
@@ -312,11 +312,11 @@ void MonoRDSolver::CalcSolution(const Vector &u, Vector &du) const
                                                      u(dof_id) - assembly.dofs.xi_min(dof_id))
                            / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
 
-            if (smth_indicator)
+            if (smth_indicators.size() > 0)
             {
                alphaGlob = min( 1., beta * scale(k) * min(1. - u(dof_id), u(dof_id) - 0.)
                                 / (max(uDotMax - uDot(i), uDot(i) - uDotMin) + eps) );
-               tmp = smth_indicator->DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicator->DG2CG(
+               tmp = smth_indicators[imat].DG2CG(dof_id) < 0. ? 1. : si_val(smth_indicators[imat].DG2CG(
                                                                          dof_id));
                alpha(i) = min(max(tmp, alpha(i)), alphaGlob);
             }

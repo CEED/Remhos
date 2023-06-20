@@ -151,6 +151,7 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
+   int nmat = 3;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
@@ -700,17 +701,25 @@ int main(int argc, char *argv[])
    Array<int> offset((product_sync) ? 3 : 2);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
-   // Primary scalar field is u.
-   ParGridFunction u(&pfes);
-   u.MakeRef(&pfes, S, offset[0]);
-   FunctionCoefficient u0(u0_function);
-   u.ProjectCoefficient(u0);
-   u.SyncAliasMemory(S);
+
+   // Material Indicator Fields
+   std::vector<ParGridFunction> Ys(nmat, &pfes);
+   for(int imat = 0; imat < nmat; ++imat){
+      // initialize the indicator fields
+      ParGridFunction &y_i = Ys[imat];
+      y_i.MakeRef(&pfes, S, offset[0]);
+      FunctionCoefficient u0(u0_function);
+      y_i.ProjectCoefficient(u0);
+      y_i.SyncAliasMemory(S);
+   }
+
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
    if (product_sync)
    {
+      // temporarily use Ys[0] as u
+      ParGridFunction &u = Ys[0];
       s.SetSpace(&pfes);
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
@@ -725,12 +734,15 @@ int main(int argc, char *argv[])
       us.SyncAliasMemory(S);
    }
 
-   // Smoothness indicator.
-   SmoothnessIndicator *smth_indicator = NULL;
+   // Smoothness indicators.
+   std::vector<SmoothnessIndicator> smth_indicators{};
+   smth_indicators.reserve(nmat);
    if (smth_ind_type)
    {
-      smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dof_info);
+      for(int imat = 0; imat < nmat; ++imat){
+         smth_indicators.emplace_back(smth_ind_type, *subcell_mesh,
+                                               pfes, Ys[imat], dof_info);
+      }
    }
 
    // Setup of the high-order solver (if any).
@@ -838,14 +850,14 @@ int main(int argc, char *argv[])
    {
       const bool subcell_scheme = false;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
-                                     asmbl, smth_indicator, velocity,
+                                     asmbl, smth_indicators, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
    else if (mono_type == MonolithicSolverType::ResDistMonoSubcell)
    {
       const bool subcell_scheme = true;
       mono_solver = new MonoRDSolver(pfes, k.SpMat(), m.SpMat(), lumpedM,
-                                     asmbl, smth_indicator, velocity,
+                                     asmbl, smth_indicators, velocity,
                                      subcell_scheme, time_dep, mass_lim);
    }
 
@@ -859,9 +871,11 @@ int main(int argc, char *argv[])
       meshLO.precision(precision);
       subcell_mesh->PrintAsOne(meshLO);
    }
-   ofstream sltn("sltn_init.gf");
-   sltn.precision(precision);
-   u.SaveAsOne(sltn);
+   for(int imat = 0; imat < nmat; ++imat){
+      ofstream sltn("sltn_imat" + std::to_string(imat) + "_init.gf");
+      sltn.precision(precision);
+      Ys[imat].SaveAsOne(sltn);
+   }
 
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
@@ -870,7 +884,9 @@ int main(int argc, char *argv[])
    {
       dc = new VisItDataCollection("Remhos", &pmesh);
       dc->SetPrecision(precision);
-      dc->RegisterField("solution", &u);
+      for(int imat = 0; imat < nmat; ++imat){
+         dc->RegisterField("solution_mat" + std::to_string(imat), &Ys[imat]);
+      }
       dc->SetCycle(0);
       dc->SetTime(0.0);
       dc->Save();
@@ -881,6 +897,9 @@ int main(int argc, char *argv[])
    int  visport   = 19916;
    if (visualization)
    {
+      // Visualize the first material
+      ParGridFunction &u = Ys[0];
+
       // Make sure all MPI ranks have sent their 'v' solution before initiating
       // another set of GLVis connections (one from each rank):
       MPI_Barrier(pmesh.GetComm());
@@ -904,41 +923,49 @@ int main(int argc, char *argv[])
    }
 
    // Record the initial mass.
-   Vector masses(lumpedM);
-   const double mass0_u_loc = lumpedM * u;
-   double mass0_u, mass0_us;
-   MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   if (product_sync)
-   {
-      const double mass0_us_loc = lumpedM * us;
-      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+   std::vector<double> masses0_u(nmat);
+   double mass0_us;
+   for(int imat = 0; imat < nmat; ++imat){
+      Vector masses(lumpedM);
+      const double mass0_u_loc = lumpedM * Ys[imat];
+      MPI_Allreduce(&mass0_u_loc, &masses0_u[imat], 1, MPI_DOUBLE, MPI_SUM, comm);
+      if (product_sync)
+      {
+         const double mass0_us_loc = lumpedM * us;
+         MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+      }
    }
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
    FCTSolver *fct_solver = NULL;
-   if (fct_type == FCTSolverType::FluxBased)
    {
-      MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
-      K_HO.SpMat().HostReadI();
-      K_HO.SpMat().HostReadJ();
-      K_HO.SpMat().HostReadData();
-      K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-      const int fct_iterations = 1;
-      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
-                                    K_HO_smap, M_HO.SpMat(), fct_iterations);
-   }
-   else if (fct_type == FCTSolverType::ClipScale)
-   {
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
-   }
-   else if (fct_type == FCTSolverType::NonlinearPenalty)
-   {
-      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
-   }
-   else if (fct_type == FCTSolverType::FCTProject)
-   {
-      fct_solver = new ElementFCTProjection(pfes, dt);
+      SmoothnessIndicator *smth_indicator = 
+         (smth_indicators.size() > 0) ? smth_indicators.data() : nullptr;
+
+      if (fct_type == FCTSolverType::FluxBased)
+      {
+         MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
+         K_HO.SpMat().HostReadI();
+         K_HO.SpMat().HostReadJ();
+         K_HO.SpMat().HostReadData();
+         K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
+         const int fct_iterations = 1;
+         fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+                                       K_HO_smap, M_HO.SpMat(), fct_iterations);
+      }
+      else if (fct_type == FCTSolverType::ClipScale)
+      {
+         fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      }
+      else if (fct_type == FCTSolverType::NonlinearPenalty)
+      {
+         fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      }
+      else if (fct_type == FCTSolverType::FCTProject)
+      {
+         fct_solver = new ElementFCTProjection(pfes, dt);
+      }
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO, K_sharp, 
@@ -950,8 +977,8 @@ int main(int argc, char *argv[])
    adv.SetTimeStepControl(dt_control);
    ode_solver->Init(adv);
 
-   double umin, umax;
-   GetMinMax(u, umin, umax);
+   std::vector<double> Ymins, Ymaxes;
+   for(int imat = 0; imat < nmat; ++imat) GetMinMax(Ys[imat], Ymins[imat], Ymaxes[imat]);
 
    if (exec_mode == 1)
    {
@@ -961,7 +988,9 @@ int main(int argc, char *argv[])
       t_final = 1.0;
    }
 
-   ParGridFunction res = u;
+   std::vector<ParGridFunction> resvec{};
+   resvec.reserve(nmat);
+   for(int imat = 0; imat < nmat; ++imat) resvec[imat] = Ys[imat];
    double residual;
    double s_min_glob = numeric_limits<double>::infinity(),
           s_max_glob = -numeric_limits<double>::infinity();
@@ -972,173 +1001,183 @@ int main(int argc, char *argv[])
    int ti_total = 0, ti = 0;
    while (done == false)
    {
-      double dt_real = min(dt, t_final - t);
+      for(int imat = 0; imat < nmat; ++imat){ // loop over materials
+         ParGridFunction &Y_imat = Ys[imat]; 
+         double dt_real = min(dt, t_final - t);
 
-      // This also resets the time step estimate when automatic dt is on.
-      adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+         // This also resets the time step estimate when automatic dt is on.
+         adv.SetDt(dt_real);
+         if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+         if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
 
-      if (product_sync)
-      {
-         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
+         if (product_sync)
+         {
+            ComputeMinMaxS(pmesh.GetNE(), us, Y_imat, s_min_glob, s_max_glob);
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-         if (myid == 0)
-         {
-            std::cout << "   --- Full time step" << std::endl;
-            std::cout << "   in:  ";
-            std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
-         }
+            if (myid == 0)
+            {
+               std::cout << "   --- Full time step" << std::endl;
+               std::cout << "   in:  ";
+               std::cout << std::scientific << std::setprecision(5);
+               std::cout << "min_s: " << s_min_glob
+                         << "; max_s: " << s_max_glob << std::endl;
+            }
 #endif
-      }
+         }
 
-      // needed for velocity modifications.
-      dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
-      // needed for velocity visualization.
-      if (sharp == true)
-      {
-         if (exec_mode == 0)
+         // needed for velocity modifications.
+         dof_info.ComputeLinMaxBound(Y_imat, u_max_bounds, u_max_bounds_grad_dir);
+         // needed for velocity visualization.
+         if (sharp == true)
          {
-            v_new_vis.ProjectCoefficient(v_new_coeff_adv);
+            if (exec_mode == 0)
+            {
+               v_new_vis.ProjectCoefficient(v_new_coeff_adv);
+            }
+            else
+            {
+               v_new_vis.ProjectCoefficient(v_new_coeff_rem);
+            }
+         }
+
+         Sold = S;
+         ode_solver->Step(S, t, dt_real);
+         ti++;
+         ti_total++;
+
+         if (dt_control != TimeStepControl::FixedTimeStep)
+         {
+            double dt_est = adv.GetTimeStepEstimate();
+            if (dt_est < dt_real)
+            {
+               // Repeat with the proper time step.
+               if (myid == 0)
+               {
+                  cout << "Repeat / decrease dt: "
+                       << dt_real << " --> " << 0.85 * dt << endl;
+               }
+               ti--;
+               t -= dt_real;
+               S  = Sold;
+               dt = 0.85 * dt;
+               if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
+               continue;
+            }
+            else if (dt_est > 1.25 * dt_real)
+            {
+               if (myid == 0)
+               {
+                  cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
+               }
+               dt *= 1.02;
+            }
+         }
+
+         // S has been modified, update the alias
+         Y_imat.SyncMemory(S);
+         if (product_sync)
+         {
+            ParGridFunction &u = Ys[0];
+            us.SyncMemory(S);
+
+            // It is known that RK time integrators with more than 1 stage may
+            // cause violation of the lower bounds for us.
+            // The lower bound is corrected, causing small conservation error.
+            // Correction can also be done with localized bounds for s, but for
+            // now we have implemented only the minimum global bound.
+            u.HostRead();
+            us.HostReadWrite();
+            const int s = u.Size();
+            Array<bool> active_elem, active_dofs;
+            ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+            for (int i = 0; i < s; i++)
+            {
+               if (active_dofs[i] == false) { continue; }
+
+               double us_min = u(i) * s_min_glob;
+               if (us(i) < us_min) { us(i) = us_min; }
+            }
+
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
+            ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
+            if (myid == 0)
+            {
+               std::cout << "   out: ";
+               std::cout << std::scientific << std::setprecision(5);
+               std::cout << "min_s: " << s_min_glob
+                         << "; max_s: " << s_max_glob << std::endl;
+            }
+#endif
+         }
+
+         // Monotonicity check for debug purposes mainly.
+         if (verify_bounds && forced_bounds && smth_indicators.size() == 0)
+         {
+            double umin_new, umax_new;
+            GetMinMax(Y_imat, umin_new, umax_new);
+            if (problem_num % 10 != 6 && problem_num % 10 != 7)
+            {
+               if (myid == 0)
+               {
+                  MFEM_VERIFY(umin_new > Ymins[imat] - 1e-12,
+                              "Undershoot in material " << imat 
+                              << " of " << Ymins[imat] - umin_new);
+                  MFEM_VERIFY(umax_new < Ymaxes[imat] + 1e-12,
+                              "Overshoot in material " << imat 
+                              << "of " << umax_new - Ymaxes[imat]);
+               }
+               Ymins[imat] = umin_new;
+               Ymaxes[imat] = umax_new;
+            }
+            else
+            {
+               if (myid == 0)
+               {
+                  MFEM_VERIFY(umin_new > 0.0 - 1e-12,
+                              "Undershoot in material " << imat 
+                              << " of " << 0.0 - umin_new);
+                  MFEM_VERIFY(umax_new < 1.0 + 1e-12,
+                              "Overshoot in material " << imat
+                              << " of " << umax_new - 1.0);
+               }
+            }
+         }
+
+         if (exec_mode == 1)
+         {
+            x0.HostReadWrite(); v_sub_gf.HostReadWrite();
+            x.HostReadWrite();
+            add(x0, t, v_gf, x);
+            x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
+            MFEM_VERIFY(xsub != NULL,
+                        "xsub == NULL/This code should not be entered for order = 1.");
+            xsub->HostReadWrite();
+            add(x0_sub, t, v_sub_gf, *xsub);
+         }
+
+         if (problem_num != 6 && problem_num != 7 && problem_num != 8)
+         {
+            done = (t >= t_final - 1.e-8*dt);
          }
          else
          {
-            v_new_vis.ProjectCoefficient(v_new_coeff_rem);
-         }
-      }
-
-      Sold = S;
-      ode_solver->Step(S, t, dt_real);
-      ti++;
-      ti_total++;
-
-      if (dt_control != TimeStepControl::FixedTimeStep)
-      {
-         double dt_est = adv.GetTimeStepEstimate();
-         if (dt_est < dt_real)
-         {
-            // Repeat with the proper time step.
-            if (myid == 0)
+            // Steady state problems - stop at convergence.
+            double res_loc = 0.;
+            ParGridFunction &res = resvec[imat];
+            lumpedM.HostReadWrite(); Y_imat.HostReadWrite(); res.HostReadWrite();
+            for (int i = 0; i < res.Size(); i++)
             {
-               cout << "Repeat / decrease dt: "
-                    << dt_real << " --> " << 0.85 * dt << endl;
+               res_loc += pow( (lumpedM(i) * Y_imat(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
             }
-            ti--;
-            t -= dt_real;
-            S  = Sold;
-            dt = 0.85 * dt;
-            if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
-            continue;
-         }
-         else if (dt_est > 1.25 * dt_real)
-         {
-            if (myid == 0)
-            {
-               cout << "Increase dt: " << dt << " --> " << 1.02 * dt << endl;
-            }
-            dt *= 1.02;
+            MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
+
+            residual = sqrt(residual);
+            if (residual < 1.e-12 && t >= 1.) { done = true; Y_imat = res; }
+            else { res = Y_imat; }
          }
       }
 
-      // S has been modified, update the alias
-      u.SyncMemory(S);
-      if (product_sync)
-      {
-         us.SyncMemory(S);
-
-         // It is known that RK time integrators with more than 1 stage may
-         // cause violation of the lower bounds for us.
-         // The lower bound is corrected, causing small conservation error.
-         // Correction can also be done with localized bounds for s, but for
-         // now we have implemented only the minimum global bound.
-         u.HostRead();
-         us.HostReadWrite();
-         const int s = u.Size();
-         Array<bool> active_elem, active_dofs;
-         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         for (int i = 0; i < s; i++)
-         {
-            if (active_dofs[i] == false) { continue; }
-
-            double us_min = u(i) * s_min_glob;
-            if (us(i) < us_min) { us(i) = us_min; }
-         }
-
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
-         if (myid == 0)
-         {
-            std::cout << "   out: ";
-            std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
-         }
-#endif
-      }
-
-      // Monotonicity check for debug purposes mainly.
-      if (verify_bounds && forced_bounds && smth_indicator == NULL)
-      {
-         double umin_new, umax_new;
-         GetMinMax(u, umin_new, umax_new);
-         if (problem_num % 10 != 6 && problem_num % 10 != 7)
-         {
-            if (myid == 0)
-            {
-               MFEM_VERIFY(umin_new > umin - 1e-12,
-                           "Undershoot of " << umin - umin_new);
-               MFEM_VERIFY(umax_new < umax + 1e-12,
-                           "Overshoot of " << umax_new - umax);
-            }
-            umin = umin_new;
-            umax = umax_new;
-         }
-         else
-         {
-            if (myid == 0)
-            {
-               MFEM_VERIFY(umin_new > 0.0 - 1e-12,
-                           "Undershoot of " << 0.0 - umin_new);
-               MFEM_VERIFY(umax_new < 1.0 + 1e-12,
-                           "Overshoot of " << umax_new - 1.0);
-            }
-         }
-      }
-
-      if (exec_mode == 1)
-      {
-         x0.HostReadWrite(); v_sub_gf.HostReadWrite();
-         x.HostReadWrite();
-         add(x0, t, v_gf, x);
-         x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
-         MFEM_VERIFY(xsub != NULL,
-                     "xsub == NULL/This code should not be entered for order = 1.");
-         xsub->HostReadWrite();
-         add(x0_sub, t, v_sub_gf, *xsub);
-      }
-
-      if (problem_num != 6 && problem_num != 7 && problem_num != 8)
-      {
-         done = (t >= t_final - 1.e-8*dt);
-      }
-      else
-      {
-         // Steady state problems - stop at convergence.
-         double res_loc = 0.;
-         lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
-         for (int i = 0; i < res.Size(); i++)
-         {
-            res_loc += pow( (lumpedM(i) * u(i) / dt) - (lumpedM(i) * res(i) / dt), 2. );
-         }
-         MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
-
-         residual = sqrt(residual);
-         if (residual < 1.e-12 && t >= 1.) { done = true; u = res; }
-         else { res = u; }
-      }
-
+      // output and visualization in timestep
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
@@ -1147,11 +1186,11 @@ int main(int argc, char *argv[])
                  << ", dt: " << dt << ", residual: " << residual << endl;
          }
 
-         if (visualization)
+         if (visualization) // only visualize last material for now
          {
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
-            VisualizeField(sout, vishost, visport, u, "Solution u",
+            VisualizeField(sout, vishost, visport, Ys[0], "Solution u",
                            Wx, Wy, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+400, Wy, Ww, Wh);
@@ -1163,7 +1202,7 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                // Recompute s = u_s / u.
-               ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+               ComputeRatio(pmesh.GetNE(), us, Ys[0], s, u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
                               Wx + Ww, Wy, Ww, Wh);
                VisualizeField(vis_us, vishost, visport, us, "Solution u_s",
@@ -1197,115 +1236,126 @@ int main(int argc, char *argv[])
          meshLO.precision(precision);
          subcell_mesh->PrintAsOne(meshLO);
       }
-      ofstream sltn("sltn_final.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
+      for(int imat = 0; imat < nmat; ++imat){
+         ofstream sltn("sltn_imat" + std::to_string(imat) + "_final.gf");
+         sltn.precision(precision);
+         Ys[imat].SaveAsOne(sltn);
+      }
    }
 
-   // Check for mass conservation.
-   double mass_u_loc = 0.0, mass_us_loc = 0.0;
-   if (exec_mode == 1)
-   {
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostRead();
-      ml.SpMat().GetDiag(lumpedM);
-      mass_u_loc = lumpedM * u;
-      if (product_sync) { mass_us_loc = lumpedM * us; }
-   }
-   else
-   {
-      mass_u_loc = masses * u;
-      if (product_sync) { mass_us_loc = masses * us; }
-   }
-   double mass_u, mass_us, s_max;
-   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
-   if (product_sync)
-   {
-      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
-      const double s_max_loc = s.Max();
-      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
-   }
-   if (myid == 0)
-   {
-      cout << setprecision(10)
-           << "Final mass u:  " << mass_u << endl
-           << "Max value u:   " << umax << endl << setprecision(6)
-           << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
+   for(int imat = 0; imat < nmat; ++imat){
+      
+      ParGridFunction &u = Ys[imat];
+      // Check for mass conservation.
+      Vector masses(lumpedM);
+      double umin, umax;
+      double mass_u_loc = 0.0, mass_us_loc = 0.0;
+      if (exec_mode == 1)
+      {
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostRead();
+         ml.SpMat().GetDiag(lumpedM);
+         mass_u_loc = lumpedM * u;
+         if (product_sync) { mass_us_loc = lumpedM * us; }
+      }
+      else
+      {
+         mass_u_loc = masses * u;
+         if (product_sync) { mass_us_loc = masses * us; }
+      }
+      double mass_u, mass_us, s_max;
+      MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+      const double umax_loc = u.Max();
+      MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
       if (product_sync)
       {
+         ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
+         const double s_max_loc = s.Max();
+         MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+         MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+      }
+      if (myid == 0)
+      {
          cout << setprecision(10)
-              << "Final mass us: " << mass_us << endl
-              << "Max value s:   " << s_max << endl << setprecision(6)
-              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
-      }
-   }
-
-   ConstantCoefficient zero(0.0);
-   double norm_u = u.ComputeL2Error(zero);
-   if (myid == 0)
-   {
-      cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
-   }
-
-   // Compute errors, if the initial condition is equal to the final solution
-   if (problem_num == 4 || problem_num == 18) // solid body rotation
-   {
-      double err_L1 = u.ComputeLpError(1., u0),
-             err_L2 = u.ComputeL2Error(u0);
-      if (myid == 0)
-      {
-         cout << "L1-error: " << err_L1 << endl
-              << "L2-error: " << err_L2 << endl;
-      }
-   }
-   else if (problem_num == 7)
-   {
-      FunctionCoefficient u_ex(inflow_function);
-      double e1 = u.ComputeLpError(1., u_ex);
-      double e2 = u.ComputeLpError(2., u_ex);
-      double eInf = u.ComputeLpError(numeric_limits<double>::infinity(), u_ex);
-      if (myid == 0)
-      {
-         cout << "L1-error: " << e1 << "." << endl;
-
-         // write output
-         ofstream file("errors.txt", ios_base::app);
-
-         if (!file)
+              << "Final mass material " << " : " << mass_u << endl
+              << "Max value material " << " : " << umax << endl << setprecision(6)
+              << "Mass loss  material " << " : " << abs(masses0_u[imat] - mass_u) << endl;
+         if (product_sync)
          {
-            MFEM_ABORT("Error opening file.");
-         }
-         else
-         {
-            ostringstream strs;
-            strs << e1 << " " << e2 << " " << eInf << "\n";
-            string str = strs.str();
-            file << str;
-            file.close();
+            cout << setprecision(10)
+                 << "Final mass us: " << mass_us << endl
+                 << "Max value s:   " << s_max << endl << setprecision(6)
+                 << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
          }
       }
-   }
 
-   if (smth_indicator)
-   {
-      // Print the values of the smoothness indicator.
-      ParGridFunction si_val;
-      smth_indicator->ComputeSmoothnessIndicator(u, si_val);
+      ConstantCoefficient zero(0.0);
+      double norm_u = u.ComputeL2Error(zero);
+      if (myid == 0)
       {
-         ofstream smth("si_final.gf");
-         smth.precision(precision);
-         si_val.SaveAsOne(smth);
+         cout << setprecision(12) << "L2-norm u: " << norm_u << endl;
+      }
+
+      // Compute errors, if the initial condition is equal to the final solution
+      if (problem_num == 4 || problem_num == 18) // solid body rotation
+      {
+         
+         FunctionCoefficient u0(u0_function);
+         double err_L1 = u.ComputeLpError(1., u0),
+                err_L2 = u.ComputeL2Error(u0);
+         if (myid == 0)
+         {
+            cout << "L1-error: " << err_L1 << endl
+                 << "L2-error: " << err_L2 << endl;
+         }
+      }
+      else if (problem_num == 7)
+      {
+         FunctionCoefficient u_ex(inflow_function);
+         double e1 = u.ComputeLpError(1., u_ex);
+         double e2 = u.ComputeLpError(2., u_ex);
+         double eInf = u.ComputeLpError(numeric_limits<double>::infinity(), u_ex);
+         if (myid == 0)
+         {
+            cout << "L1-error: " << e1 << "." << endl;
+
+            // write output
+            ofstream file("errors.txt", ios_base::app);
+
+            if (!file)
+            {
+               MFEM_ABORT("Error opening file.");
+            }
+            else
+            {
+               ostringstream strs;
+               strs << e1 << " " << e2 << " " << eInf << "\n";
+               string str = strs.str();
+               file << str;
+               file.close();
+            }
+         }
+      }
+
+   }
+   if (smth_indicators.size() == nmat)
+   {
+      for(int imat = 0; imat < nmat; ++imat){
+         // Print the values of the smoothness indicator.
+         ParGridFunction si_val;
+         smth_indicators[imat].ComputeSmoothnessIndicator(Ys[imat], si_val);
+         {
+            ofstream smth("si_final.gf");
+            smth.precision(precision);
+            si_val.SaveAsOne(smth);
+         }
       }
    }
 
    // Free the used memory.
    delete mono_solver;
    delete fct_solver;
-   delete smth_indicator;
    delete ho_solver;
 
    delete ode_solver;

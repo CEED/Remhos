@@ -175,11 +175,12 @@ void FCTSolver::ScaleProductBounds(const Vector &s_min, const Vector &s_max,
    }
 }
 
-void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+void FluxBasedFCT::CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                    const Vector &du_ho, const Vector &du_lo,
                                    const Vector &u_min, const Vector &u_max,
                                    Vector &du) const
 {
+   SmoothnessIndicator *smth_indicator = smth_indicator_arr + imat;
    MFEM_VERIFY(smth_indicator == NULL, "TODO: update SI bounds.");
 
    // Construct the flux matrix (it gets recomputed every time).
@@ -203,13 +204,14 @@ void FluxBasedFCT::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    }
 }
 
-void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+void FluxBasedFCT::CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                   const Vector &d_us_HO, const Vector &d_us_LO,
                                   Vector &s_min, Vector &s_max,
                                   const Vector &u_new,
                                   const Array<bool> &active_el,
                                   const Array<bool> &active_dofs, Vector &d_us)
 {
+   SmoothnessIndicator *smth_indicator = smth_indicator_arr + imat;
    // Construct the flux matrix (it gets recomputed every time).
    ComputeFluxMatrix(us, d_us_HO, flux_ij);
 
@@ -477,11 +479,12 @@ UpdateSolutionAndFlux(const Vector &du_lo, const Vector &m,
 }
 
 
-void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+void ClipScaleSolver::CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                       const Vector &du_ho, const Vector &du_lo,
                                       const Vector &u_min, const Vector &u_max,
                                       Vector &du) const
 {
+   SmoothnessIndicator *smth_indicator = smth_indicator_arr + imat;
    const int NE = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
    Vector f_clip(nd);
@@ -556,13 +559,14 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    }
 }
 
-void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+void ClipScaleSolver::CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                      const Vector &d_us_HO, const Vector &d_us_LO,
                                      Vector &s_min, Vector &s_max,
                                      const Vector &u_new,
                                      const Array<bool> &active_el,
                                      const Array<bool> &active_dofs, Vector &d_us)
 {
+   SmoothnessIndicator *smth_indicator = smth_indicator_arr + imat;
    us.HostRead();
    s_min.HostReadWrite();
    s_max.HostReadWrite();
@@ -578,7 +582,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                       us_min, us_max);
 
    // ClipScale solve for d_us.
-   CalcFCTSolution(us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
+   CalcFCTSolution(imat, us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
    ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
@@ -623,7 +627,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
 #endif
 }
 
-void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
+void ElementFCTProjection::CalcFCTSolution(int imat, const ParGridFunction &u,
                                            const Vector &m,
                                            const Vector &du_HO,
                                            const Vector &du_LO,
@@ -743,7 +747,7 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
    } // element loop
 }
 
-void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+void ElementFCTProjection::CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                      const Vector &d_us_HO, const Vector &d_us_LO,
                                      Vector &s_min, Vector &s_max,
                                      const Vector &u_new,
@@ -765,11 +769,12 @@ void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vecto
                       us_min, us_max);
 
    // ClipScale solve for d_us.
-   CalcFCTSolution(us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
+   CalcFCTSolution(imat, us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
    ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 }
 
-void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
+void NonlinearPenaltySolver::CalcFCTSolution(int imat,
+                                             const ParGridFunction &u,
                                              const Vector &m,
                                              const Vector &du_ho,
                                              const Vector &du_lo,
@@ -777,6 +782,7 @@ void NonlinearPenaltySolver::CalcFCTSolution(const ParGridFunction &u,
                                              const Vector &u_max,
                                              Vector &du) const
 {
+   SmoothnessIndicator *smth_indicator = smth_indicator_arr + imat;
    const int size = u.Size();
    Vector du_ho_star(size);
 

@@ -31,7 +31,7 @@ class FCTSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
-   SmoothnessIndicator *smth_indicator;
+   SmoothnessIndicator *smth_indicator_arr;
    double dt;
    const bool needs_LO_input_for_products;
 
@@ -52,7 +52,7 @@ protected:
 public:
    FCTSolver(ParFiniteElementSpace &space,
              SmoothnessIndicator *si, double dt_, bool needs_LO_prod)
-      : pfes(space), smth_indicator(si), dt(dt_),
+      : pfes(space), smth_indicator_arr(si), dt(dt_),
         needs_LO_input_for_products(needs_LO_prod) { }
 
    virtual ~FCTSolver() { }
@@ -65,7 +65,7 @@ public:
    // bounds preservation: u_min_i <= u_i + dt du_i <= u_max_i,
    // conservation:        sum m_i (u_i + dt du_ho_i) = sum m_i (u_i + dt du_i).
    // Some methods utilize du_lo as a backup choice, as it satisfies the above.
-   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+   virtual void CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const = 0;
@@ -74,7 +74,7 @@ public:
    // Given the input, calculates d_us, so that:
    // bounds preservation: s_min_i <= (us_i + dt d_us_i) / u_new_i <= s_max_i,
    // conservation: sum m_i (us_i + dt d_us_HO_i) = sum m_i (us_i + dt d_us_i).
-   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+   virtual void CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
                                const Vector &u_new,
@@ -117,12 +117,12 @@ public:
         K(adv_mat), M(mass_mat), K_smap(adv_smap), flux_ij(adv_mat),
         gp(&pfes), gm(&pfes), iter_cnt(fct_iterations) { }
 
-   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+   virtual void CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
 
-   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+   virtual void CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
                                const Vector &u_new,
@@ -137,12 +137,12 @@ public:
                    SmoothnessIndicator *si, double dt)
       : FCTSolver(space, si, dt, false) { }
 
-   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+   virtual void CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
 
-   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+   virtual void CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
                                const Vector &u_new,
@@ -156,12 +156,12 @@ public:
    ElementFCTProjection(ParFiniteElementSpace &space, double dt)
       : FCTSolver(space, NULL, dt, false) { }
 
-   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+   virtual void CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;
 
-   virtual void CalcFCTProduct(const ParGridFunction &us, const Vector &m,
+   virtual void CalcFCTProduct(int imat, const ParGridFunction &us, const Vector &m,
                                const Vector &d_us_HO, const Vector &d_us_LO,
                                Vector &s_min, Vector &s_max,
                                const Vector &u_new,
@@ -181,7 +181,7 @@ public:
                           SmoothnessIndicator *si, double dt_)
       : FCTSolver(space, si, dt_, false) { }
 
-   virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
+   virtual void CalcFCTSolution(int imat, const ParGridFunction &u, const Vector &m,
                                 const Vector &du_ho, const Vector &du_lo,
                                 const Vector &u_min, const Vector &u_max,
                                 Vector &du) const;

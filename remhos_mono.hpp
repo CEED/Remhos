@@ -35,7 +35,7 @@ public:
 
    virtual ~MonolithicSolver() { }
 
-   virtual void CalcSolution(const Vector &u, Vector &du) const = 0;
+   virtual void CalcSolution(const Vector &u, int imat, Vector &du) const = 0;
 };
 
 class Assembly;
@@ -47,7 +47,7 @@ protected:
    const SparseMatrix &K_mat, &M_mat;
    const Vector &M_lumped;
    Assembly &assembly;
-   SmoothnessIndicator *smth_indicator;
+   std::vector<SmoothnessIndicator> &smth_indicators;
    Vector scale;
    bool subcell_scheme;
    const bool time_dep;
@@ -57,11 +57,11 @@ public:
    MonoRDSolver(ParFiniteElementSpace &space,
                 const SparseMatrix &adv_mat, const SparseMatrix &mass_mat,
                 const Vector &Mlump,
-                Assembly &asmbly, SmoothnessIndicator *si,
+                Assembly &asmbly, std::vector<SmoothnessIndicator> &sis,
                 VectorFunctionCoefficient &velocity,
                 bool subcell, bool timedep, bool masslim);
 
-   void CalcSolution(const Vector &u, Vector &du) const;
+   void CalcSolution(const Vector &u, int imat, Vector &du) const;
 };
 
 } // namespace mfem
