@@ -68,7 +68,6 @@ public:
    SmoothnessIndicator(int type_id,
                        ParMesh &subcell_mesh,
                        ParFiniteElementSpace &pfes_DG_,
-                       ParGridFunction &u,
                        DofInfo &dof_info);
    ~SmoothnessIndicator();
 

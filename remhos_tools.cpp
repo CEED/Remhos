@@ -24,7 +24,6 @@ namespace mfem
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,
-                                         ParGridFunction &u,
                                          DofInfo &dof_info)
    : type(type_id), param(type == 1 ? 5.0 : 3.0),
      fec_sub(1, pfes_DG_.GetMesh()->Dimension(), BasisType::Positive),
@@ -128,15 +127,6 @@ SmoothnessIndicator::SmoothnessIndicator(int type_id,
       ShapeEval.SetCol(i, shape);
    }
    ShapeEval.Transpose();
-
-   // Print the values of the smoothness indicator.
-   ParGridFunction si_val;
-   ComputeSmoothnessIndicator(u, si_val);
-   {
-      ofstream smth("si_init.gf");
-      smth.precision(8);
-      si_val.SaveAsOne(smth);
-   }
 
    if (dim > 1) { delete ir; }
 }
