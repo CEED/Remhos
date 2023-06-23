@@ -32,6 +32,7 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
@@ -1257,14 +1258,14 @@ int main(int argc, char *argv[])
       ml.Assemble();
       lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
-      mass_u_loc = 0;
-      for(int imat = 0; imat < nmat; ++imat) mass0_u_loc += lumpedM * u_vec[imat];
+      for(int imat = 0; imat < nmat; ++imat) {
+         mass_u_loc += lumpedM * u_vec[imat];
+      }
       if (product_sync) { mass_us_loc = lumpedM * us; }
    }
    else
    {
-      mass_u_loc = 0;
-      for(int imat = 0; imat < nmat; ++imat) mass0_u_loc += lumpedM * u_vec[imat];
+      for(int imat = 0; imat < nmat; ++imat) mass_u_loc += lumpedM * u_vec[imat];
       if (product_sync) { mass_us_loc = masses * us; }
    }
    double mass_u, mass_us, s_max;
@@ -1400,7 +1401,7 @@ AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_v
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(nmat * size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -1416,7 +1417,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
   
    for(int imat = 0; imat < nmat; ++imat){
      
+      // Needed because X and Y are allocated on the host by the ODESolver.
+      X.Read(); Y.Read();
+
+      Vector u, d_u;
+      Vector *xptr = const_cast<Vector*>(&X);
+
       // needed for velocity modifications.
+      // note: u_vec is before intermediate RK steps
       dofs.ComputeLinMaxBound(u_vec[imat], u_max_bounds, u_max_bounds_grad_dir);
 
       if (exec_mode == 1)
@@ -1486,12 +1494,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       const int size = Kbf.ParFESpace()->GetVSize();
       const int NE   = Kbf.ParFESpace()->GetNE();
 
-      // Needed because X and Y are allocated on the host by the ODESolver.
-      X.Read(); Y.Read();
-
-      Vector u, d_u;
-      Vector *xptr = const_cast<Vector*>(&X);
-
       u.MakeRef(*xptr, vsize * imat, size);
       d_u.MakeRef(Y, vsize * imat, size);
       Vector du_HO(u.Size()), du_LO(u.Size());
@@ -1532,7 +1534,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       // Remap the product field, if there is a product field.
-      if (X.Size() > size)
+      if (nmat == 1 && X.Size() > size)
       {
          Vector us, d_us;
          us.MakeRef(*xptr, size, size);
