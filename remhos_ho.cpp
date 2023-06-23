@@ -23,23 +23,34 @@ namespace mfem
 {
 
 CGHOSolver::CGHOSolver(ParFiniteElementSpace &space,
-                       ParBilinearForm &Mbf, ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf)
+                       ParBilinearForm &Mbf, ParBilinearForm &Kbf,
+                       ParBilinearForm *Ksharp)
+   : HOSolver(space), M(Mbf), K(Kbf), Ksharp(Ksharp)
+{ }
+
+CGHOSolver::CGHOSolver(ParFiniteElementSpace &space,
+              ParBilinearForm &Mbf, ParBilinearForm &Kbf)
+   : CGHOSolver(space, Mbf, Kbf, nullptr)
 { }
 
 void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
    Vector rhs(u.Size());
+   Vector rhs_sharp(u.Size());
    du = 0.0;
 
    // Invert by preconditioned CG.
    CGSolver M_solver(pfes.GetComm());
-   HypreParMatrix *M_mat = NULL, *K_mat = NULL;
+   HypreParMatrix *M_mat = NULL, *K_mat = NULL, *K_sharp_mat;
    Solver *M_prec;
    Array<int> ess_tdof_list;
    if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
    {
       K.Mult(u, rhs);
+      if(Ksharp){
+         Ksharp->Mult(u, rhs_sharp);
+         rhs.Add(1.0, rhs_sharp);
+      }
 
       M_solver.SetOperator(M);
       M_prec = new OperatorJacobiSmoother(M, ess_tdof_list);
@@ -51,6 +62,15 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       K.SpMat().HostReadData();
       K_mat = K.ParallelAssemble(&K.SpMat());
       K_mat->Mult(u, rhs);
+
+      if(Ksharp){
+         Ksharp->SpMat().HostReadWriteI();
+         Ksharp->SpMat().HostReadWriteJ();
+         Ksharp->SpMat().HostReadData();
+         K_sharp_mat = Ksharp->ParallelAssemble(&Ksharp->SpMat());
+         K_sharp_mat->Mult(u, rhs_sharp);
+         rhs.Add(1.0, rhs_sharp);
+      }
 
       M_mat = M.ParallelAssemble();
       M_solver.SetOperator(*M_mat);
@@ -71,8 +91,14 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
+                                           ParBilinearForm &Kbf,
+                                           ParBilinearForm *Ksharp)
+   : HOSolver(space), M(Mbf), K(Kbf), Ksharp(Ksharp) { }
+
+LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
+                                           ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf) { }
+   : LocalInverseHOSolver(space, Mbf, Kbf, nullptr) { }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
@@ -80,6 +106,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
                "PA for DG is not supported for Local Inverse.");
 
    Vector rhs(u.Size());
+   Vector rhs_sharp(u.Size());
 
    K.SpMat().HostReadWriteI();
    K.SpMat().HostReadWriteJ();
@@ -87,6 +114,14 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
    K_mat->Mult(u, rhs);
 
+   if(Ksharp){
+      Ksharp->SpMat().HostReadWriteI();
+      Ksharp->SpMat().HostReadWriteJ();
+      Ksharp->SpMat().HostReadData();
+      HypreParMatrix *K_sharp_mat = Ksharp->ParallelAssemble(&Ksharp->SpMat());
+      K_sharp_mat->Mult(u, rhs_sharp);
+      rhs.Add(1.0, rhs_sharp);
+   }
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
    DenseMatrix M_loc(nd);
