@@ -475,6 +475,7 @@ int main(int argc, char *argv[])
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
+   std::unique_ptr<ParBilinearForm> Ksharp(new ParBilinearForm(&pfes)); // Bilinear form for sharpening term
    if (exec_mode == 0)
    {
       MFEM_VERIFY(sharp == false, "only remap tests now");
