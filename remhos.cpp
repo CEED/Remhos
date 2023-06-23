@@ -68,6 +68,7 @@ void velocity_function(const Vector &x, Vector &v);
 
 // Initial condition
 double u0_function(const Vector &x);
+double final_mat_u0(const Vector &x);
 double s0_function(const Vector &x);
 
 // Inflow boundary condition
@@ -708,10 +709,22 @@ int main(int argc, char *argv[])
 
    // Get ParGridFunctions for each scalar field by offset into udata and initialize
    std::vector<ParGridFunction> u_vec(nmat);
-   FunctionCoefficient u0(u0_function);
-   for(int imat = 0; imat < nmat; ++imat) {
-      u_vec[imat].MakeRef(&pfes, udata, imat * vsize);
-      u_vec[imat].ProjectCoefficient(u0);
+   if(nmat > 1){
+      for(int imat = 0; imat < nmat - 1; ++imat) {
+         u_vec[imat].MakeRef(&pfes, udata, imat * vsize);
+         double mat_fraction = 1.0 / (nmat - 1);
+         auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
+         FunctionCoefficient u0(mat_frac_u0);
+         u_vec[imat].ProjectCoefficient(u0);
+      }
+      int mat_final_idx = nmat - 1;
+      u_vec[mat_final_idx].MakeRef(&pfes, udata, mat_final_idx * vsize);
+      FunctionCoefficient u0(final_mat_u0);
+      u_vec[mat_final_idx].ProjectCoefficient(u0);
+   } else {
+      u_vec[0].MakeRef(&pfes, udata, vsize);
+      FunctionCoefficient u0(u0_function);
+      u_vec[0].ProjectCoefficient(u0);
    }
 
 
@@ -1313,6 +1326,7 @@ int main(int argc, char *argv[])
    {
       MFEM_ASSERT(nmat == 1, "Problem error only implemented for single material".);
       ParGridFunction &u = u_vec[0];
+      FunctionCoefficient u0(u0_function);
       double err_L1 = u.ComputeLpError(1., u0),
              err_L2 = u.ComputeL2Error(u0);
       if (myid == 0)
@@ -1712,6 +1726,7 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
+      case 21:
       case 11:
       {
          // Gresho deformation used for mesh motion in remap tests.
@@ -1738,6 +1753,15 @@ void velocity_function(const Vector &x, Vector &v)
       case 17:
       case 18:
       case 19:
+      case 20:
+      case 22:
+      case 23:
+      case 24:
+      case 25:
+      case 26:
+      case 27:
+      case 28:
+      case 29:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 
@@ -2035,6 +2059,19 @@ double u0_function(const Vector &x)
       }
    }
    return 0.0;
+}
+
+/**
+ * initial condition for the final material in a multimaterial simulation
+ * The total material sum should be 1 so this is 1.0 - the sum of other materials
+ * @param x the position
+ * @return the initial condition for the material marker of the final material
+ */
+double final_mat_u0(const Vector &x){
+   double mass = 1.0;
+   double mat_fraction = 1.0 / (nmat - 1);
+   for(int imat = 0; imat < nmat - 1; ++imat) mass -= mat_fraction * u0_function(x);
+   return mass;
 }
 
 double s0_function(const Vector &x)
