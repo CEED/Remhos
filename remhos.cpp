@@ -84,7 +84,7 @@ private:
    std::vector<ParGridFunction> &u_vec;
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
-   ParBilinearForm &M_HO, &K_HO;
+   ParBilinearForm &M_HO, &K_HO, *Ksharp;
    Vector &lumpedM;
 
    Vector start_mesh_pos, start_submesh_pos;
@@ -114,7 +114,7 @@ public:
                      BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
-                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *K_HO,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      ParGridFunction &u_max_bounds, ParGridFunction &u_max_bounds_grad_dir,
@@ -511,8 +511,9 @@ int main(int argc, char *argv[])
          {
             auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
             auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
-            K_HO.AddDomainIntegrator(new TransposeIntegrator(ci));
-            K_HO.AddInteriorFaceIntegrator(dgt);
+            Ksharp->AddDomainIntegrator(new TransposeIntegrator(ci));
+            Ksharp->AddInteriorFaceIntegrator(dgt);
+            Ksharp->KeepNbrBlock(true);
          }
       }
 
@@ -523,20 +524,24 @@ int main(int argc, char *argv[])
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      if(Ksharp) Ksharp->SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
    if (next_gen_full)
    {
       K_HO.SetAssemblyLevel(AssemblyLevel::FULL);
+      if(Ksharp) Ksharp->SetAssemblyLevel(AssemblyLevel::FULL);
    }
 
    M_HO.Assemble();
    K_HO.Assemble(0);
+   if(Ksharp) Ksharp->Assemble(0);
 
    if (pa == false)
    {
       M_HO.Finalize();
       K_HO.Finalize(0);
+      if(Ksharp) Ksharp->Finalize(0);
    }
 
    // Compute the lumped mass matrix.
@@ -723,7 +728,7 @@ int main(int argc, char *argv[])
       FunctionCoefficient u0(final_mat_u0);
       u_vec[mat_final_idx].ProjectCoefficient(u0);
    } else {
-      u_vec[0].MakeRef(&pfes, udata, vsize);
+      u_vec[0].MakeRef(&pfes, udata, offset[0]);
       FunctionCoefficient u0(u0_function);
       u_vec[0].ProjectCoefficient(u0);
    }
@@ -776,11 +781,11 @@ int main(int argc, char *argv[])
    }
    else if (ho_type == HOSolverType::CG)
    {
-      ho_solver = new CGHOSolver(pfes, M_HO, K_HO);
+      ho_solver = new CGHOSolver(pfes, M_HO, K_HO, Ksharp.get());
    }
    else if (ho_type == HOSolverType::LocalInverse)
    {
-      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO, Ksharp.get());
    }
 
    // Setup the low order solver (if any).
@@ -978,7 +983,7 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(vsize, u_vec, m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(vsize, u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
@@ -1408,7 +1413,7 @@ int main(int argc, char *argv[])
 AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_vec,
                                      BilinearForm &Mbf_, BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
-                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
+                                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *Ksharp,
                                      GridFunction &pos, GridFunction *sub_pos,
                                      GridFunction &vel, GridFunction &sub_vel,
                                      ParGridFunction &u_max_bounds, ParGridFunction &u_max_bounds_grad_dir,
@@ -1417,7 +1422,7 @@ AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_v
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(nmat * size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
-   M_HO(M_HO_), K_HO(K_HO_),
+   M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
@@ -1469,6 +1474,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          M_HO.Assemble();
          K_HO.BilinearForm::operator=(0.0);
          K_HO.Assemble(0);
+         Ksharp->BilinearForm::operator=(0.0);
+         Ksharp->Assemble(0);
 
          if (lom.pk)
          {
@@ -1754,15 +1761,6 @@ void velocity_function(const Vector &x, Vector &v)
       case 17:
       case 18:
       case 19:
-      case 20:
-      case 22:
-      case 23:
-      case 24:
-      case 25:
-      case 26:
-      case 27:
-      case 28:
-      case 29:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 
