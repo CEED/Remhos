@@ -1434,8 +1434,13 @@ AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_v
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
-  
-   for(int imat = 0; imat < nmat; ++imat){
+ 
+   Vector d_u_last;
+   d_u_last.MakeRef(Y, vsize * (nmat - 1), vsize);
+   d_u_last = 0.0;
+
+   int loopend = (nmat > 1) ? nmat - 1 : nmat;
+   for(int imat = 0; imat < loopend; ++imat){
      
       // Needed because X and Y are allocated on the host by the ODESolver.
       X.Read(); Y.Read();
@@ -1554,6 +1559,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       // user only wants to run LO, this order will give him the LO solution.
       else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
       else { MFEM_ABORT("No solver was chosen."); }
+
+      // update the du for the last material if multimaterial
+      if(nmat > 1) { d_u_last.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
       if (nmat == 1 && X.Size() > size)
