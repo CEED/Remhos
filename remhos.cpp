@@ -921,7 +921,7 @@ int main(int argc, char *argv[])
       adv.SetRemapStartPos(x0, x0_sub);
 
       // For remap, the pseudo-time always evolves from 0 to 1.
-      t_final = 0.1;
+      t_final = 1.0;
    }
 
    ParGridFunction res = u;
@@ -1028,15 +1028,13 @@ int main(int argc, char *argv[])
          }
       }
 
-      // S has been modified, update the alias
-      u.SyncMemory(S);
-      if (product_sync && sharp)
+      const int size = u.Size();
+      Vector new_m(size);
+      Array<bool> active_elem, active_dofs;
+      Vector u_blend(size);
+
+      if (sharp)
       {
-         us.SyncMemory(S);
-
-         const int size = u.Size();
-
-         Vector new_m(size);
          ParMesh *pmesh = M_HO.ParFESpace()->GetParMesh();
          GridFunction x_new(pmesh->GetNodes()->FESpace());
          add(x0, t, v_gf, x_new);
@@ -1044,24 +1042,24 @@ int main(int argc, char *argv[])
          ml.Assemble();
          ml.SpMat().GetDiag(new_m);
 
-         Array<bool> active_elem, active_dofs;
-         ComputeBoolIndicators(NE, u_old, active_elem, active_dofs);
-
          // blend indicators.
          dof_info.ComputeElementsMinMax(u_old, dof_info.xe_min, dof_info.xe_max,
                                         NULL, NULL);
          dof_info.ComputeBounds(dof_info.xe_min, dof_info.xe_max,
                                 dof_info.xi_min, dof_info.xi_max);
 
-         Vector u_blend(size);
          check_violation(u, dof_info.xi_min, dof_info.xi_max,
                          "u-full-bounded");
          blend_global(u, u_sharp, new_m,
                       dof_info.xi_min, dof_info.xi_max, u_blend);
          check_violation(u_blend, dof_info.xi_min, dof_info.xi_max,
                          "u-full-blend");
+      }
 
+      if (product_sync)
+      {
          // compute s-bounds.
+         ComputeBoolIndicators(NE, u_old, active_elem, active_dofs);
          ComputeRatio(NE, us_old, u_old, s_old, active_elem, active_dofs);
          dof_info.ComputeElementsMinMax(s_old, dof_info.xe_min, dof_info.xe_max,
                                         &active_elem, &active_dofs);
@@ -1073,18 +1071,24 @@ int main(int argc, char *argv[])
          fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max, u,
                                           active_elem, active_dofs,
                                           us_min, us_max);
-         check_violation(us, us_min, us_max, "prod-full-bound", &active_dofs);
+         check_violation(us, us_min, us_max, "us-full-bound", &active_dofs);
 
-         Vector us_blend(size);
-         sharp_product_sync(u, u_blend, new_m, dof_info.xi_min, dof_info.xi_max,
-                            us, active_dofs, us_blend);
-         u  = u_blend;
-         us = us_blend;
+         if (sharp)
+         {
+            Vector us_blend(size);
+            sharp_product_sync(u, u_blend, new_m,
+                               dof_info.xi_min, dof_info.xi_max,
+                               us, active_dofs, us_blend);
+            us = us_blend;
 
-         fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max, u_blend,
-                                          active_elem, active_dofs,
-                                          us_min, us_max);
-         check_violation(us, us_min, us_max, "prod-full-blend", &active_dofs);
+            fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max,
+                                             u_blend, active_elem, active_dofs,
+                                             us_min, us_max);
+            check_violation(us, us_min, us_max, "us-full-blend", &active_dofs);
+         }
+      }
+
+      if (sharp) { u = u_blend; }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
@@ -1096,7 +1100,6 @@ int main(int argc, char *argv[])
                       << "; max_s: " << s_max_glob << std::endl;
          }
 #endif
-      }
 
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
