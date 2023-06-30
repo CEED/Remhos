@@ -377,7 +377,7 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
 void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
                                           const Vector &el_max,
                                           Vector &dof_min, Vector &dof_max,
-                                          Array<bool> *active_el)
+                                          int levels, Array<bool> *active_el)
 {
    ParMesh *pmesh = pfes.GetParMesh();
    L2_FECollection fec_bounds(0, pmesh->Dimension());
@@ -391,36 +391,49 @@ void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
 
    x_min = el_min;
    x_max = el_max;
+   Vector level_min(NE), level_max(NE);
 
-   x_min.ExchangeFaceNbrData(); x_max.ExchangeFaceNbrData();
-   const Vector &minv = x_min.FaceNbrData(), &maxv = x_max.FaceNbrData();
    const Table &el_to_el = pmesh->ElementToElementTable();
-   Array<int> face_nbr_el;
-   for (int i = 0; i < NE; i++)
+   for (int l = 0; l < levels; l++)
    {
-      double el_min = x_min(i), el_max = x_max(i);
+      x_min.ExchangeFaceNbrData(); x_max.ExchangeFaceNbrData();
+      const Vector &minv = x_min.FaceNbrData(), &maxv = x_max.FaceNbrData();
 
-      el_to_el.GetRow(i, face_nbr_el);
-      for (int n = 0; n < face_nbr_el.Size(); n++)
+      level_min = x_min;
+      level_max = x_max;
+      Array<int> face_nbr_el;
+      for (int i = 0; i < NE; i++)
       {
-         if (face_nbr_el[n] < NE)
+         el_to_el.GetRow(i, face_nbr_el);
+         for (int n = 0; n < face_nbr_el.Size(); n++)
          {
-            // Local neighbor.
-            el_min = fmin(el_min, x_min(face_nbr_el[n]));
-            el_max = fmax(el_max, x_max(face_nbr_el[n]));
+            if (face_nbr_el[n] < NE)
+            {
+               // Local neighbor.
+               level_min(i) = fmin(level_min(i), x_min(face_nbr_el[n]));
+               level_max(i) = fmax(level_max(i), x_max(face_nbr_el[n]));
+            }
+            else
+            {
+               // MPI face neighbor.
+               level_min(i) = fmin(level_min(i), minv(face_nbr_el[n] - NE));
+               level_max(i) = fmax(level_max(i), maxv(face_nbr_el[n] - NE));
+            }
+         }
+
+         if (l == levels - 1)
+         {
+            for (int j = 0; j < ndofs; j++)
+            {
+               dof_min(i*ndofs + j) = level_min(i);
+               dof_max(i*ndofs + j) = level_max(i);
+            }
          }
          else
          {
-            // MPI face neighbor.
-            el_min = fmin(el_min, minv(face_nbr_el[n] - NE));
-            el_max = fmax(el_max, maxv(face_nbr_el[n] - NE));
+            x_min = level_min;
+            x_max = level_max;
          }
-      }
-
-      for (int j = 0; j < ndofs; j++)
-      {
-         dof_min(i*ndofs + j) = el_min;
-         dof_max(i*ndofs + j) = el_max;
       }
    }
 }

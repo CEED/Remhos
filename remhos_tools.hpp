@@ -133,6 +133,7 @@ private:
    // A given DOF gets bounds from its own element and its face-neighbors.
    void ComputeMatrixSparsityBounds(const Vector &el_min, const Vector &el_max,
                                     Vector &dof_min, Vector &dof_max,
+                                    int levels = 1,
                                     Array<bool> *active_el = NULL);
 
 public:
@@ -150,6 +151,7 @@ public:
    // of all elements that feature the dof at its physical location.
    void ComputeBounds(const Vector &el_min, const Vector &el_max,
                       Vector &dof_min, Vector &dof_max,
+                      int el_levels = 1,
                       Array<bool> *active_el = NULL)
    {
       if (bounds_type == 0)
@@ -159,7 +161,7 @@ public:
       else if (bounds_type == 1)
       {
          ComputeMatrixSparsityBounds(el_min, el_max,
-                                     dof_min, dof_max, active_el);
+                                     dof_min, dof_max, el_levels, active_el);
       }
       else { MFEM_ABORT("Wrong option for bounds computation."); }
    }
