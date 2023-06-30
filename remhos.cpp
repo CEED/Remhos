@@ -58,6 +58,9 @@ int problem_num;
 
 // The number of materials to consider   
 int nmat = 1;
+// The total number of equations (including material transport)
+int neq = 1;
+
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -276,6 +279,7 @@ int main(int argc, char *argv[])
    // When not using lua, exec mode is derived from problem number convention
    if (problem_num < 10)      { exec_mode = 0; }
    else if (problem_num < 20) { exec_mode = 1; }
+   else if (problem_num < 22) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
 
    // Read the serial mesh from the given mesh file on all processors.
@@ -707,30 +711,110 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dof_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
+   if( problem_num > 19){
+      // Testing remap for rho and u vs rho and rhou
+      MFEM_ASSERT(nmat == 2, "This problem is only defined for 2 materials");
+
+      neq = nmat + 3; // nmat, rho, u and rhou
+   } else {
+      neq = nmat;
+   }
    // setup Vector for all dofs of all scalar fields (all materials)
    const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? nmat + 2 : nmat + 1);
+   Array<int> offset((product_sync) ? neq + 2 : neq + 1);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector udata(offset, Device::GetMemoryType());
 
    // Get ParGridFunctions for each scalar field by offset into udata and initialize
-   std::vector<ParGridFunction> u_vec(nmat);
-   if(nmat > 1){
-      for(int imat = 0; imat < nmat - 1; ++imat) {
-         u_vec[imat].MakeRef(&pfes, udata, imat * vsize);
-         double mat_fraction = 1.0 / (nmat - 1);
-         auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
-         FunctionCoefficient u0(mat_frac_u0);
-         u_vec[imat].ProjectCoefficient(u0);
+   std::vector<ParGridFunction> u_vec(neq, &pfes);
+   if( problem_num > 19 ){
+      {
+         // mat 0: left half plane is one, else zero
+         FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? 1.0 : 0.0; });
+         u_vec[0].MakeRef(&pfes, udata, 0 * vsize);
+         u_vec[0].ProjectCoefficient(u0);
       }
-      int mat_final_idx = nmat - 1;
-      u_vec[mat_final_idx].MakeRef(&pfes, udata, mat_final_idx * vsize);
-      FunctionCoefficient u0(final_mat_u0);
-      u_vec[mat_final_idx].ProjectCoefficient(u0);
+      {
+         // mat 1: right half plane is one, else zero
+         FunctionCoefficient u0([&](const Vector &x){ return (x(0) > 0.5) ? 1.0 : 0.0; });
+         u_vec[1].MakeRef(&pfes, udata, 1 * vsize);
+         u_vec[1].ProjectCoefficient(u0);
+      }
+      if( problem_num == 20 ){
+         // const density and velocity fields with continuous P = rho * u
+         double rho1 = 1.0; // the density of material one
+         double rho2 = 2.0; // the density of material two
+         {
+            // density
+            int ieq = 2;
+            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? rho1 : rho2; });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+         {
+            // velocity
+            int ieq = 3;
+            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? 2.0 : 1.0; });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+         {
+            // rho * u
+            int ieq = 4;
+            FunctionCoefficient u0([&](const Vector &x){ return 2.0; });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+      } else if ( problem_num == 21 ) {
+         // const density fields, linear discontinuous velocity field with continuous P = rho * u
+         // analagous to conditions that can cause RTI
+         double rho1 = 1.0; // the density of material one
+         double rho2 = 2.0; // the density of material two
+         {
+            // density
+            int ieq = 2;
+            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? rho1 : rho2; });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+         {
+            // velocity
+            int ieq = 3;
+            FunctionCoefficient u0([&](const Vector &x){ 
+               return (x(0) < 0.5) ? (x(0) + 1.0) : (-0.5 * x(0) + 0.5);
+            });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+         {
+            // rho * u
+            int ieq = 4;
+            FunctionCoefficient u0([&](const Vector &x){ 
+               return (x(0) < 0.5) ? rho1 * (x(0) + 1.0) : rho2 * (-0.5 * x(0) + 0.5);
+            });
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            u_vec[ieq].ProjectCoefficient(u0);
+         }
+      }
    } else {
-      u_vec[0].MakeRef(&pfes, udata, offset[0]);
-      FunctionCoefficient u0(u0_function);
-      u_vec[0].ProjectCoefficient(u0);
+      if(nmat > 1){
+         for(int ieq = 0; ieq < neq - 1; ++ieq) {
+            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
+            double mat_fraction = 1.0 / (nmat - 1);
+               
+               auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
+               FunctionCoefficient u0(mat_frac_u0);
+               u_vec[ieq].ProjectCoefficient(u0);
+         }
+         int mat_final_idx = nmat - 1;
+         u_vec[mat_final_idx].MakeRef(&pfes, udata, mat_final_idx * vsize);
+         FunctionCoefficient u0(final_mat_u0);
+         u_vec[mat_final_idx].ProjectCoefficient(u0);
+      } else {
+         u_vec[0].MakeRef(&pfes, udata, offset[0]);
+         FunctionCoefficient u0(u0_function);
+         u_vec[0].ProjectCoefficient(u0);
+      }
    }
 
 
@@ -1007,10 +1091,10 @@ int main(int argc, char *argv[])
 
    // create a same size vector for residual data
    Vector resdata = udata;
-   std::vector<ParGridFunction> res_vec(nmat);
-   for(int imat = 0; imat < nmat; ++imat){
-      ParGridFunction &res = res_vec[imat];
-      res.MakeRef(&pfes, resdata, imat * vsize);
+   std::vector<ParGridFunction> res_vec(neq);
+   for(int ieq = 0; ieq < nmat; ++ieq){
+      ParGridFunction &res = res_vec[ieq];
+      res.MakeRef(&pfes, resdata, ieq * vsize);
    }
 
    double residual;
@@ -1267,6 +1351,126 @@ int main(int argc, char *argv[])
          sltn.precision(precision);
          u_vec[imat].SaveAsOne(sltn);
       }
+      if( problem_num > 19 ) {
+         double rho1 = 1, rho2 = 2;
+         GridFunctionCoefficient mat1_coeff(&u_vec[0]);
+         GridFunctionCoefficient mat2_coeff(&u_vec[1]);
+         // =========================
+         // = coefficient subset A: =
+         // =     Y1, Y2, rho*u     =
+         // =========================
+
+         // Y1
+         ofstream Y1A("Y1_final_A.gf");
+         Y1A.precision(precision);
+         u_vec[0].SaveAsOne(Y1A);
+         // Y2
+         ofstream Y2A("Y2_final_A.gf");
+         Y2A.precision(precision);
+         u_vec[1].SaveAsOne(Y2A);
+         // density
+         ofstream densA("density_final_A.gf");
+         SumCoefficient densACoeff(
+            mat1_coeff, mat2_coeff,
+            rho1, rho2
+         );
+         ParGridFunction densAgf(&pfes);
+         densAgf.ProjectCoefficient(densACoeff);
+         densAgf.SaveAsOne(densA);
+         // pressure = rho * u
+         ofstream presA("pressure_final_A.gf");
+         presA.precision(precision);
+         u_vec[4].SaveAsOne(presA);
+
+
+         // =========================
+         // = coefficient subset B: =
+         // =     Y1, rho, rho*u    =
+         // =========================
+
+         // Y1
+         ofstream Y1B("Y1_final_B.gf");
+         Y1B.precision(precision);
+         u_vec[0].SaveAsOne(Y1B);
+         // Y2
+         ofstream Y2B("Y2_final_B.gf");
+         Y2B.precision(precision);
+         GridFunctionCoefficient densBCoeff(&u_vec[2]);
+         SumCoefficient Y2BCoeff(densBCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
+         ParGridFunction Y2Bgf(&pfes);
+         Y2Bgf.ProjectCoefficient(Y2BCoeff);
+         Y2Bgf.SaveAsOne(Y2B);
+         // density
+         ofstream densB("density_final_B.gf");
+         densB.precision(precision);
+         u_vec[2].SaveAsOne(densB);
+         // pressure = rho * u
+         ofstream presB("pressure_final_B.gf");
+         presB.precision(precision);
+         u_vec[4].SaveAsOne(presB);
+         
+         // =========================
+         // = coefficient subset C: =
+         // =      Y1, Y2, u        =
+         // =========================
+
+         // Y1
+         ofstream Y1C("Y1_final_C.gf");
+         Y1C.precision(precision);
+         u_vec[0].SaveAsOne(Y1C);
+         // Y2
+         ofstream Y2C("Y2_final_C.gf");
+         Y2C.precision(precision);
+         u_vec[1].SaveAsOne(Y2C);
+         // density
+         ofstream densC("density_final_C.gf");
+         densC.precision(precision);
+         SumCoefficient densCCoeff(
+            mat1_coeff, mat2_coeff,
+            rho1, rho2
+         );
+         ParGridFunction densCgf(&pfes);
+         densCgf.ProjectCoefficient(densCCoeff);
+         densCgf.SaveAsOne(densC);
+         // pressure = rho * u
+         ofstream presC("pressure_final_C.gf");
+         presC.precision(precision);
+         GridFunctionCoefficient uCCoeff(&u_vec[3]);
+         ProductCoefficient presCCoeff(densCCoeff, uCCoeff);
+         ParGridFunction presCgf(&pfes);
+         presCgf.ProjectCoefficient(presCCoeff);
+         presCgf.SaveAsOne(presC);
+
+         // =========================
+         // = coefficient subset D: =
+         // =       Y1, rho, u      =
+         // =========================
+
+         // Y1
+         ofstream Y1D("Y1_final_D.gf");
+         Y1D.precision(precision);
+         u_vec[0].SaveAsOne(Y1D);
+         // Y2
+         ofstream Y2D("Y2_final_D.gf");
+         Y2D.precision(precision);
+         GridFunctionCoefficient densDCoeff(&u_vec[2]);
+         SumCoefficient Y2DCoeff(densDCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
+         ParGridFunction Y2Dgf(&pfes);
+         Y2Dgf.ProjectCoefficient(Y2DCoeff);
+         Y2Dgf.SaveAsOne(Y2D);
+         // density
+         ofstream densD("density_final_D.gf");
+         densD.precision(precision);
+         u_vec[2].SaveAsOne(densD);
+         // pressure = rho * u
+         ofstream presD("pressure_final_D.gf");
+         presD.precision(precision);
+         GridFunctionCoefficient uDCoeff(&u_vec[3]);
+         ProductCoefficient presDCoeff(densDCoeff, uDCoeff);
+         ParGridFunction presDgf(&pfes);
+         presDgf.ProjectCoefficient(presDCoeff);
+         presDgf.SaveAsOne(presD);
+      }
    }
 
    // Check for mass conservation.
@@ -1421,7 +1625,7 @@ AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_v
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(nmat * size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(neq * size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -1439,8 +1643,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u_last.MakeRef(Y, vsize * (nmat - 1), vsize);
    d_u_last = 0.0;
 
-   int loopend = (nmat > 1) ? nmat - 1 : nmat;
-   for(int imat = 0; imat < loopend; ++imat){
+   int matignore = (nmat > 1) ? nmat - 1 : nmat;
+   for(int ieq = 0; ieq < neq; ++ieq) if( ieq != matignore ){
      
       // Needed because X and Y are allocated on the host by the ODESolver.
       X.Read(); Y.Read();
@@ -1450,7 +1654,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
       // needed for velocity modifications.
       // note: u_vec is before intermediate RK steps
-      dofs.ComputeLinMaxBound(u_vec[imat], u_max_bounds, u_max_bounds_grad_dir);
+      dofs.ComputeLinMaxBound(u_vec[ieq], u_max_bounds, u_max_bounds_grad_dir);
 
       if (exec_mode == 1)
       {
@@ -1521,8 +1725,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       const int size = Kbf.ParFESpace()->GetVSize();
       const int NE   = Kbf.ParFESpace()->GetNE();
 
-      u.MakeRef(*xptr, vsize * imat, size);
-      d_u.MakeRef(Y, vsize * imat, size);
+      u.MakeRef(*xptr, vsize * ieq, size);
+      d_u.MakeRef(Y, vsize * ieq, size);
       Vector du_HO(u.Size()), du_LO(u.Size());
       x_gf = u;
       x_gf.ExchangeFaceNbrData();
@@ -1561,7 +1765,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       // update the du for the last material if multimaterial
-      if(nmat > 1) { d_u_last.Add(-1.0, d_u); }
+      if(nmat > 1 && ieq < matignore) { d_u_last.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
       if (nmat == 1 && X.Size() > size)
@@ -1677,7 +1881,7 @@ void velocity_function(const Vector &x, Vector &v)
       X(i) = 2 * (x(i) - center) / (bb_max[i] - bb_min[i]);
    }
 
-   int ProbExec = problem_num % 20;
+   int ProbExec = problem_num % 30;
 
    switch (ProbExec)
    {
@@ -1742,7 +1946,6 @@ void velocity_function(const Vector &x, Vector &v)
          }
          break;
       }
-      case 21:
       case 11:
       {
          // Gresho deformation used for mesh motion in remap tests.
@@ -1769,6 +1972,8 @@ void velocity_function(const Vector &x, Vector &v)
       case 17:
       case 18:
       case 19:
+      case 20: // variable set remap study
+      case 21: // variable set remap study
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 
@@ -1885,7 +2090,6 @@ double ring(double rin, double rout, Vector c, Vector y)
       return 0.0;
    }
 }
-
 // Initial condition: hard-coded functions
 double u0_function(const Vector &x)
 {
