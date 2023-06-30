@@ -781,7 +781,7 @@ int main(int argc, char *argv[])
             // velocity
             int ieq = 3;
             FunctionCoefficient u0([&](const Vector &x){ 
-               return (x(0) < 0.5) ? (x(0) + 1.0) : (-0.5 * x(0) + 0.5);
+               return (x(0) < 0.5) ? (0.5*x(0) + 1.0) : (-0.25 * x(0) + 0.75);
             });
             u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
             u_vec[ieq].ProjectCoefficient(u0);
@@ -790,7 +790,7 @@ int main(int argc, char *argv[])
             // rho * u
             int ieq = 4;
             FunctionCoefficient u0([&](const Vector &x){ 
-               return (x(0) < 0.5) ? rho1 * (x(0) + 1.0) : rho2 * (-0.5 * x(0) + 0.5);
+               return (x(0) < 0.5) ? rho1 * (0.5*x(0) + 1.0) : rho2 * (-0.25 * x(0) + 0.75);
             });
             u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
             u_vec[ieq].ProjectCoefficient(u0);
@@ -985,6 +985,126 @@ int main(int argc, char *argv[])
       u_vec[imat].SaveAsOne(sltn);
    }
 
+   if( problem_num > 19 ) {
+      double rho1 = 1, rho2 = 2;
+      GridFunctionCoefficient mat1_coeff(&u_vec[0]);
+      GridFunctionCoefficient mat2_coeff(&u_vec[1]);
+      // =========================
+      // = coefficient subset A: =
+      // =     Y1, Y2, rho*u     =
+      // =========================
+
+      // Y1
+      ofstream Y1A("Y1_init_A.gf");
+      Y1A.precision(precision);
+      u_vec[0].SaveAsOne(Y1A);
+      // Y2
+      ofstream Y2A("Y2_init_A.gf");
+      Y2A.precision(precision);
+      u_vec[1].SaveAsOne(Y2A);
+      // density
+      ofstream densA("density_init_A.gf");
+      SumCoefficient densACoeff(
+         mat1_coeff, mat2_coeff,
+         rho1, rho2
+      );
+      ParGridFunction densAgf(&pfes);
+      densAgf.ProjectCoefficient(densACoeff);
+      densAgf.SaveAsOne(densA);
+      // pressure = rho * u
+      ofstream presA("pressure_init_A.gf");
+      presA.precision(precision);
+      u_vec[4].SaveAsOne(presA);
+
+
+      // =========================
+      // = coefficient subset B: =
+      // =     Y1, rho, rho*u    =
+      // =========================
+
+      // Y1
+      ofstream Y1B("Y1_init_B.gf");
+      Y1B.precision(precision);
+      u_vec[0].SaveAsOne(Y1B);
+      // Y2
+      ofstream Y2B("Y2_init_B.gf");
+      Y2B.precision(precision);
+      GridFunctionCoefficient densBCoeff(&u_vec[2]);
+      SumCoefficient Y2BCoeff(densBCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
+      ParGridFunction Y2Bgf(&pfes);
+      Y2Bgf.ProjectCoefficient(Y2BCoeff);
+      Y2Bgf.SaveAsOne(Y2B);
+      // density
+      ofstream densB("density_init_B.gf");
+      densB.precision(precision);
+      u_vec[2].SaveAsOne(densB);
+      // pressure = rho * u
+      ofstream presB("pressure_init_B.gf");
+      presB.precision(precision);
+      u_vec[4].SaveAsOne(presB);
+      
+      // =========================
+      // = coefficient subset C: =
+      // =      Y1, Y2, u        =
+      // =========================
+
+      // Y1
+      ofstream Y1C("Y1_init_C.gf");
+      Y1C.precision(precision);
+      u_vec[0].SaveAsOne(Y1C);
+      // Y2
+      ofstream Y2C("Y2_init_C.gf");
+      Y2C.precision(precision);
+      u_vec[1].SaveAsOne(Y2C);
+      // density
+      ofstream densC("density_init_C.gf");
+      densC.precision(precision);
+      SumCoefficient densCCoeff(
+         mat1_coeff, mat2_coeff,
+         rho1, rho2
+      );
+      ParGridFunction densCgf(&pfes);
+      densCgf.ProjectCoefficient(densCCoeff);
+      densCgf.SaveAsOne(densC);
+      // pressure = rho * u
+      ofstream presC("pressure_init_C.gf");
+      presC.precision(precision);
+      GridFunctionCoefficient uCCoeff(&u_vec[3]);
+      ProductCoefficient presCCoeff(densCCoeff, uCCoeff);
+      ParGridFunction presCgf(&pfes);
+      presCgf.ProjectCoefficient(presCCoeff);
+      presCgf.SaveAsOne(presC);
+
+      // =========================
+      // = coefficient subset D: =
+      // =       Y1, rho, u      =
+      // =========================
+
+      // Y1
+      ofstream Y1D("Y1_init_D.gf");
+      Y1D.precision(precision);
+      u_vec[0].SaveAsOne(Y1D);
+      // Y2
+      ofstream Y2D("Y2_init_D.gf");
+      Y2D.precision(precision);
+      GridFunctionCoefficient densDCoeff(&u_vec[2]);
+      SumCoefficient Y2DCoeff(densDCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
+      ParGridFunction Y2Dgf(&pfes);
+      Y2Dgf.ProjectCoefficient(Y2DCoeff);
+      Y2Dgf.SaveAsOne(Y2D);
+      // density
+      ofstream densD("density_init_D.gf");
+      densD.precision(precision);
+      u_vec[2].SaveAsOne(densD);
+      // pressure = rho * u
+      ofstream presD("pressure_init_D.gf");
+      presD.precision(precision);
+      GridFunctionCoefficient uDCoeff(&u_vec[3]);
+      ProductCoefficient presDCoeff(densDCoeff, uDCoeff);
+      ParGridFunction presDgf(&pfes);
+      presDgf.ProjectCoefficient(presDCoeff);
+      presDgf.SaveAsOne(presD);
+   }
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
    DataCollection *dc = NULL;
@@ -1644,7 +1764,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u_last = 0.0;
 
    int matignore = (nmat > 1) ? nmat - 1 : nmat;
-   for(int ieq = 0; ieq < neq; ++ieq) if( ieq != matignore ){
+   for(int ieq = 0; ieq < neq; ++ieq) if( problem_num > 19 || ieq != matignore ){
      
       // Needed because X and Y are allocated on the host by the ODESolver.
       X.Read(); Y.Read();
@@ -1765,7 +1885,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       // update the du for the last material if multimaterial
-      if(nmat > 1 && ieq < matignore) { d_u_last.Add(-1.0, d_u); }
+      if(nmat > 1 && problem_num < 20 && ieq < matignore) { d_u_last.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
       if (nmat == 1 && X.Size() > size)
