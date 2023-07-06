@@ -58,6 +58,9 @@ int problem_num;
 
 // The number of materials to consider   
 int nmat = 1;
+// whether or not to apply the sharpening conservation correction
+bool sharp_cons_corr = false;
+
 // The total number of equations (including material transport)
 int neq = 1;
 
@@ -183,7 +186,7 @@ int main(int argc, char *argv[])
    int vis_steps = 100;
    const char *device_config = "cpu";
 
-   int precision = 8;
+   int precision = 16;
    cout.precision(precision);
 
    OptionsParser args(argc, argv);
@@ -220,7 +223,8 @@ int main(int argc, char *argv[])
                   "Correction type: 0 - No nonlinear correction,\n\t"
                   "                 1 - Flux-based FCT,\n\t"
                   "                 2 - Local clip + scale,\n\t"
-                  "                 3 - Local clip + nonlinear penalization.");
+                  "                 3 - Local clip + nonlinear penalization.,\n\t"
+                  "                 4 - FCT-Project");
    args.AddOption((int*)(&mono_type), "-mono", "--mono-type",
                   "Monolithic solver: 0 - No monolithic solver,\n\t"
                   "                   1 - Residual Distribution,\n\t"
@@ -230,6 +234,8 @@ int main(int argc, char *argv[])
                   "                     1 - matrix sparsity pattern.");
    args.AddOption(&sharp, "-sharp", "--sharp", "-no-sharp", "--no-sharp",
                   "Enable or disable profile sharpening.");
+   args.AddOption(&sharp_cons_corr, "-scc", "--sharp-cons-corr", "-no-scc", "--no-sharp-cons-corr",
+      "Enable or disable conservation correction for sharpening");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -736,7 +742,7 @@ int main(int argc, char *argv[])
       }
       {
          // mat 1: right half plane is one, else zero
-         FunctionCoefficient u0([&](const Vector &x){ return (x(0) > 0.5) ? 1.0 : 0.0; });
+         FunctionCoefficient u0([&](const Vector &x){ return (x(0) >= 0.5) ? 1.0 : 0.0; });
          u_vec[1].MakeRef(&pfes, udata, 1 * vsize);
          u_vec[1].ProjectCoefficient(u0);
       }
@@ -1471,7 +1477,28 @@ int main(int argc, char *argv[])
          sltn.precision(precision);
          u_vec[imat].SaveAsOne(sltn);
       }
-      if( problem_num > 19 ) {
+      if( problem_num < 20){ 
+         // create the sum of materials
+         ofstream matsum("indicator_sum_final.gf");
+         matsum.precision(precision);
+         if(nmat == 2){ // TODO: generalize
+            GridFunctionCoefficient mat1_coeff(&u_vec[0]);
+            GridFunctionCoefficient mat2_coeff(&u_vec[1]);
+            SumCoefficient sumcoeff(mat1_coeff, mat2_coeff);
+            ParGridFunction sumgf(&pfes);
+            sumgf.ProjectCoefficient(sumcoeff);
+            sumgf.SaveAsOne(matsum);
+         } else if (nmat == 3) {
+            GridFunctionCoefficient mat1_coeff(&u_vec[0]);
+            GridFunctionCoefficient mat2_coeff(&u_vec[1]);
+            GridFunctionCoefficient mat3_coeff(&u_vec[2]);
+            SumCoefficient sumcoeff_A(mat1_coeff, mat2_coeff);
+            SumCoefficient sumcoeff(sumcoeff_A, mat3_coeff);
+            ParGridFunction sumgf(&pfes);
+            sumgf.ProjectCoefficient(sumcoeff);
+            sumgf.SaveAsOne(matsum);
+         }
+      } else {
          double rho1 = 1, rho2 = 2;
          GridFunctionCoefficient mat1_coeff(&u_vec[0]);
          GridFunctionCoefficient mat2_coeff(&u_vec[1]);
@@ -1763,7 +1790,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u_last.MakeRef(Y, vsize * (nmat - 1), vsize);
    d_u_last = 0.0;
 
-   int matignore = (nmat > 1) ? nmat - 1 : nmat;
+   int matignore = (nmat > 1 && sharp_cons_corr) ? nmat - 1 : nmat;
    for(int ieq = 0; ieq < neq; ++ieq) if( problem_num > 19 || ieq != matignore ){
      
       // Needed because X and Y are allocated on the host by the ODESolver.
@@ -1885,7 +1912,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       // update the du for the last material if multimaterial
-      if(nmat > 1 && problem_num < 20 && ieq < matignore) { d_u_last.Add(-1.0, d_u); }
+      if(nmat > 1 && problem_num < 20 && ieq < matignore && sharp_cons_corr)
+      { d_u_last.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
       if (nmat == 1 && X.Size() > size)
