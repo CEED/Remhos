@@ -1024,7 +1024,7 @@ int main(int argc, char *argv[])
 
       if (product_sync)
       {
-         // compute s-bounds.
+         // Compute s-bounds.
          ComputeBoolIndicators(NE, u_old, active_elem, active_dofs);
          ComputeRatio(NE, us_old, u_old, s_old, active_elem, active_dofs);
          dof_info.ComputeElementsMinMax(s_old, dof_info.xe_min, dof_info.xe_max,
@@ -1038,6 +1038,9 @@ int main(int argc, char *argv[])
          fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max, u,
                                           active_elem, active_dofs,
                                           us_min, us_max);
+         // This should be in bounds with 2-level neighbors and RK2,
+         // but the current time integration might break the lower bound, as
+         // the ratio is not a linear function.
          //check_violation(us, us_min, us_max, "us-full-bound", &active_dofs);
 
          if (sharp)
@@ -1400,7 +1403,7 @@ void check_violation(const Vector &u, const Vector &d_u, double dt,
    {
       if (active_dofs && (*active_dofs)[i] == false) { continue; }
 
-      if (u_new(i) + eps < u_min(i) || u_new(i) > u_max(i) + eps)
+      if (u_new(i) < u_min(i) - eps || u_new(i) > u_max(i) + eps)
       {
          cout << info << " bounds violation: "
               << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
@@ -1438,13 +1441,14 @@ void sharp_product_sync(const Vector &u, const Vector &m,
    double Sp = 0.0, Sn = 0.0, S_to_min = 0.0, S_to_max = 0.0;
    for (int i = 0; i < size; i++)
    {
-      if (active_dofs[i] == false)        { us(i) = 0.0; continue; }
-      if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
-
-//      if (i == 4244)
+//      if (i == 8202)
 //      {
+//         cout << i << " " << u(i) << endl;
 //         cout << i << " " << u(i) * s_min(i) << " " <<  us_b(i) << " " << u(i) * s_max(i) << endl;
 //      }
+
+      if (active_dofs[i] == false)        { us(i) = 0.0; continue; }
+      if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
 
       us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
       Sp += m(i) * fmax(us(i) - us_b(i), 0.0);
@@ -1462,7 +1466,7 @@ void sharp_product_sync(const Vector &u, const Vector &m,
    const double S = Sp + Sn;
    if (fabs(S) < eps) { return; }
 
-   // Check if mass restoration is possible.
+   // Check if restoring the mass is possible.
    if (S > 0.0)
    {
       double S_max_decr = 0.0;
@@ -1496,6 +1500,7 @@ void sharp_product_sync(const Vector &u, const Vector &m,
       MFEM_VERIFY(S_max_incr > fabs(S), "Lost mass - impossible to fix!!!");
    }
 
+   // Restore the mass.
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false)        { us(i) = 0.0; continue; }
@@ -1607,15 +1612,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
    check_violation(u, d_u_b, dt, dofs.xi_min, dofs.xi_max, "bounded");
 
-   // Sharp solution.
+   // Sharp solution (won't be in bounds).
    Vector d_u_s(size), d_u_s_LO(size), d_u_s_HO(size);
    lo_solver_s->CalcLOSolution(u, d_u_s_LO);
    ho_solver_s->CalcHOSolution(u, d_u_s_HO);
    fct_solver_s->CalcFCTSolution(x_gf, lumpedM, d_u_s_HO, d_u_s_LO,
                                  dofs.xi_min, dofs.xi_max, d_u_s);
-   //check_violation(u, du_s, dt, dofs.xi_min, dofs.xi_max, "sharp");
 
-   // Blend u.
+   // Global blend between bounded and sharp.
    Vector u_b(size), u_s(size), u_new(size);
    add(1.0, u, dt, d_u_b, u_b);
    add(1.0, u, dt, d_u_s, u_s);
@@ -1626,6 +1630,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    if (evolve_sharp == false) { d_u = d_u_b; }
 
    // Remap the product field, if there is a product field.
+   // Only the bounded solution is evolved here. If sharpening is on, the
+   // global blending is performed at the full time step.
    if (X.Size() > size)
    {
       Vector us, d_us;
@@ -1656,6 +1662,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                          dofs.xi_min, dofs.xi_max, 1, &s_bool_el);
 
+      // Note that here we use the blended u, which gives better sync.
       Vector u_new(size);
       add(1.0, u, dt, d_u, u_new);
 
