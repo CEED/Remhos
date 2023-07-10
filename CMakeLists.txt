@@ -47,6 +47,7 @@ set(SOURCE_FILES
     remhos_ho.cpp
     remhos_fct.cpp
     remhos_mono.cpp
+    remhos_multivar.cpp
     remhos_sync.cpp
 )
 

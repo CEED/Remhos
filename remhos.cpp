@@ -37,6 +37,7 @@
 #include "remhos_lo.hpp"
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
+#include "remhos_multivar.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 
@@ -61,10 +62,6 @@ int nmat = 1;
 // whether or not to apply the sharpening conservation correction
 bool sharp_cons_corr = false;
 
-// The total number of equations (including material transport)
-int neq = 1;
-
-
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
 int exec_mode;
@@ -86,7 +83,7 @@ Vector bb_min, bb_max;
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
-   int vsize;
+   int neq, vsize;
    std::vector<ParGridFunction> &u_vec;
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
@@ -116,7 +113,7 @@ private:
                                const Vector &x_min, const Vector &x_max) const;
 
 public:
-   AdvectionOperator(int size, std::vector<ParGridFunction> &u_vec,
+   AdvectionOperator(int neq, int size, std::vector<ParGridFunction> &u_vec,
                      BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
@@ -185,6 +182,8 @@ int main(int argc, char *argv[])
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
+   int varset_select = 0;
+   VARIABLE_SET varset;
 
    int precision = 16;
    cout.precision(precision);
@@ -196,6 +195,11 @@ int main(int argc, char *argv[])
                   "Problem setup to use. See options in velocity_function().");
    args.AddOption(&nmat, "-nm", "--num-materials",
                   "Number of materials to use.");
+   args.AddOption(&varset_select, "-varset", "--variable-set",
+                  "The variable set to use"
+                  "0 = material indicators"
+                  "1 - conservative variables with nmat mass fractions"
+                  "2 - primitive variables");
    args.AddOption(&rs_levels, "-rs", "--refine-serial",
                   "Number of times to refine the mesh uniformly in serial.");
    args.AddOption(&rp_levels, "-rp", "--refine-parallel",
@@ -276,7 +280,19 @@ int main(int argc, char *argv[])
       return 1;
    }
    if (myid == 0) { args.PrintOptions(cout); }
-
+   switch(varset_select){
+      case 0:
+         varset = VARIABLE_SET::MATERIAL_INDICATORS;
+         break;
+      case 1:
+         varset = VARIABLE_SET::CONSERVATIVE_VARIABLES_N;
+         break;
+      case 2:
+         varset = VARIABLE_SET::PRIMITIVE_VARIABLES;
+         break;
+      default:
+         varset = VARIABLE_SET::MATERIAL_INDICATORS; 
+   }
    // Enable hardware devices such as GPUs, and programming models such as
    // CUDA, OCCA, RAJA and OpenMP based on command line options.
    Device device(device_config);
@@ -717,111 +733,10 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dof_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
-   if( problem_num > 19){
-      // Testing remap for rho and u vs rho and rhou
-      MFEM_ASSERT(nmat == 2, "This problem is only defined for 2 materials");
+   VariableSystem u_system(nmat, varset, pfes);
 
-      neq = nmat + 3; // nmat, rho, u and rhou
-   } else {
-      neq = nmat;
-   }
-   // setup Vector for all dofs of all scalar fields (all materials)
-   const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? neq + 2 : neq + 1);
-   for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
-   BlockVector udata(offset, Device::GetMemoryType());
-
-   // Get ParGridFunctions for each scalar field by offset into udata and initialize
-   std::vector<ParGridFunction> u_vec(neq, &pfes);
-   if( problem_num > 19 ){
-      {
-         // mat 0: left half plane is one, else zero
-         FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? 1.0 : 0.0; });
-         u_vec[0].MakeRef(&pfes, udata, 0 * vsize);
-         u_vec[0].ProjectCoefficient(u0);
-      }
-      {
-         // mat 1: right half plane is one, else zero
-         FunctionCoefficient u0([&](const Vector &x){ return (x(0) >= 0.5) ? 1.0 : 0.0; });
-         u_vec[1].MakeRef(&pfes, udata, 1 * vsize);
-         u_vec[1].ProjectCoefficient(u0);
-      }
-      if( problem_num == 20 ){
-         // const density and velocity fields with continuous P = rho * u
-         double rho1 = 1.0; // the density of material one
-         double rho2 = 2.0; // the density of material two
-         {
-            // density
-            int ieq = 2;
-            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? rho1 : rho2; });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-         {
-            // velocity
-            int ieq = 3;
-            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? 2.0 : 1.0; });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-         {
-            // rho * u
-            int ieq = 4;
-            FunctionCoefficient u0([&](const Vector &x){ return 2.0; });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-      } else if ( problem_num == 21 ) {
-         // const density fields, linear discontinuous velocity field with continuous P = rho * u
-         // analagous to conditions that can cause RTI
-         double rho1 = 1.0; // the density of material one
-         double rho2 = 2.0; // the density of material two
-         {
-            // density
-            int ieq = 2;
-            FunctionCoefficient u0([&](const Vector &x){ return (x(0) < 0.5) ? rho1 : rho2; });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-         {
-            // velocity
-            int ieq = 3;
-            FunctionCoefficient u0([&](const Vector &x){ 
-               return (x(0) < 0.5) ? (0.5*x(0) + 1.0) : (-0.25 * x(0) + 0.75);
-            });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-         {
-            // rho * u
-            int ieq = 4;
-            FunctionCoefficient u0([&](const Vector &x){ 
-               return (x(0) < 0.5) ? rho1 * (0.5*x(0) + 1.0) : rho2 * (-0.25 * x(0) + 0.75);
-            });
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            u_vec[ieq].ProjectCoefficient(u0);
-         }
-      }
-   } else {
-      if(nmat > 1){
-         for(int ieq = 0; ieq < neq - 1; ++ieq) {
-            u_vec[ieq].MakeRef(&pfes, udata, ieq * vsize);
-            double mat_fraction = 1.0 / (nmat - 1);
-               
-               auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
-               FunctionCoefficient u0(mat_frac_u0);
-               u_vec[ieq].ProjectCoefficient(u0);
-         }
-         int mat_final_idx = nmat - 1;
-         u_vec[mat_final_idx].MakeRef(&pfes, udata, mat_final_idx * vsize);
-         FunctionCoefficient u0(final_mat_u0);
-         u_vec[mat_final_idx].ProjectCoefficient(u0);
-      } else {
-         u_vec[0].MakeRef(&pfes, udata, offset[0]);
-         FunctionCoefficient u0(u0_function);
-         u_vec[0].ProjectCoefficient(u0);
-      }
-   }
+   //initial conditions
+   initial_conditions(u_system);
 
 
    // For the case of product remap, we also solve for s and u_s.
@@ -830,19 +745,19 @@ int main(int argc, char *argv[])
    if (product_sync)
    {
       MFEM_ASSERT(nmat == 1, "Product remap only implemented for single material".);
-      ParGridFunction &u = u_vec[0];
+      ParGridFunction &u = u_system[0];
       s.SetSpace(&pfes);
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
 
-      us.MakeRef(&pfes, udata, offset[1]);
+      us.MakeRef(&pfes, u_system.udata, u_system.offset[1]);
       double *h_us = us.HostWrite();
       const double *h_u = u.HostRead();
       const double *h_s = s.HostRead();
       // Simple - we don't target conservation at initialization.
       for (int i = 0; i < s.Size(); i++) { h_us[i] = h_u[i] * h_s[i]; }
-      us.SyncAliasMemory(udata);
+      us.SyncAliasMemory(u_system.udata);
    }
 
    // Smoothness indicator.
@@ -852,15 +767,7 @@ int main(int argc, char *argv[])
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
                                                pfes,  dof_info);
       // Print the values of the smoothness indicator.
-      for(int imat = 0; imat < nmat; ++imat){
-         ParGridFunction si_val;
-         smth_indicator->ComputeSmoothnessIndicator(u_vec[imat], si_val);
-         {
-            ofstream smth("si_mat" + std::to_string(imat) + "_init.gf");
-            smth.precision(8);
-            si_val.SaveAsOne(smth);
-         }
-      }
+      u_system.printSmoothnessIndicator("_init", precision, smth_indicator);
    }
 
    // Setup of the high-order solver (if any).
@@ -985,132 +892,8 @@ int main(int argc, char *argv[])
       meshLO.precision(precision);
       subcell_mesh->PrintAsOne(meshLO);
    }
-   for(int imat = 0; imat < nmat; ++imat){
-      ofstream sltn("sltn_mat" + std::to_string(imat) + "_init.gf");
-      sltn.precision(precision);
-      u_vec[imat].SaveAsOne(sltn);
-   }
+   u_system.printGridFunctions("_init", precision);
 
-   if( problem_num > 19 ) {
-      double rho1 = 1, rho2 = 2;
-      GridFunctionCoefficient mat1_coeff(&u_vec[0]);
-      GridFunctionCoefficient mat2_coeff(&u_vec[1]);
-      // =========================
-      // = coefficient subset A: =
-      // =     Y1, Y2, rho*u     =
-      // =========================
-
-      // Y1
-      ofstream Y1A("Y1_init_A.gf");
-      Y1A.precision(precision);
-      u_vec[0].SaveAsOne(Y1A);
-      // Y2
-      ofstream Y2A("Y2_init_A.gf");
-      Y2A.precision(precision);
-      u_vec[1].SaveAsOne(Y2A);
-      // density
-      ofstream densA("density_init_A.gf");
-      SumCoefficient densACoeff(
-         mat1_coeff, mat2_coeff,
-         rho1, rho2
-      );
-      ParGridFunction densAgf(&pfes);
-      densAgf.ProjectCoefficient(densACoeff);
-      densAgf.SaveAsOne(densA);
-      // pressure = rho * u
-      ofstream presA("pressure_init_A.gf");
-      presA.precision(precision);
-      u_vec[4].SaveAsOne(presA);
-
-
-      // =========================
-      // = coefficient subset B: =
-      // =     Y1, rho, rho*u    =
-      // =========================
-
-      // Y1
-      ofstream Y1B("Y1_init_B.gf");
-      Y1B.precision(precision);
-      u_vec[0].SaveAsOne(Y1B);
-      // Y2
-      ofstream Y2B("Y2_init_B.gf");
-      Y2B.precision(precision);
-      GridFunctionCoefficient densBCoeff(&u_vec[2]);
-      SumCoefficient Y2BCoeff(densBCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
-      ParGridFunction Y2Bgf(&pfes);
-      Y2Bgf.ProjectCoefficient(Y2BCoeff);
-      Y2Bgf.SaveAsOne(Y2B);
-      // density
-      ofstream densB("density_init_B.gf");
-      densB.precision(precision);
-      u_vec[2].SaveAsOne(densB);
-      // pressure = rho * u
-      ofstream presB("pressure_init_B.gf");
-      presB.precision(precision);
-      u_vec[4].SaveAsOne(presB);
-      
-      // =========================
-      // = coefficient subset C: =
-      // =      Y1, Y2, u        =
-      // =========================
-
-      // Y1
-      ofstream Y1C("Y1_init_C.gf");
-      Y1C.precision(precision);
-      u_vec[0].SaveAsOne(Y1C);
-      // Y2
-      ofstream Y2C("Y2_init_C.gf");
-      Y2C.precision(precision);
-      u_vec[1].SaveAsOne(Y2C);
-      // density
-      ofstream densC("density_init_C.gf");
-      densC.precision(precision);
-      SumCoefficient densCCoeff(
-         mat1_coeff, mat2_coeff,
-         rho1, rho2
-      );
-      ParGridFunction densCgf(&pfes);
-      densCgf.ProjectCoefficient(densCCoeff);
-      densCgf.SaveAsOne(densC);
-      // pressure = rho * u
-      ofstream presC("pressure_init_C.gf");
-      presC.precision(precision);
-      GridFunctionCoefficient uCCoeff(&u_vec[3]);
-      ProductCoefficient presCCoeff(densCCoeff, uCCoeff);
-      ParGridFunction presCgf(&pfes);
-      presCgf.ProjectCoefficient(presCCoeff);
-      presCgf.SaveAsOne(presC);
-
-      // =========================
-      // = coefficient subset D: =
-      // =       Y1, rho, u      =
-      // =========================
-
-      // Y1
-      ofstream Y1D("Y1_init_D.gf");
-      Y1D.precision(precision);
-      u_vec[0].SaveAsOne(Y1D);
-      // Y2
-      ofstream Y2D("Y2_init_D.gf");
-      Y2D.precision(precision);
-      GridFunctionCoefficient densDCoeff(&u_vec[2]);
-      SumCoefficient Y2DCoeff(densDCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
-      ParGridFunction Y2Dgf(&pfes);
-      Y2Dgf.ProjectCoefficient(Y2DCoeff);
-      Y2Dgf.SaveAsOne(Y2D);
-      // density
-      ofstream densD("density_init_D.gf");
-      densD.precision(precision);
-      u_vec[2].SaveAsOne(densD);
-      // pressure = rho * u
-      ofstream presD("pressure_init_D.gf");
-      presD.precision(precision);
-      GridFunctionCoefficient uDCoeff(&u_vec[3]);
-      ProductCoefficient presDCoeff(densDCoeff, uDCoeff);
-      ParGridFunction presDgf(&pfes);
-      presDgf.ProjectCoefficient(presDCoeff);
-      presDgf.SaveAsOne(presD);
-   }
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
    DataCollection *dc = NULL;
@@ -1118,8 +901,7 @@ int main(int argc, char *argv[])
    {
       dc = new VisItDataCollection("Remhos", &pmesh);
       dc->SetPrecision(precision);
-      for(int imat = 0; imat < nmat; ++imat)
-         dc->RegisterField("material" + std::to_string(imat), &u_vec[imat]);
+      u_system.initDataCollection(dc);
       dc->SetCycle(0);
       dc->SetTime(0.0);
       dc->Save();
@@ -1131,7 +913,7 @@ int main(int argc, char *argv[])
    if (visualization)
    {
       // only visualize the first matrial on GLVis
-      ParGridFunction &u = u_vec[0];
+      ParGridFunction &u = u_system.u_vec[0];
       // Make sure all MPI ranks have sent their 'v' solution before initiating
       // another set of GLVis connections (one from each rank):
       MPI_Barrier(pmesh.GetComm());
@@ -1156,15 +938,8 @@ int main(int argc, char *argv[])
 
    // Record the initial mass (sum of all materials).
    Vector masses(lumpedM);
-   double mass0_u_loc = 0;
-   for(int imat = 0; imat < nmat; ++imat) mass0_u_loc += lumpedM * u_vec[imat];
-   double mass0_u, mass0_us;
-   MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   if (product_sync)
-   {
-      const double mass0_us_loc = lumpedM * us;
-      MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-   }
+   std::vector<double> initial_masses{};
+   double initial_mass = u_system.calculateMasses(lumpedM, comm, initial_masses);
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
@@ -1193,7 +968,7 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(vsize, u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
+   AdvectionOperator adv(u_system.neq, pfes.GetVSize(), u_system.u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
@@ -1205,7 +980,7 @@ int main(int argc, char *argv[])
 
    std::vector<double> umins(nmat), umaxes(nmat);
    for(int imat = 0; imat < nmat; ++imat) 
-      GetMinMax(u_vec[imat], umins[imat], umaxes[imat]);
+      GetMinMax(u_system.u_vec[imat], umins[imat], umaxes[imat]);
 
    if (exec_mode == 1)
    {
@@ -1216,11 +991,11 @@ int main(int argc, char *argv[])
    }
 
    // create a same size vector for residual data
-   Vector resdata = udata;
-   std::vector<ParGridFunction> res_vec(neq);
+   Vector resdata = u_system.udata;
+   std::vector<ParGridFunction> res_vec(u_system.neq);
    for(int ieq = 0; ieq < nmat; ++ieq){
       ParGridFunction &res = res_vec[ieq];
-      res.MakeRef(&pfes, resdata, ieq * vsize);
+      res.MakeRef(&pfes, resdata, ieq * pfes.GetVSize());
    }
 
    double residual;
@@ -1229,7 +1004,7 @@ int main(int argc, char *argv[])
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
-   BlockVector udata_old(udata);
+   BlockVector udata_old(u_system.udata);
    int ti_total = 0, ti = 0;
    while (done == false)
    {
@@ -1243,7 +1018,7 @@ int main(int argc, char *argv[])
       if (product_sync)
       {
          MFEM_ASSERT(nmat == 1, "Product remap only implemented for single material".);
-         ParGridFunction &u = u_vec[0];
+         ParGridFunction &u = u_system[0];
          ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          if (myid == 0)
@@ -1270,8 +1045,8 @@ int main(int argc, char *argv[])
          }
       }
 
-      udata_old = udata;
-      ode_solver->Step(udata, t, dt_real);
+      udata_old = u_system.udata;
+      ode_solver->Step(u_system.udata, t, dt_real);
       ti++;
       ti_total++;
 
@@ -1288,7 +1063,7 @@ int main(int argc, char *argv[])
             }
             ti--;
             t -= dt_real;
-            udata  = udata_old;
+            u_system.udata  = udata_old;
             dt = 0.85 * dt;
             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
@@ -1304,13 +1079,13 @@ int main(int argc, char *argv[])
       }
 
       // S has been modified, update the alias
-      for(int imat = 0; imat < nmat; ++imat) u_vec[imat].SyncMemory(udata.GetBlock(imat));
+      u_system.SyncUvec();
       if (product_sync)
       {
-         us.SyncMemory(udata);
+         us.SyncMemory(u_system.udata);
 
          MFEM_ASSERT(nmat == 1, "Product remap only implemented for single material".);
-         ParGridFunction &u = u_vec[0];
+         ParGridFunction &u = u_system[0];
          // It is known that RK time integrators with more than 1 stage may
          // cause violation of the lower bounds for us.
          // The lower bound is corrected, causing small conservation error.
@@ -1346,7 +1121,7 @@ int main(int argc, char *argv[])
          if (verify_bounds && forced_bounds && smth_indicator == NULL)
          {
             double umin_new, umax_new;
-            GetMinMax(u_vec[imat], umin_new, umax_new);
+            GetMinMax(u_system[imat], umin_new, umax_new);
             if (problem_num % 10 != 6 && problem_num % 10 != 7)
             {
                if (myid == 0)
@@ -1391,9 +1166,9 @@ int main(int argc, char *argv[])
       else
       {
          std::vector<bool> dones(nmat, false);
-         for(int imat = 0; imat < nmat; ++imat){
-            ParGridFunction &u = u_vec[imat];
-            ParGridFunction &res = res_vec[imat];
+         for(int ieq = 0; ieq < u_system.neq; ++ieq){
+            ParGridFunction &u = u_system[ieq];
+            ParGridFunction &res = res_vec[ieq];
             // Steady state problems - stop at convergence.
             double res_loc = 0.;
             lumpedM.HostReadWrite(); u.HostReadWrite(); res.HostReadWrite();
@@ -1404,7 +1179,7 @@ int main(int argc, char *argv[])
             MPI_Allreduce(&res_loc, &residual, 1, MPI_DOUBLE, MPI_SUM, comm);
 
             residual = sqrt(residual);
-            if (residual < 1.e-12 && t >= 1.) { dones[imat] = true; u = res; }
+            if (residual < 1.e-12 && t >= 1.) { dones[ieq] = true; u = res; }
             else { res = u; }
          }
          // only done if all residuals are done
@@ -1421,7 +1196,7 @@ int main(int argc, char *argv[])
 
          if (visualization)
          {
-            ParGridFunction &u = u_vec[0]; // visualize the first material
+            ParGridFunction &u = u_system[0]; // visualize the first material
             int Wx = 0, Wy = 0; // window position
             int Ww = 400, Wh = 400; // window size
             VisualizeField(sout, vishost, visport, u, "Solution u",
@@ -1436,7 +1211,7 @@ int main(int argc, char *argv[])
             if (product_sync)
             {
                MFEM_ASSERT(nmat == 1, "Product remap only implemented for single material".);
-               ParGridFunction &u = u_vec[0];
+               ParGridFunction &u = u_system[0];
                // Recompute s = u_s / u.
                ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
                VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -1450,6 +1225,7 @@ int main(int argc, char *argv[])
          {
             dc->SetCycle(ti);
             dc->SetTime(t);
+            u_system.updateDataCollectionFields();
             dc->Save();
          }
       }
@@ -1472,209 +1248,44 @@ int main(int argc, char *argv[])
          meshLO.precision(precision);
          subcell_mesh->PrintAsOne(meshLO);
       }
-      for(int imat = 0; imat < nmat; ++imat){
-         ofstream sltn("sltn_mat" + std::to_string(imat) + "_final.gf");
-         sltn.precision(precision);
-         u_vec[imat].SaveAsOne(sltn);
-      }
-      if( problem_num < 20){ 
-         // create the sum of materials
-         ofstream matsum("indicator_sum_final.gf");
-         matsum.precision(precision);
-         if(nmat == 2){ // TODO: generalize
-            GridFunctionCoefficient mat1_coeff(&u_vec[0]);
-            GridFunctionCoefficient mat2_coeff(&u_vec[1]);
-            SumCoefficient sumcoeff(mat1_coeff, mat2_coeff);
-            ParGridFunction sumgf(&pfes);
-            sumgf.ProjectCoefficient(sumcoeff);
-            sumgf.SaveAsOne(matsum);
-         } else if (nmat == 3) {
-            GridFunctionCoefficient mat1_coeff(&u_vec[0]);
-            GridFunctionCoefficient mat2_coeff(&u_vec[1]);
-            GridFunctionCoefficient mat3_coeff(&u_vec[2]);
-            SumCoefficient sumcoeff_A(mat1_coeff, mat2_coeff);
-            SumCoefficient sumcoeff(sumcoeff_A, mat3_coeff);
-            ParGridFunction sumgf(&pfes);
-            sumgf.ProjectCoefficient(sumcoeff);
-            sumgf.SaveAsOne(matsum);
-         }
-      } else {
-         double rho1 = 1, rho2 = 2;
-         GridFunctionCoefficient mat1_coeff(&u_vec[0]);
-         GridFunctionCoefficient mat2_coeff(&u_vec[1]);
-         // =========================
-         // = coefficient subset A: =
-         // =     Y1, Y2, rho*u     =
-         // =========================
-
-         // Y1
-         ofstream Y1A("Y1_final_A.gf");
-         Y1A.precision(precision);
-         u_vec[0].SaveAsOne(Y1A);
-         // Y2
-         ofstream Y2A("Y2_final_A.gf");
-         Y2A.precision(precision);
-         u_vec[1].SaveAsOne(Y2A);
-         // density
-         ofstream densA("density_final_A.gf");
-         SumCoefficient densACoeff(
-            mat1_coeff, mat2_coeff,
-            rho1, rho2
-         );
-         ParGridFunction densAgf(&pfes);
-         densAgf.ProjectCoefficient(densACoeff);
-         densAgf.SaveAsOne(densA);
-         // pressure = rho * u
-         ofstream presA("pressure_final_A.gf");
-         presA.precision(precision);
-         u_vec[4].SaveAsOne(presA);
-
-
-         // =========================
-         // = coefficient subset B: =
-         // =     Y1, rho, rho*u    =
-         // =========================
-
-         // Y1
-         ofstream Y1B("Y1_final_B.gf");
-         Y1B.precision(precision);
-         u_vec[0].SaveAsOne(Y1B);
-         // Y2
-         ofstream Y2B("Y2_final_B.gf");
-         Y2B.precision(precision);
-         GridFunctionCoefficient densBCoeff(&u_vec[2]);
-         SumCoefficient Y2BCoeff(densBCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
-         ParGridFunction Y2Bgf(&pfes);
-         Y2Bgf.ProjectCoefficient(Y2BCoeff);
-         Y2Bgf.SaveAsOne(Y2B);
-         // density
-         ofstream densB("density_final_B.gf");
-         densB.precision(precision);
-         u_vec[2].SaveAsOne(densB);
-         // pressure = rho * u
-         ofstream presB("pressure_final_B.gf");
-         presB.precision(precision);
-         u_vec[4].SaveAsOne(presB);
-         
-         // =========================
-         // = coefficient subset C: =
-         // =      Y1, Y2, u        =
-         // =========================
-
-         // Y1
-         ofstream Y1C("Y1_final_C.gf");
-         Y1C.precision(precision);
-         u_vec[0].SaveAsOne(Y1C);
-         // Y2
-         ofstream Y2C("Y2_final_C.gf");
-         Y2C.precision(precision);
-         u_vec[1].SaveAsOne(Y2C);
-         // density
-         ofstream densC("density_final_C.gf");
-         densC.precision(precision);
-         SumCoefficient densCCoeff(
-            mat1_coeff, mat2_coeff,
-            rho1, rho2
-         );
-         ParGridFunction densCgf(&pfes);
-         densCgf.ProjectCoefficient(densCCoeff);
-         densCgf.SaveAsOne(densC);
-         // pressure = rho * u
-         ofstream presC("pressure_final_C.gf");
-         presC.precision(precision);
-         GridFunctionCoefficient uCCoeff(&u_vec[3]);
-         ProductCoefficient presCCoeff(densCCoeff, uCCoeff);
-         ParGridFunction presCgf(&pfes);
-         presCgf.ProjectCoefficient(presCCoeff);
-         presCgf.SaveAsOne(presC);
-
-         // =========================
-         // = coefficient subset D: =
-         // =       Y1, rho, u      =
-         // =========================
-
-         // Y1
-         ofstream Y1D("Y1_final_D.gf");
-         Y1D.precision(precision);
-         u_vec[0].SaveAsOne(Y1D);
-         // Y2
-         ofstream Y2D("Y2_final_D.gf");
-         Y2D.precision(precision);
-         GridFunctionCoefficient densDCoeff(&u_vec[2]);
-         SumCoefficient Y2DCoeff(densDCoeff, mat2_coeff, 1.0 / rho2, rho1 / rho2);
-         ParGridFunction Y2Dgf(&pfes);
-         Y2Dgf.ProjectCoefficient(Y2DCoeff);
-         Y2Dgf.SaveAsOne(Y2D);
-         // density
-         ofstream densD("density_final_D.gf");
-         densD.precision(precision);
-         u_vec[2].SaveAsOne(densD);
-         // pressure = rho * u
-         ofstream presD("pressure_final_D.gf");
-         presD.precision(precision);
-         GridFunctionCoefficient uDCoeff(&u_vec[3]);
-         ProductCoefficient presDCoeff(densDCoeff, uDCoeff);
-         ParGridFunction presDgf(&pfes);
-         presDgf.ProjectCoefficient(presDCoeff);
-         presDgf.SaveAsOne(presD);
-      }
+      u_system.printGridFunctions("_final", precision);
    }
 
    // Check for mass conservation.
-   double mass_u_loc = 0.0, mass_us_loc = 0.0;
+   std::vector<double> final_masses{};
    if (exec_mode == 1)
-   {
+   { // reform mass matrix because mesh has moved
       ml.BilinearForm::operator=(0.0);
       ml.Assemble();
       lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
-      for(int imat = 0; imat < nmat; ++imat) {
-         mass_u_loc += lumpedM * u_vec[imat];
-      }
-      if (product_sync) { mass_us_loc = lumpedM * us; }
    }
-   else
-   {
-      for(int imat = 0; imat < nmat; ++imat) mass_u_loc += lumpedM * u_vec[imat];
-      if (product_sync) { mass_us_loc = masses * us; }
-   }
-   double mass_u, mass_us, s_max;
-   MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   for(int imat = 0; imat < nmat; ++imat){
-      const double umax_loc = u_vec[imat].Max();
-      MPI_Allreduce(&umax_loc, &umaxes[imat], 1, MPI_DOUBLE, MPI_MAX, comm);
-   }
-   if (product_sync)
-   {
-      MFEM_ASSERT(nmat == 1, "Product remap only implemented for single material".);
-      ParGridFunction &u = u_vec[0];
-      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
-      const double s_max_loc = s.Max();
-      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
-   }
+   double final_mass = u_system.calculateMasses(lumpedM, comm, final_masses);
+   u_system.fieldMaxes(comm, umaxes);
    if (myid == 0)
    {
       cout << setprecision(10)
-           << "Final mass u:  " << mass_u << endl;
-      for(int imat = 0; imat < nmat; ++imat)
-         cout << "Max value u" << imat << ":   " << umaxes[imat] << endl << setprecision(6);
-      cout << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
+           << "Final mass u:  " << final_mass << endl;
+      for(int ieq = 0; ieq < u_system.neq; ++ieq)
+         cout << "Max value u" << ieq << ":   " << umaxes[ieq] << endl << setprecision(6);
+      cout << "Mass loss u:   " << abs(final_mass - initial_mass) << endl;
+      for(int ieq = 0; ieq < u_system.neq; ++ieq)
+         { cout << "Mass loss field" << ieq << ":   " << abs(final_masses[ieq] - initial_masses[ieq]) << endl; }
       if (product_sync)
-      {
-         cout << setprecision(10)
-              << "Final mass us: " << mass_us << endl
-              << "Max value s:   " << s_max << endl << setprecision(6)
-              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
+      { // TODO:
+//         cout << setprecision(10)
+//              << "Final mass us: " << mass_us << endl
+//              << "Max value s:   " << s_max << endl << setprecision(6)
+//              << "Mass loss us:  " << abs(mass0_us - mass_us) << endl;
       }
    }
 
-   for(int imat = 0; imat < nmat; ++imat){
+   for(int ieq = 0; ieq < u_system.neq; ++ieq){
       ConstantCoefficient zero(0.0);
-      double norm_u = u_vec[imat].ComputeL2Error(zero);
+      double norm_u = u_system[ieq].ComputeL2Error(zero);
       if (myid == 0)
       {
-         cout << setprecision(12) << "L2-norm u" << imat << ": " << norm_u << endl;
+         cout << setprecision(12) << "L2-norm u" << ieq << ": " << norm_u << endl;
       }
    }
 
@@ -1682,7 +1293,7 @@ int main(int argc, char *argv[])
    if (problem_num == 4 || problem_num == 18) // solid body rotation
    {
       MFEM_ASSERT(nmat == 1, "Problem error only implemented for single material".);
-      ParGridFunction &u = u_vec[0];
+      ParGridFunction &u = u_system[0];
       FunctionCoefficient u0(u0_function);
       double err_L1 = u.ComputeLpError(1., u0),
              err_L2 = u.ComputeL2Error(u0);
@@ -1695,7 +1306,7 @@ int main(int argc, char *argv[])
    else if (problem_num == 7)
    {
       MFEM_ASSERT(nmat == 1, "Problem error only implemented for single material".);
-      ParGridFunction &u = u_vec[0];
+      ParGridFunction &u = u_system[0];
       FunctionCoefficient u_ex(inflow_function);
       double e1 = u.ComputeLpError(1., u_ex);
       double e2 = u.ComputeLpError(2., u_ex);
@@ -1725,15 +1336,7 @@ int main(int argc, char *argv[])
    if (smth_indicator)
    {
       // Print the values of the smoothness indicator.
-      for(int imat = 0; imat < nmat; ++imat){
-         ParGridFunction si_val;
-         smth_indicator->ComputeSmoothnessIndicator(u_vec[imat], si_val);
-         {
-            ofstream smth("si_mat" + std::to_string(imat) + "_final.gf");
-            smth.precision(8);
-            si_val.SaveAsOne(smth);
-         }
-      }
+      u_system.printSmoothnessIndicator("_final", precision, smth_indicator);
    }
 
    // Free the used memory.
@@ -1761,7 +1364,7 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_vec,
+AdvectionOperator::AdvectionOperator(int neq, int vsize, std::vector<ParGridFunction> &u_vec,
                                      BilinearForm &Mbf_, BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *Ksharp,
@@ -1772,7 +1375,7 @@ AdvectionOperator::AdvectionOperator(int size, std::vector<ParGridFunction> &u_v
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(neq * size), vsize(size), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -2014,6 +1617,25 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                  Kbf.ParFESpace()->GetComm());
 
    dt_est = fmin(dt_est, dt);
+}
+
+void mfem::initial_conditions(VariableSystem &u){
+   if(nmat > 1){ // multimaterial adjustment for standard IC
+      int neq = u.neq;
+      for(int ieq = 0; ieq < neq - 1; ++ieq) {
+         double mat_fraction = 1.0 / (nmat - 1);
+         
+         auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
+         FunctionCoefficient u0(mat_frac_u0);
+         u[ieq].ProjectCoefficient(u0);
+      }
+      int mat_final_idx = nmat - 1;
+      FunctionCoefficient u0(final_mat_u0);
+      u[mat_final_idx].ProjectCoefficient(u0);
+   } else {
+         FunctionCoefficient u0(u0_function);
+         u.u_vec[0].ProjectCoefficient(u0);
+   }
 }
 
 // Velocity coefficient

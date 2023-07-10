@@ -106,11 +106,11 @@ CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
 SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
-  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp
+  remhos_fct.cpp remhos_mono.cpp remhos_multivar.cpp remhos_sync.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
 HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
-  remhos_mono.hpp remhos_sync.hpp
+  remhos_mono.hpp remhos_multivar.hpp remhos_sync.hpp
 
 # Targets
 
