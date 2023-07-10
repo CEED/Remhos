@@ -70,6 +70,7 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
          K_sharp_mat = Ksharp->ParallelAssemble(&Ksharp->SpMat());
          K_sharp_mat->Mult(u, rhs_sharp);
          rhs.Add(1.0, rhs_sharp);
+         delete K_sharp_mat;
       }
 
       M_mat = M.ParallelAssemble();
@@ -121,6 +122,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       HypreParMatrix *K_sharp_mat = Ksharp->ParallelAssemble(&Ksharp->SpMat());
       K_sharp_mat->Mult(u, rhs_sharp);
       rhs.Add(1.0, rhs_sharp);
+      delete K_sharp_mat;
    }
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();

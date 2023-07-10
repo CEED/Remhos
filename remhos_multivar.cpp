@@ -24,7 +24,6 @@ namespace mfem {
       int vsize = pfes.GetVSize(); 
       for(int i = 0; i < offset.Size(); ++i){ offset[i] = i * vsize; }
       udata.Update(offset, Device::GetMemoryType());
-      udata = 0;
       // setup the pargridfunction references
       u_vec.reserve(neq);
       for(int i = 0; i < neq; ++i){ u_vec.emplace_back(&pfes, udata, i * vsize); }
@@ -128,7 +127,10 @@ namespace mfem {
          for(int imat = 0; imat < nmat; ++imat) { mat_coeffs.push_back(GridFunctionCoefficient(&u_vec[imat])); }
          std::vector<SumCoefficient> sum_coeffs;
          sum_coeffs.reserve(nmat - 1); // prevent pointer invalidation
-         sum_coeffs.push_back(SumCoefficient(mat_coeffs[0], mat_coeffs[1]));
+         if(nmat > 1)
+            sum_coeffs.push_back(SumCoefficient(mat_coeffs[0], mat_coeffs[1]));
+         else
+            sum_coeffs.push_back(SumCoefficient(0.0, mat_coeffs[0])); // if single material add to a zero field
          for(int imat = 2; imat < nmat; ++imat){
             sum_coeffs.push_back(SumCoefficient(mat_coeffs[imat], sum_coeffs[imat - 2]));
          }

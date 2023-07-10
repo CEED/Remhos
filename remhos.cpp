@@ -59,8 +59,11 @@ int problem_num;
 
 // The number of materials to consider   
 int nmat = 1;
-// whether or not to apply the sharpening conservation correction
-bool sharp_cons_corr = false;
+/// material sum correction for sharpening term
+/// 0 - no correction
+/// 1 - correction on last material
+/// 2 - evenly distributed
+int sharp_cons_corr = 0;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -238,8 +241,11 @@ int main(int argc, char *argv[])
                   "                     1 - matrix sparsity pattern.");
    args.AddOption(&sharp, "-sharp", "--sharp", "-no-sharp", "--no-sharp",
                   "Enable or disable profile sharpening.");
-   args.AddOption(&sharp_cons_corr, "-scc", "--sharp-cons-corr", "-no-scc", "--no-sharp-cons-corr",
-      "Enable or disable conservation correction for sharpening");
+   args.AddOption(&sharp_cons_corr, "-scc", "--sharp-cons-corr", 
+      "Material sum correction"
+      "0 - no correction"
+      "1 - correction accumulated on the final material"
+      "2 - evenly distributed correction");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -1393,8 +1399,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u_last.MakeRef(Y, vsize * (nmat - 1), vsize);
    d_u_last = 0.0;
 
-   int matignore = (nmat > 1 && sharp_cons_corr) ? nmat - 1 : nmat;
-   for(int ieq = 0; ieq < neq; ++ieq) if( problem_num > 19 || ieq != matignore ){
+   Vector d_u_accumulate(vsize);
+   d_u_accumulate = 0.0;
+
+   // if the conservation correction is applied to the last material 
+   // we ignore the advection of this material and accumulate d_u_last
+   int matignore = (nmat > 1 && sharp_cons_corr == 1) ? nmat - 1 : -1;
+   for(int ieq = 0; ieq < neq; ++ieq) if( ieq != matignore ){
      
       // Needed because X and Y are allocated on the host by the ODESolver.
       X.Read(); Y.Read();
@@ -1515,8 +1526,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       // update the du for the last material if multimaterial
-      if(nmat > 1 && problem_num < 20 && ieq < matignore && sharp_cons_corr)
+      if(nmat > 1 && sharp_cons_corr == 1 && ieq < nmat - 1)
       { d_u_last.Add(-1.0, d_u); }
+
+      // update the accumulated du if distributed correction
+      if(nmat > 1 && sharp_cons_corr == 2 && ieq < nmat)
+      { d_u_accumulate.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
       if (nmat == 1 && X.Size() > size)
@@ -1584,7 +1599,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
          d_us.SyncAliasMemory(Y);
       }
-
+   }
+   if(nmat > 1 && sharp_cons_corr == 2){
+      // distribute the difference required for conservation among the materials
+      for(int imat = 0; imat < nmat; ++imat){
+         Vector d_u;
+         d_u.MakeRef(Y, vsize * imat, vsize);
+         double frac = 1.0 / (double) nmat;
+         d_u.Add(frac, d_u_accumulate);
+      }
    }
 }
 
