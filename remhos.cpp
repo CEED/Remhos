@@ -1646,7 +1646,7 @@ void mfem::initial_conditions(VariableSystem &u){
    if(nmat > 1){ // multimaterial adjustment for standard IC
       int neq = u.neq;
       for(int ieq = 0; ieq < neq - 1; ++ieq) {
-         double mat_fraction = 1.0 / (nmat - 1);
+         double mat_fraction = 1.0 / (nmat);
          
          auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
          FunctionCoefficient u0(mat_frac_u0);

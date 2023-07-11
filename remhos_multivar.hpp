@@ -55,6 +55,9 @@ class VariableSystem {
    // vectors for printing to datacollection
    std::vector<ParGridFunction> densities;
    std::vector<ParGridFunction> pressures;
+   std::vector<SumCoefficient> sum_coeffs;
+   std::vector<GridFunctionCoefficient> mat_coeffs;
+   ParGridFunction indicator_sum_gf;
   
    public:
    int nmat;                     /// the number of materials

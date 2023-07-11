@@ -6,7 +6,7 @@
 
 namespace mfem {
    VariableSystem::VariableSystem(int nmat, VARIABLE_SET varset, ParFiniteElementSpace &pfes)
-      : nmat(nmat), varset(varset), pfes(pfes),
+      : indicator_sum_gf(&pfes), nmat(nmat), varset(varset), pfes(pfes),
       neq( [varset, nmat]()-> int { // initialize neq based on variable set
          switch(varset){
             case VARIABLE_SET::MATERIAL_INDICATORS:
@@ -27,6 +27,18 @@ namespace mfem {
       // setup the pargridfunction references
       u_vec.reserve(neq);
       for(int i = 0; i < neq; ++i){ u_vec.emplace_back(&pfes, udata, i * vsize); }
+
+      // Coefficients that get reused for output
+      // get the sum of indicators
+      for(int imat = 0; imat < nmat; ++imat) { mat_coeffs.push_back(GridFunctionCoefficient(&u_vec[imat])); }
+      sum_coeffs.reserve(nmat - 1); // prevent pointer invalidation
+      if(nmat > 1)
+         sum_coeffs.push_back(SumCoefficient(mat_coeffs[0], mat_coeffs[1]));
+      else
+         sum_coeffs.push_back(SumCoefficient(0.0, mat_coeffs[0])); // if single material add to a zero field
+      for(int imat = 2; imat < nmat; ++imat){
+         sum_coeffs.push_back(SumCoefficient(mat_coeffs[imat], sum_coeffs[imat - 2]));
+      }
    }
 
    ParGridFunction VariableSystem::computeDensity(int imat) {
@@ -123,17 +135,6 @@ namespace mfem {
 
          // print out indicator sum
          ofstream sum_out("indicator_sum" + suffix + ".gf");
-         std::vector<GridFunctionCoefficient> mat_coeffs;
-         for(int imat = 0; imat < nmat; ++imat) { mat_coeffs.push_back(GridFunctionCoefficient(&u_vec[imat])); }
-         std::vector<SumCoefficient> sum_coeffs;
-         sum_coeffs.reserve(nmat - 1); // prevent pointer invalidation
-         if(nmat > 1)
-            sum_coeffs.push_back(SumCoefficient(mat_coeffs[0], mat_coeffs[1]));
-         else
-            sum_coeffs.push_back(SumCoefficient(0.0, mat_coeffs[0])); // if single material add to a zero field
-         for(int imat = 2; imat < nmat; ++imat){
-            sum_coeffs.push_back(SumCoefficient(mat_coeffs[imat], sum_coeffs[imat - 2]));
-         }
          ParGridFunction sum_indicator(&pfes);
          sum_indicator.ProjectCoefficient(sum_coeffs.back());
          sum_indicator.SaveAsOne(sum_out);
@@ -153,20 +154,37 @@ namespace mfem {
    void VariableSystem::initDataCollection(DataCollection *dc){
       for(int imat = 0; imat < nmat; ++ imat) 
          { dc->RegisterField("material_indicator_" + std::to_string(imat), &getIndicator(imat)); }
-      for(int imat = 0; imat < nmat; ++imat){
-         densities.push_back(computeDensity(imat));
-         dc->RegisterField("density_" + std::to_string(imat), &densities[imat]);
+      // get the sum of indicators
+      std::vector<GridFunctionCoefficient> mat_coeffs;
+      for(int imat = 0; imat < nmat; ++imat) { mat_coeffs.push_back(GridFunctionCoefficient(&u_vec[imat])); }
+      std::vector<SumCoefficient> sum_coeffs;
+      sum_coeffs.reserve(nmat - 1); // prevent pointer invalidation
+      if(nmat > 1)
+         sum_coeffs.push_back(SumCoefficient(mat_coeffs[0], mat_coeffs[1]));
+      else
+         sum_coeffs.push_back(SumCoefficient(0.0, mat_coeffs[0])); // if single material add to a zero field
+      for(int imat = 2; imat < nmat; ++imat){
+         sum_coeffs.push_back(SumCoefficient(mat_coeffs[imat], sum_coeffs[imat - 2]));
       }
-      for(int imat = 0; imat < nmat; ++imat){
-         pressures.push_back(computePressure(imat));
-         dc->RegisterField("pressure_" + std::to_string(imat), &pressures[imat]);
-      }
+      indicator_sum_gf.ProjectCoefficient(sum_coeffs.back());
+      dc->RegisterField("indicator_sum", &indicator_sum_gf);
+
+// TODO: rvalue move semantics not working
+//      for(int imat = 0; imat < nmat; ++imat){
+//         densities.push_back(std::move(computeDensity(imat)));
+//         dc->RegisterField("density_" + std::to_string(imat), &densities[imat]);
+//      }
+//      for(int imat = 0; imat < nmat; ++imat){
+//         pressures.push_back(computePressure(imat));
+//         dc->RegisterField("pressure_" + std::to_string(imat), &pressures[imat]);
+//      }
    }
 
    void VariableSystem::updateDataCollectionFields(){
       for(int imat = 0; imat < nmat; ++imat){
-         densities[imat] = computeDensity(imat);
-         pressures[imat] = computePressure(imat);
+ //        densities[imat] = computeDensity(imat);
+ //        pressures[imat] = computePressure(imat);
+         indicator_sum_gf.ProjectCoefficient(sum_coeffs.back());
       }
    }
 
