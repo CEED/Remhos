@@ -986,6 +986,7 @@ int main(int argc, char *argv[])
       }
 
       S_old = S;
+      cout << "---" << endl;
       ode_solver->Step(S, t, dt_real);
       ti++;
       ti_total++;
@@ -1031,38 +1032,19 @@ int main(int argc, char *argv[])
                                         &active_elem, &active_dofs);
          dof_info.ComputeBounds(dof_info.xe_min, dof_info.xe_max,
                                 dof_info.xi_min, dof_info.xi_max,
-                                2, &active_elem);
+                                1, &active_elem);
 
          Vector us_min(size), us_max(size);
          ComputeBoolIndicators(NE, u, active_elem, active_dofs);
          fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max, u,
                                           active_elem, active_dofs,
                                           us_min, us_max);
-         // This should be in bounds with 2-level neighbors and RK2,
-         // but the current time integration might break the lower bound, as
-         // the ratio is not a linear function.
-         //check_violation(us, us_min, us_max, "us-full-bound", &active_dofs);
-
-         if (sharp)
-         {
-            ParMesh *pmesh = M_HO.ParFESpace()->GetParMesh();
-            GridFunction x_new(pmesh->GetNodes()->FESpace());
-            add(x0, t, v_gf, x_new);
-            ml.BilinearForm::operator=(0.0);
-            ml.Assemble();
-            ml.SpMat().GetDiag(new_m);
-
-            Vector us_blend(size);
-            sharp_product_sync(u, new_m,
-                               dof_info.xi_min, dof_info.xi_max,
-                               us, active_dofs, us_blend);
-            us = us_blend;
-
-            fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max,
-                                             u, active_elem, active_dofs,
-                                             us_min, us_max);
-            check_violation(us, us_min, us_max, "us-full-blend", &active_dofs);
-         }
+//         cout << "in loop u:  " << u(5339) << endl;
+//         cout << "in loop us: " << us(5339) << endl;
+//         cout << "in loop ss_mm: " << us_min(5339) << " "
+//                                   << us_max(5339) << endl;
+         // Must always be ok with RK1.
+         check_violation(us, us_min, us_max, "us-full", &active_dofs);
       }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
@@ -1405,7 +1387,7 @@ void check_violation(const Vector &u, const Vector &d_u, double dt,
 
       if (u_new(i) < u_min(i) - eps || u_new(i) > u_max(i) + eps)
       {
-         cout << info << " bounds violation: "
+         cout << info << " bounds violation: " << i << " "
               << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
          MFEM_ABORT("bounds");
       }
@@ -1433,7 +1415,9 @@ void check_violation(const Vector &u_new,
 
 void sharp_product_sync(const Vector &u, const Vector &m,
                         const Vector &s_min, const Vector &s_max,
-                        const Vector &us_b, const Array<bool> &active_dofs,
+                        const Vector &us_b,
+                        const Array<bool> &active_dofs_blend,
+                        const Array<bool> &active_dofs_bound,
                         Vector &us)
 {
    const double eps = 1e-12;
@@ -1441,13 +1425,13 @@ void sharp_product_sync(const Vector &u, const Vector &m,
    double Sp = 0.0, Sn = 0.0, S_to_min = 0.0, S_to_max = 0.0;
    for (int i = 0; i < size; i++)
    {
-//      if (i == 8202)
-//      {
-//         cout << i << " " << u(i) << endl;
-//         cout << i << " " << u(i) * s_min(i) << " " <<  us_b(i) << " " << u(i) * s_max(i) << endl;
-//      }
-
-      if (active_dofs[i] == false)        { us(i) = 0.0; continue; }
+      if (active_dofs_blend[i] == false && active_dofs_bound[i] == true)
+      {
+         us(i) = 0.0;
+         Sn -= m(i) * us_b(i);
+         continue;
+      }
+      if (active_dofs_blend[i] == false)  { us(i) = 0.0; continue; }
       if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
 
       us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
@@ -1472,7 +1456,7 @@ void sharp_product_sync(const Vector &u, const Vector &m,
       double S_max_decr = 0.0;
       for (int i = 0; i < size; i++)
       {
-         if (active_dofs[i] == false)        { continue; }
+         if (active_dofs_blend[i] == false)  { continue; }
          if (u(i) < eps || u(i) > 1.0 - eps) { continue; }
 
          double r = us(i) - u(i) * s_min(i);
@@ -1488,7 +1472,7 @@ void sharp_product_sync(const Vector &u, const Vector &m,
       double S_max_incr = 0.0;
       for (int i = 0; i < size; i++)
       {
-         if (active_dofs[i] == false)        { continue; }
+         if (active_dofs_blend[i] == false)  { continue; }
          if (u(i) < eps || u(i) > 1.0 - eps) { continue; }
 
          double r = u(i) * s_max(i) - us(i);
@@ -1503,7 +1487,7 @@ void sharp_product_sync(const Vector &u, const Vector &m,
    // Restore the mass.
    for (int i = 0; i < size; i++)
    {
-      if (active_dofs[i] == false)        { us(i) = 0.0; continue; }
+      if (active_dofs_blend[i] == false)  { us(i) = 0.0; continue; }
       if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
 
       if (S > 0.0)
@@ -1532,26 +1516,23 @@ void sharp_product_sync(const Vector &u, const Vector &m,
             MFEM_ABORT("max bounds");
          }
       }
-
-//      if (i == 4244)
-//      {
-//         cout << i << " " << u(i) * s_min(i) << " " <<  us(i) << " " << u(i) * s_max(i) << endl;
-//      }
    }
 
    double m_bound = 0.0, m_blend = 0.0;
    for (int i = 0; i < size; i++)
    {
-      if (active_dofs[i] == false) { continue; }
-
-      m_bound += m(i) * us(i);
-      m_blend += m(i) * us_b(i);
+      if (active_dofs_blend[i] == true) { m_blend += m(i) * us(i); }
+      if (active_dofs_bound[i] == true) { m_bound += m(i) * us_b(i); }
    }
    MPI_Allreduce(MPI_IN_PLACE, &m_bound, 1, MPI_DOUBLE,
                  MPI_SUM, MPI_COMM_WORLD);
    MPI_Allreduce(MPI_IN_PLACE, &m_blend, 1, MPI_DOUBLE,
                  MPI_SUM, MPI_COMM_WORLD);
-   //cout << fabs(m_bound - m_blend) << endl;
+   if (fabs(m_bound - m_blend) > eps)
+   {
+      cout << fabs(m_bound - m_blend) << endl;
+      MFEM_ABORT("error in us-sync conservation");
+   }
 }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
@@ -1610,7 +1591,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       UpdateTimeStepEstimate(u, d_u_b_LO, dofs.xi_min, dofs.xi_max);
    }
-   check_violation(u, d_u_b, dt, dofs.xi_min, dofs.xi_max, "bounded");
+   check_violation(u, d_u_b, dt, dofs.xi_min, dofs.xi_max, "u-bound-mult");
 
    // Sharp solution (won't be in bounds).
    Vector d_u_s(size), d_u_s_LO(size), d_u_s_HO(size);
@@ -1624,7 +1605,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    add(1.0, u, dt, d_u_b, u_b);
    add(1.0, u, dt, d_u_s, u_s);
    blend_global(u_b, u_s, lumpedM, dofs.xi_min, dofs.xi_max, u_new);
-   check_violation(u_new, dofs.xi_min, dofs.xi_max, "blended");
+   check_violation(u_new, dofs.xi_min, dofs.xi_max, "u-blend-mult");
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u(i)) / dt; }
 
    if (evolve_sharp == false) { d_u = d_u_b; }
@@ -1662,25 +1643,55 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                          dofs.xi_min, dofs.xi_max, 1, &s_bool_el);
 
-      // Note that here we use the blended u, which gives better sync.
-      Vector u_new(size);
-      add(1.0, u, dt, d_u, u_new);
-
       // Evolve u and get the new active dofs.
+      Vector u_b_new(size);
+      add(1.0, u, dt, d_u_b, u_b_new);
       Array<bool> s_bool_el_new, s_bool_dofs_new;
-      ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
+      ComputeBoolIndicators(NE, u_b_new, s_bool_el_new, s_bool_dofs_new);
 
+      // Evolve us bounded.
       Vector d_us_b(size);
       fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
-                                   dofs.xi_min, dofs.xi_max, u_new,
-                                   s_bool_el_new, s_bool_dofs_new, d_us);
+                                   dofs.xi_min, dofs.xi_max, u_b_new,
+                                   s_bool_el_new, s_bool_dofs_new, d_us_b);
+      Vector us_b_new(size);
+      add(1.0, us, dt, d_us_b, us_b_new);
 
+      // Check bounded violation.
       Vector us_min(size), us_max(size);
-      fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_new,
+      fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_b_new,
                                        s_bool_el_new, s_bool_dofs_new,
                                        us_min, us_max);
-      check_violation(us, d_us, dt, us_min, us_max, "product-sub-bounded",
+      check_violation(us_b_new, us_min, us_max, "us-bound-mult",
                       &s_bool_dofs_new);
+
+      if (evolve_sharp)
+      {
+         Vector us_blend(size);
+         Array<bool> s_bool_el_blend, s_bool_dofs_blend;
+         ComputeBoolIndicators(NE, u_new, s_bool_el_blend, s_bool_dofs_blend);
+         fct_solver_b->ScaleProductBounds(dofs.xi_min, dofs.xi_max, u_new,
+                                          s_bool_el_new, s_bool_dofs_blend,
+                                          us_min, us_max);
+
+//         cout << "in mult us_mm: " << us_min(5339) << " "
+//                                   << us_max(5339) << endl;
+
+         sharp_product_sync(u_new, lumpedM,
+                            dofs.xi_min, dofs.xi_max, us_b_new,
+                            s_bool_dofs_blend, s_bool_dofs_new, us_blend);
+         for (int i = 0; i < size; i++) { d_us(i) = (us_blend(i) - us(i))/dt; }
+
+         check_violation(us, d_us, dt, us_min, us_max, "us-blend-mult",
+                         &s_bool_el_blend);
+      }
+      else { d_us = d_us_b; }
+
+//      Vector us_new(size);
+//      add(1.0, us, dt, d_us, us_new);
+//      cout << "in mult u_bound:  " << u_b_new(5339) << endl;
+//      cout << "in mult u_blend:  " << u_new(5339) << endl;
+//      cout << "in mult us: " << us_new(5339) << endl;
 
       d_us.SyncAliasMemory(Y);
    }
