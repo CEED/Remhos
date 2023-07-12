@@ -1339,12 +1339,15 @@ void blend_global(const Vector &u_b, const Vector &u_s, const Vector &m,
    const int size = u_b.Size();
 
    Vector f_clip(size);
+   f_clip = 0.0;
    u.SetSize(size);
 
    // Clip.
    double Sp = 0.0, Sn = 0.0;
    for (int i = 0; i < size; i++)
    {
+      if (u_b(i) < eps) { continue; }
+
       double f_clip_min = u_min(i) - u_b(i);
       double f_clip_max = u_max(i) - u_b(i);
 
@@ -1360,6 +1363,8 @@ void blend_global(const Vector &u_b, const Vector &u_s, const Vector &m,
 
    for (int i = 0; i < size; i++)
    {
+      if (u_b(i) < eps) { u(i) = 0.0; continue; }
+
       if (S > eps && f_clip(i) > 0.0)
       {
          f_clip(i) *= - Sn / Sp;
@@ -1674,8 +1679,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                           s_bool_el_new, s_bool_dofs_blend,
                                           us_min, us_max);
 
-//         cout << "in mult us_mm: " << us_min(5339) << " "
-//                                   << us_max(5339) << endl;
+//         cout << "126 in mult u_bound:  " << u_b_new(126) << endl;
+//         cout << "126 in mult u_blend:  " << u_new(126) << endl;
+//         cout << "126 in mult us_mm: " << us_min(126) << " "
+//                                       << us_max(126) << endl;
 
          sharp_product_sync(u_new, lumpedM,
                             dofs.xi_min, dofs.xi_max, us_b_new,
@@ -1683,7 +1690,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          for (int i = 0; i < size; i++) { d_us(i) = (us_blend(i) - us(i))/dt; }
 
          check_violation(us, d_us, dt, us_min, us_max, "us-blend-mult",
-                         &s_bool_el_blend);
+                         &s_bool_dofs_blend);
       }
       else { d_us = d_us_b; }
 
