@@ -121,6 +121,13 @@ class VariableSystem {
    // ===========
    // = Utility =
    // ===========
+    
+   /**
+    * @brief renormalize the degrees of freedom over the materials
+    * such that the sum of the materials at each dof = 1
+    */
+   void renormalize();
+
    void SyncUvec(){ for(int imat = 0; imat < nmat; ++imat) { u_vec[imat].SyncMemory(udata.GetBlock(imat)); }}
 
    // ==========

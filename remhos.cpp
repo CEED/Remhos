@@ -63,6 +63,7 @@ int nmat = 1;
 /// 0 - no correction
 /// 1 - correction on last material
 /// 2 - evenly distributed
+/// 3 - distribute amoung existing materials per dof
 int sharp_cons_corr = 0;
 
 // 0 is standard transport.
@@ -173,6 +174,7 @@ int main(int argc, char *argv[])
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    int bounds_type = 0;
    bool sharp = false;
+   int renormalization_steps = -1;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -245,7 +247,11 @@ int main(int argc, char *argv[])
       "Material sum correction"
       "0 - no correction"
       "1 - correction accumulated on the final material"
-      "2 - evenly distributed correction");
+      "2 - evenly distributed correction"
+      "3 - distribute amoung existing materials per dof");
+   args.AddOption(&renormalization_steps, "-renorm", "--renormalization-steps",
+      "perform renormalization of material indicators every n timesteps or not if < 0"
+      "Note: this applies directly to the dofs so must use Bernstein polynomials");
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -1056,6 +1062,11 @@ int main(int argc, char *argv[])
       ti++;
       ti_total++;
 
+      // Renormalization
+      if(renormalization_steps > 0 && ti % renormalization_steps == 0){
+         u_system.renormalize();   
+      }
+
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
          double dt_est = adv.GetTimeStepEstimate();
@@ -1530,7 +1541,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       { d_u_last.Add(-1.0, d_u); }
 
       // update the accumulated du if distributed correction
-      if(nmat > 1 && sharp_cons_corr == 2 && ieq < nmat)
+      if(nmat > 1 && (sharp_cons_corr == 2 || sharp_cons_corr == 3) && ieq < nmat)
       { d_u_accumulate.Add(-1.0, d_u); }
 
       // Remap the product field, if there is a product field.
@@ -1600,16 +1611,66 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          d_us.SyncAliasMemory(Y);
       }
    }
-   if(nmat > 1 && sharp_cons_corr == 2){
-      // distribute the difference required for conservation among the materials
-      for(int imat = 0; imat < nmat; ++imat){
-         Vector d_u;
-         d_u.MakeRef(Y, vsize * imat, vsize);
-         double frac = 1.0 / (double) nmat;
-         d_u.Add(frac, d_u_accumulate);
+   if(nmat > 1) {
+      if( sharp_cons_corr == 2 ){
+         // distribute the difference required for material sum = 1 among the materials
+         for(int imat = 0; imat < nmat; ++imat){
+            Vector d_u;
+            d_u.MakeRef(Y, vsize * imat, vsize);
+            double frac = 1.0 / (double) nmat;
+            d_u.Add(frac, d_u_accumulate);
+         }
+      } else if ( sharp_cons_corr == 3 ){
+         // distribute amoung available materials to get material sum = 1
+         for(int idof = 0; idof < vsize; ++idof){
+            // how much needs to be distributed
+            double acc = d_u_accumulate[idof];
+            // list of how much can be distributed before bounds violation
+            // for each material
+            std::vector<double> bound_viol_list(nmat);
+            // create a list of materials that can be distributed to
+            // (du != 0 and wont violate bounds)
+            std::vector<int> imat_list{};
+            // perform the distribution algorithm 
+            // until all the d_u_accumulate has been distributed
+            static constexpr int sweepmax = 10;
+            static constexpr double tol = 1e-6;//4 * std::numeric_limits<double>::epsilon();
+            for(int isweep = 0; isweep < sweepmax && std::abs(acc) > tol; ++isweep){
+               imat_list.clear();// clear out the list of materials that can be distributed to
+               imat_list.reserve(nmat);
+               for(int imat = 0; imat < nmat; ++imat){
+                  double d_u_imat = Y[vsize * imat + idof];
+                  double u_imat = X[vsize * imat + idof];
+                  // branchless calculation for bounds violation
+                  double ustep, a, b, limit1, limit2;
+                  ustep = dt * d_u_imat + u_imat;
+                  a = copysign(ustep, acc);
+                  b = copysign(1 - ustep, acc);
+                  limit1 = abs( 0.5 * (-a + abs(a)) );
+                  limit2 = abs( 0.5 * ( b + abs(b)) );
+                  bound_viol_list[imat] = max(limit1, limit2); // note: this is positive
+                  // if material is present or will be present and there is room to distribute
+                  if( (std::abs(u_imat) > tol || std::abs(d_u_imat) > tol) && bound_viol_list[imat] > tol )
+                     { imat_list.push_back(imat); }
+               }
+
+               // get the amount of acc to distribute
+               double acc_frac = abs(acc / imat_list.size());
+
+               // perform distribution
+               for(int imat : imat_list){
+                  double distributed = copysign(min(acc_frac, bound_viol_list[imat] / dt), acc);
+                  acc -= distributed;
+                  Y[vsize * imat + idof] += distributed;
+               }
+            } // repeat until distributed or hit max sweeps
+            if(abs(acc) > tol){
+//               std::cout << "warning, could not distribute" << std::endl;
+            }
+         }
       }
-   }
-}
+   } // end if nmat > 1
+} // end Mult
 
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                                                const Vector &dx,
@@ -1642,11 +1703,91 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    dt_est = fmin(dt_est, dt);
 }
 
+Vector rescaleICDomain(const Vector &x){
+   int dim = x.Size();
+
+   // map to the reference [-1,1] domain
+   Vector X(dim);
+   for (int i = 0; i < dim; i++)
+   {
+      double center = (bb_min[i] + bb_max[i]) * 0.5;
+      X(i) = 2 * (x(i) - center) / (bb_max[i] - bb_min[i]);
+   }
+   return X;
+}
+
 void mfem::initial_conditions(VariableSystem &u){
-   if(nmat > 1){ // multimaterial adjustment for standard IC
+   // === Custom multimaterial problem setups ===
+   if( problem_num == 20 ){ 
+      MFEM_ASSERT(nmat == 3, "Problem 20 is a 3 material problem set nmat = 3");
+      MFEM_ASSERT((x.Size() > 1), "Problem 20 requires a 2D or above mesh");
+      /// 3 material pie chart
+      auto material_pie_0 = [&](const Vector &x) -> double {
+         Vector X = rescaleICDomain(x);
+         if(X[1] >= X[0] && X[1] >= -X[0]) return 1.0;
+         else return 0.0;
+      };
+      FunctionCoefficient u0(material_pie_0);
+      u[0].ProjectCoefficient(u0);
+
+      auto material_pie_1 = [&](const Vector &x) -> double {
+         Vector X = rescaleICDomain(x);
+         if(X[1] < -X[0] && X[0] < 0) return 1.0;
+         else return 0.0;
+      };
+      FunctionCoefficient u1(material_pie_1);
+      u[1].ProjectCoefficient(u1);
+
+      auto material_pie_2 = [&](const Vector &x) -> double {
+         Vector X = rescaleICDomain(x);
+         if(X[1] < X[0] && X[0] >= 0) return 1.0;
+         else return 0.0;
+      };
+      FunctionCoefficient u2(material_pie_2);
+      u[2].ProjectCoefficient(u2);
+   } else if( problem_num == 21 ) {
+      MFEM_ASSERT(nmat == 3, "Problem 20 is a 3 material problem set nmat = 3");
+      MFEM_ASSERT((x.Size() > 1), "Problem 20 requires a 2D or above mesh");
+      // 2 notched cylinders
+      auto mat_0_func = [&](const Vector &x) -> double {
+         Vector X = rescaleICDomain(x);
+         // define the notched cyliner
+         double centerx = 0.0;
+         double centery = 0.5;
+         double scale = 0.0225;
+         bool in_cylinder = (pow(X(0)-centerx, 2.0) + pow(X(1)-centery, 2.0)) <= 4.0*scale;
+         bool slit = (X(0) <= -0.05) || (X(1) >= 0.05) || (X(1) >= 0.7);
+         return (slit && in_cylinder) ? 1.0 : 0.0;
+      };
+
+      auto mat_1_func = [&](const Vector &x) -> double {
+         Vector X = rescaleICDomain(x);
+         // define the notched cyliner
+         double centerx = 0.0;
+         double centery = -0.5;
+         double scale = 0.0225;
+         bool in_cylinder = (pow(X(0)-centerx, 2.0) + pow(X(1)-centery, 2.0)) <= 4.0*scale;
+         bool slit = (X(0) <= -0.05) || (X(1) >= 0.05) || (X(1) <= -0.7);
+         return (slit && in_cylinder) ? 1.0 : 0.0;
+      };
+
+      auto mat_2_func = [&](const Vector &x) -> double {
+         // inverse of other materials
+         return 1 - (mat_0_func(x) + mat_1_func(x));
+      };
+
+
+      FunctionCoefficient u0(mat_0_func);
+      u[0].ProjectCoefficient(u0);
+      FunctionCoefficient u1(mat_1_func);
+      u[1].ProjectCoefficient(u1);
+      FunctionCoefficient u2(mat_2_func);
+      u[2].ProjectCoefficient(u2);
+
+   } else if(nmat > 1){ // multimaterial adjustment for standard IC
       int neq = u.neq;
       for(int ieq = 0; ieq < neq - 1; ++ieq) {
-         double mat_fraction = 1.0 / (nmat);
+         double mat_fraction = 1.0 / (nmat - 1);
          
          auto mat_frac_u0 = [&](const Vector &x){ return mat_fraction * u0_function(x); };
          FunctionCoefficient u0(mat_frac_u0);
@@ -1765,8 +1906,10 @@ void velocity_function(const Vector &x, Vector &v)
       case 17:
       case 18:
       case 19:
-      case 20: // variable set remap study
-      case 21: // variable set remap study
+      case 20: // 3 mat remap study
+      case 21: // 3 mat remap study
+      case 22:
+      case 23:
       {
          // Taylor-Green deformation used for mesh motion in remap tests.
 

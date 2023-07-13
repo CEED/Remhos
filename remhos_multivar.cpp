@@ -124,6 +124,19 @@ namespace mfem {
          MPI_Allreduce(&max_loc, &field_maxes[ieq], 1, MPI_DOUBLE, MPI_MAX, comm);
       }
    }
+
+   void VariableSystem::renormalize(){
+      int ndof = u_vec[0].Size();
+      for(int idof = 0; idof < ndof; ++idof){
+         double sum = 0.0;
+         for(int imat = 0; imat < nmat; ++imat){
+            sum += udata[imat * ndof + idof];
+         }
+         for(int imat = 0; imat < nmat; ++imat){
+            udata[imat * ndof + idof] /= sum;
+         }
+      }
+   }
       
    void VariableSystem::printGridFunctions(std::string suffix, int precision){
       using namespace std;
