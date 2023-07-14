@@ -1437,7 +1437,6 @@ void sharp_product_sync(const Vector &u, const Vector &m,
          continue;
       }
       if (active_dofs_blend[i] == false)  { us(i) = 0.0; continue; }
-      if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
 
       us(i) = fmin(u(i) * s_max(i), fmax(us_b(i), u(i) * s_min(i)));
       Sp += m(i) * fmax(us(i) - us_b(i), 0.0);
@@ -1462,7 +1461,6 @@ void sharp_product_sync(const Vector &u, const Vector &m,
       for (int i = 0; i < size; i++)
       {
          if (active_dofs_blend[i] == false)  { continue; }
-         if (u(i) < eps || u(i) > 1.0 - eps) { continue; }
 
          double r = us(i) - u(i) * s_min(i);
          if (r > 0.0) { S_max_decr += m(i) * r; }
@@ -1478,7 +1476,6 @@ void sharp_product_sync(const Vector &u, const Vector &m,
       for (int i = 0; i < size; i++)
       {
          if (active_dofs_blend[i] == false)  { continue; }
-         if (u(i) < eps || u(i) > 1.0 - eps) { continue; }
 
          double r = u(i) * s_max(i) - us(i);
          if (r > 0.0) { S_max_incr += m(i) * r; }
@@ -1493,7 +1490,6 @@ void sharp_product_sync(const Vector &u, const Vector &m,
    for (int i = 0; i < size; i++)
    {
       if (active_dofs_blend[i] == false)  { us(i) = 0.0; continue; }
-      if (u(i) < eps || u(i) > 1.0 - eps) { us(i) = us_b(i); continue; }
 
       if (S > 0.0)
       {
