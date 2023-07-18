@@ -108,9 +108,9 @@ private:
    LowOrderMethod &lom;
    DofInfo &dofs;
 
-   HOSolver *ho_solver;
-   LOSolver *lo_solver;
-   FCTSolver *fct_solver;
+   HOSolver *ho_solver_b, *ho_solver_s;
+   LOSolver *lo_solver_b, *lo_solver_s;
+   FCTSolver *fct_solver_b, *fct_solver_s;
    MonolithicSolver *mono_solver;
 
    void UpdateTimeStepEstimate(const Vector &x, const Vector &dx,
@@ -121,12 +121,14 @@ public:
                      BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
-                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *K_HO,
+                     ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *Ksharp,
                      GridFunction &pos, GridFunction *sub_pos,
                      GridFunction &vel, GridFunction &sub_vel,
                      ParGridFunction &u_max_bounds, ParGridFunction &u_max_bounds_grad_dir,
                      Assembly &_asmbl, LowOrderMethod &_lom, DofInfo &_dofs,
-                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                     HOSolver *hos_b, HOSolver *hos_s,
+                     LOSolver *los_b, LOSolver *los_s,
+                     FCTSolver *fct_b, FCTSolver *fct_s,
                      MonolithicSolver *mos);
 
    virtual void Mult(const Vector &x, Vector &y) const;
@@ -135,7 +137,7 @@ public:
    {
       if (tsc == TimeStepControl::LOBoundsError)
       {
-         MFEM_VERIFY(lo_solver,
+         MFEM_VERIFY(lo_solver_b,
                      "The selected time step control requires a LO solver.");
       }
       dt_control = tsc;
@@ -983,7 +985,7 @@ int main(int argc, char *argv[])
    AdvectionOperator adv(u_system.neq, pfes.GetVSize(), u_system.u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
-                         ho_solver, lo_solver, fct_solver, mono_solver);
+                         ho_solver, nullptr, lo_solver, nullptr, fct_solver, nullptr, mono_solver);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1390,7 +1392,9 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, std::vector<ParGridFunc
                                      ParGridFunction &u_max_bounds, ParGridFunction &u_max_bounds_grad_dir,
                                      Assembly &_asmbl,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
-                                     HOSolver *hos, LOSolver *los, FCTSolver *fct,
+                                     HOSolver *hos_b, HOSolver *hos_s,
+                                     LOSolver *los_b, LOSolver *los_s,
+                                     FCTSolver *fct_b, FCTSolver *fct_s,
                                      MonolithicSolver *mos) :
    TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
@@ -1401,7 +1405,9 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, std::vector<ParGridFunc
    u_max_bounds(u_max_bounds), u_max_bounds_grad_dir(u_max_bounds_grad_dir),
    x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
+   ho_solver_b(hos_b), ho_solver_s(hos_s),
+   lo_solver_b(los_b), lo_solver_s(los_s),
+   fct_solver_b(fct_b), fct_solver_s(fct_s), mono_solver(mos) { }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
@@ -1470,7 +1476,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          const int dim = mesh->Dimension(), ne = mesh->GetNE();
          Array<int> bdrs, orientation;
          FaceElementTransformations *Trans;
-         if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver))
+         if (auto RD_ptr = dynamic_cast<const PAResidualDistribution*>(lo_solver_b))
          {
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
@@ -1503,16 +1509,16 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       x_gf = u;
       x_gf.ExchangeFaceNbrData();
       if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
-      else if (fct_solver)
+      else if (fct_solver_b)
       {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+         MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
 
-         lo_solver->CalcLOSolution(u, du_LO);
-         ho_solver->CalcHOSolution(u, du_HO);
+         lo_solver_b->CalcLOSolution(u, du_LO);
+         ho_solver_b->CalcHOSolution(u, du_HO);
 
          dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
          dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-         fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+         fct_solver_b->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                      dofs.xi_min, dofs.xi_max, d_u);
 
          if (dt_control == TimeStepControl::LOBoundsError)
@@ -1520,9 +1526,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
             UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
          }
       }
-      else if (lo_solver)
+      else if (lo_solver_b)
       {
-         lo_solver->CalcLOSolution(u, d_u);
+         lo_solver_b->CalcLOSolution(u, d_u);
 
          if (dt_control == TimeStepControl::LOBoundsError)
          {
@@ -1533,7 +1539,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
       // The HO option must be last, since some LO solvers use the HO. Then if the
       // user only wants to run LO, this order will give him the LO solution.
-      else if (ho_solver) { ho_solver->CalcHOSolution(u, d_u); }
+      else if (ho_solver_b) { ho_solver_b->CalcHOSolution(u, d_u); }
       else { MFEM_ABORT("No solver was chosen."); }
 
       // update the du for the last material if multimaterial
@@ -1555,17 +1561,17 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          x_gf.ExchangeFaceNbrData();
 
          if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
-         else if (fct_solver)
+         else if (fct_solver_b)
          {
-            MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+            MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO and LO solvers.");
 
             Vector d_us_HO(us.Size()), d_us_LO;
-            if (fct_solver->NeedsLOProductInput())
+            if (fct_solver_b->NeedsLOProductInput())
             {
                d_us_LO.SetSize(us.Size());
-               lo_solver->CalcLOSolution(us, d_us_LO);
+               lo_solver_b->CalcLOSolution(us, d_us_LO);
             }
-            ho_solver->CalcHOSolution(us, d_us_HO);
+            ho_solver_b->CalcHOSolution(us, d_us_HO);
 
             // Compute the ratio s = us_old / u_old, and old active dofs.
             Vector s(size);
@@ -1592,7 +1598,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
             Array<bool> s_bool_el_new, s_bool_dofs_new;
             ComputeBoolIndicators(NE, u_new, s_bool_el_new, s_bool_dofs_new);
 
-            fct_solver->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
+            fct_solver_b->CalcFCTProduct(x_gf, lumpedM, d_us_HO, d_us_LO,
                                        dofs.xi_min, dofs.xi_max,
                                        u_new,
                                        s_bool_el_new, s_bool_dofs_new, d_us);
@@ -1604,8 +1610,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
             ComputeMinMaxS(NE, us_new, u_new, myid);
 #endif
          }
-         else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
-         else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
+         else if (lo_solver_b) { lo_solver_b->CalcLOSolution(us, d_us); }
+         else if (ho_solver_b) { ho_solver_b->CalcHOSolution(us, d_us); }
          else { MFEM_ABORT("No solver was chosen."); }
 
          d_us.SyncAliasMemory(Y);
@@ -1633,12 +1639,22 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
             std::vector<int> imat_list{};
             // perform the distribution algorithm 
             // until all the d_u_accumulate has been distributed
-            static constexpr int sweepmax = 10;
+            static constexpr int sweepmax = 3;
             static constexpr double tol = 1e-6;//4 * std::numeric_limits<double>::epsilon();
+            // create the list of materials that are present (maybe need to check within element)
+            std::vector<int> present_materials{};
+            for(int imat = 0; imat < nmat; ++imat)
+            {
+               double d_u_imat = Y[vsize * imat + idof];
+               double u_imat = X[vsize * imat + idof];
+               if( (std::abs(u_imat) > tol || std::abs(d_u_imat) > tol))
+                  { present_materials.push_back(imat); }
+            }
+
             for(int isweep = 0; isweep < sweepmax && std::abs(acc) > tol; ++isweep){
                imat_list.clear();// clear out the list of materials that can be distributed to
                imat_list.reserve(nmat);
-               for(int imat = 0; imat < nmat; ++imat){
+               for(int imat : present_materials){
                   double d_u_imat = Y[vsize * imat + idof];
                   double u_imat = X[vsize * imat + idof];
                   // branchless calculation for bounds violation
@@ -1649,8 +1665,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                   limit1 = abs( 0.5 * (-a + abs(a)) );
                   limit2 = abs( 0.5 * ( b + abs(b)) );
                   bound_viol_list[imat] = max(limit1, limit2); // note: this is positive
-                  // if material is present or will be present and there is room to distribute
-                  if( (std::abs(u_imat) > tol || std::abs(d_u_imat) > tol) && bound_viol_list[imat] > tol )
+                  // if there is room to distribute
+                  if( bound_viol_list[imat] > tol )
                      { imat_list.push_back(imat); }
                }
 
@@ -1665,7 +1681,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                }
             } // repeat until distributed or hit max sweeps
             if(abs(acc) > tol){
-//               std::cout << "warning, could not distribute" << std::endl;
+               std::cout << "warning, could not distribute" << std::endl;
+               std::cout << "bound_viol_list: [" << bound_viol_list[0] << ", "<< bound_viol_list[1] << ", "
+                  << bound_viol_list[2] << "]" <<std::endl;
+               std::cout << "acc: " << acc << std::endl;
             }
          }
       }
