@@ -84,10 +84,72 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+class ReinitAdvCoefficient : public VectorCoefficient {
+   VariableSystem &varsystem;
+   double beta; // proportionality constant
+
+   public:
+   ReinitAdvCoefficient(int ndim, VariableSystem &varsystem, double beta) 
+      : VectorCoefficient(ndim), varsystem(varsystem), beta(beta) {}
+
+   void Eval(Vector &out, ElementTransformation &T, const IntegrationPoint &ip) override {
+      const int ndim = GetVDim();
+      T.SetIntPoint(&ip);
+      double term1 = 1.0; // fill with 1 - indicator sum
+      Vector grad_indicator(ndim);
+      out = 0.0;
+      for(int imat = 0; imat < varsystem.nmat; ++imat){
+         term1 -= varsystem[imat].GetValue(T);
+         varsystem[imat].GetGradient(T, grad_indicator);
+         out.Add(1.0, grad_indicator);
+      }
+      term1 *= beta; // scale by proportionality constant
+      term1 /= out.Norml2(); // normalize gradient
+      out *= term1; // apply scaling
+   }
+};
+
+class ReinitAdvOper : public TimeDependentOperator {
+   
+   int vsize, nmat;
+   ParFiniteElementSpace &pfes;
+   ParBilinearForm &Mbf;
+   ParBilinearForm &Kbf;
+   CGHOSolver solver;
+
+   public:
+   ReinitAdvOper(int vsize, int nmat, ParFiniteElementSpace &pfes, ParBilinearForm &Mbf, ParBilinearForm &Kbf) 
+      : TimeDependentOperator(vsize * nmat), vsize(vsize), nmat(nmat), pfes(pfes), Mbf(Mbf), Kbf(Kbf),
+   solver(pfes, Mbf, Kbf){}
+
+   void Mult(const Vector &X, Vector &Y) const override {
+      X.Read(); Y.Read(); 
+      Vector *xptr = const_cast<Vector*>(&X);
+      Y = 0.0;
+
+      // recalc bilinear forms
+      Kbf.BilinearForm::operator=(0.0);
+      Kbf.Assemble(0);
+      Mbf.BilinearForm::operator=(0.0);
+      Mbf.Assemble(0);
+
+      // solve by CG
+      for(int imat = 0; imat < nmat; ++imat){
+         Vector u, du;  
+         u.MakeRef(*xptr, vsize * imat, vsize);
+         du.MakeRef(Y, vsize * imat, vsize);
+         Vector rhs(u.Size());
+         Kbf.Mult(u, rhs);
+         solver.CalcHOSolution(rhs, du);
+      }
+   }
+};
+
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
    int neq, vsize;
+   ParFiniteElementSpace &pfes;
    std::vector<ParGridFunction> &u_vec;
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
@@ -117,7 +179,8 @@ private:
                                const Vector &x_min, const Vector &x_max) const;
 
 public:
-   AdvectionOperator(int neq, int size, std::vector<ParGridFunction> &u_vec,
+   AdvectionOperator(int neq, int size, ParFiniteElementSpace &pfes,
+                     std::vector<ParGridFunction> &u_vec,
                      BilinearForm &Mbf_, BilinearForm &_ml,
                      Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
@@ -177,6 +240,7 @@ int main(int argc, char *argv[])
    int bounds_type = 0;
    bool sharp = false;
    int renormalization_steps = -1;
+   int reinitialization_steps = -1;
    bool pa = false;
    bool next_gen_full = false;
    int smth_ind_type = 0;
@@ -254,6 +318,9 @@ int main(int argc, char *argv[])
    args.AddOption(&renormalization_steps, "-renorm", "--renormalization-steps",
       "perform renormalization of material indicators every n timesteps or not if < 0"
       "Note: this applies directly to the dofs so must use Bernstein polynomials");
+   args.AddOption(&reinitialization_steps, "-reinit", "--reinitialization-steps",
+      "perform advection based renormalization of material indicators every n timesteps or not if < 0"
+      );
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -526,6 +593,7 @@ int main(int argc, char *argv[])
    {
       k.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
       K_HO.AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
+      Ksharp->AddDomainIntegrator(new ConvectionIntegrator(v_mesh_coeff));
    }
 
    if (ho_type == HOSolverType::CG ||
@@ -546,6 +614,10 @@ int main(int argc, char *argv[])
          auto dgt_b = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
          K_HO.AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_i));
          K_HO.AddBdrFaceIntegrator(new TransposeIntegrator(dgt_b));
+         auto dgt_ii = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         auto dgt_bb = new DGTraceIntegrator(v_mesh_coeff, -1.0, -0.5);
+         Ksharp->AddInteriorFaceIntegrator(new TransposeIntegrator(dgt_ii));
+         Ksharp->AddBdrFaceIntegrator(new TransposeIntegrator(dgt_bb));
 
          if (sharp == true)
          {
@@ -553,11 +625,11 @@ int main(int argc, char *argv[])
             auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
             Ksharp->AddDomainIntegrator(new TransposeIntegrator(ci));
             Ksharp->AddInteriorFaceIntegrator(dgt);
-            Ksharp->KeepNbrBlock(true);
          }
       }
 
       K_HO.KeepNbrBlock(true);
+      Ksharp->KeepNbrBlock(true);
    }
 
    if (pa)
@@ -785,43 +857,51 @@ int main(int argc, char *argv[])
    }
 
    // Setup of the high-order solver (if any).
-   HOSolver *ho_solver = NULL;
+   HOSolver *ho_solver_b = NULL; // bounded
+   HOSolver *ho_solver_s = NULL; // sharpened
    if (ho_type == HOSolverType::Neumann)
    {
-      ho_solver = new NeumannHOSolver(pfes, m, k, lumpedM, asmbl);
+      ho_solver_b = new NeumannHOSolver(pfes, M_HO, K_HO, lumpedM, asmbl);
+      ho_solver_b = new NeumannHOSolver(pfes, M_HO, *Ksharp, lumpedM, asmbl);
    }
    else if (ho_type == HOSolverType::CG)
    {
-      ho_solver = new CGHOSolver(pfes, M_HO, K_HO, Ksharp.get());
+      ho_solver_b = new CGHOSolver(pfes, M_HO, K_HO);
+      ho_solver_s = new CGHOSolver(pfes, M_HO, *Ksharp);
    }
    else if (ho_type == HOSolverType::LocalInverse)
    {
-      ho_solver = new LocalInverseHOSolver(pfes, M_HO, K_HO, Ksharp.get());
+      ho_solver_b = new LocalInverseHOSolver(pfes, M_HO, K_HO);
+      ho_solver_s = new LocalInverseHOSolver(pfes, M_HO, *Ksharp);
    }
 
    // Setup the low order solver (if any).
-   LOSolver *lo_solver = NULL;
-   Array<int> lo_smap;
+   LOSolver *lo_solver_b = NULL;
+   LOSolver *lo_solver_s = NULL;
+   Array<int> lo_smap_b, lo_smap_s;
    const bool time_dep = (exec_mode == 0) ? false : true;
    if (lo_type == LOSolverType::DiscrUpwind)
    {
       if (sharp == true)
       {
-         lo_smap = SparseMatrix_Build_smap(K_HO.SpMat());
-         lo_solver = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap,
+         lo_smap_b = SparseMatrix_Build_smap(K_HO.SpMat());
+         lo_solver_b = new DiscreteUpwind(pfes, K_HO.SpMat(), lo_smap_b,
+                                        lumpedM, asmbl, time_dep, false);
+         lo_smap_s = SparseMatrix_Build_smap(Ksharp->SpMat());
+         lo_solver_s = new DiscreteUpwind(pfes, Ksharp->SpMat(), lo_smap_s,
                                         lumpedM, asmbl, time_dep, false);
       }
       else
       {
-         lo_smap = SparseMatrix_Build_smap(k.SpMat());
-         lo_solver = new DiscreteUpwind(pfes, k.SpMat(), lo_smap,
+         lo_smap_b = SparseMatrix_Build_smap(k.SpMat());
+         lo_solver_b = new DiscreteUpwind(pfes, k.SpMat(), lo_smap_b,
                                         lumpedM, asmbl, time_dep, true);
       }
    }
    else if (lo_type == LOSolverType::DiscrUpwindPrec)
    {
-      lo_smap = SparseMatrix_Build_smap(lom.pk->SpMat());
-      lo_solver = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap,
+      lo_smap_b = SparseMatrix_Build_smap(lom.pk->SpMat());
+      lo_solver_b = new DiscreteUpwind(pfes, lom.pk->SpMat(), lo_smap_b,
                                      lumpedM, asmbl, time_dep, true);
    }
    else if (lo_type == LOSolverType::ResDist)
@@ -829,12 +909,12 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = false;
       if (pa)
       {
-         lo_solver = new PAResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new PAResidualDistribution(pfes, *Ksharp, asmbl, lumpedM,
                                                 subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
             const PAResidualDistribution *RD_ptr =
-               dynamic_cast<const PAResidualDistribution*>(lo_solver);
+               dynamic_cast<const PAResidualDistribution*>(lo_solver_b);
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
             RD_ptr->SetupPA(FaceType::Interior);
@@ -843,7 +923,7 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new ResidualDistribution(pfes, *Ksharp, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
       }
    }
@@ -852,12 +932,12 @@ int main(int argc, char *argv[])
       const bool subcell_scheme = true;
       if (pa)
       {
-         lo_solver = new PAResidualDistributionSubcell(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new PAResidualDistributionSubcell(pfes, *Ksharp, asmbl, lumpedM,
                                                        subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
             const PAResidualDistributionSubcell *RD_ptr =
-               dynamic_cast<const PAResidualDistributionSubcell*>(lo_solver);
+               dynamic_cast<const PAResidualDistributionSubcell*>(lo_solver_b);
             RD_ptr->SampleVelocity(FaceType::Interior);
             RD_ptr->SampleVelocity(FaceType::Boundary);
             RD_ptr->SetupPA(FaceType::Interior);
@@ -866,15 +946,19 @@ int main(int argc, char *argv[])
       }
       else
       {
-         lo_solver = new ResidualDistribution(pfes, k, asmbl, lumpedM,
+         lo_solver_b = new ResidualDistribution(pfes, *Ksharp, asmbl, lumpedM,
                                               subcell_scheme, time_dep);
       }
    }
    else if (lo_type == LOSolverType::MassBased)
    {
-      MFEM_VERIFY(ho_solver != nullptr,
+      MFEM_VERIFY(ho_solver_b != nullptr,
                   "Mass-Based LO solver requires a choice of a HO solver.");
-      lo_solver = new MassBasedAvg(pfes, *ho_solver,
+      lo_solver_b = new MassBasedAvg(pfes, *ho_solver_b,
+                                   (exec_mode == 1) ? &v_gf : nullptr);
+      MFEM_VERIFY(ho_solver_s != nullptr,
+                  "Mass-Based LO solver requires a choice of a HO solver.");
+      lo_solver_s = new MassBasedAvg(pfes, *ho_solver_s,
                                    (exec_mode == 1) ? &v_gf : nullptr);
    }
 
@@ -896,6 +980,17 @@ int main(int argc, char *argv[])
                                      subcell_scheme, time_dep, mass_lim);
    }
 
+   double reinit_beta = 0.001;
+   ReinitAdvCoefficient reinitadv_coeff(pmesh.Dimension(), u_system, reinit_beta);
+   ParBilinearForm K_reinit(&pfes);
+   K_reinit.AddDomainIntegrator(new ConvectionIntegrator(reinitadv_coeff));
+   K_reinit.AddBdrFaceIntegrator(new DGTraceIntegrator(reinitadv_coeff, 1.0, -0.5));
+   K_reinit.Assemble(0);
+   K_reinit.Finalize(0);
+
+   ReinitAdvOper reinit_oper(pfes.GetVSize(), u_system.nmat, u_system.pfes, M_HO, K_reinit);
+
+
    // Print the starting meshes and initial condition.
    ofstream meshHO("meshHO_init.mesh");
    meshHO.precision(precision);
@@ -911,11 +1006,17 @@ int main(int argc, char *argv[])
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
    DataCollection *dc = NULL;
+   Vector v_diff_vec(pfes.GetVSize() * v_diff_coeff.GetVDim());
+   ParGridFunction v_diff_gf(&pfes, v_diff_vec);
    if (visit)
    {
       dc = new VisItDataCollection("Remhos", &pmesh);
       dc->SetPrecision(precision);
       u_system.initDataCollection(dc);
+      // TODO: causes segfault
+      //v_diff_gf.ProjectCoefficient(v_diff_coeff);
+      //dc->RegisterField("v_diff_coeff", &v_diff_gf);
+      
       dc->SetCycle(0);
       dc->SetTime(0.0);
       dc->Save();
@@ -957,7 +1058,8 @@ int main(int argc, char *argv[])
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
-   FCTSolver *fct_solver = NULL;
+   FCTSolver *fct_solver_b = NULL;
+   FCTSolver *fct_solver_s = NULL;
    if (fct_type == FCTSolverType::FluxBased)
    {
       MFEM_VERIFY(pa == false, "Flux-based FCT and PA are incompatible.");
@@ -966,26 +1068,29 @@ int main(int argc, char *argv[])
       K_HO.SpMat().HostReadData();
       K_HO_smap = SparseMatrix_Build_smap(K_HO.SpMat());
       const int fct_iterations = 1;
-      fct_solver = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
+      fct_solver_b = new FluxBasedFCT(pfes, smth_indicator, dt, K_HO.SpMat(),
                                     K_HO_smap, M_HO.SpMat(), fct_iterations);
    }
    else if (fct_type == FCTSolverType::ClipScale)
    {
-      fct_solver = new ClipScaleSolver(pfes, smth_indicator, dt);
+      fct_solver_b = new ClipScaleSolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::NonlinearPenalty)
    {
-      fct_solver = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
+      fct_solver_b = new NonlinearPenaltySolver(pfes, smth_indicator, dt);
    }
    else if (fct_type == FCTSolverType::FCTProject)
    {
-      fct_solver = new ElementFCTProjection(pfes, dt);
+      fct_solver_b = new ElementFCTProjection(pfes, dt);
+      fct_solver_s = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(u_system.neq, pfes.GetVSize(), u_system.u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
+   AdvectionOperator adv(u_system.neq, pfes.GetVSize(), pfes, 
+                         u_system.u_vec, m, ml, lumpedM, k, M_HO, K_HO, Ksharp.get(),
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
-                         ho_solver, nullptr, lo_solver, nullptr, fct_solver, nullptr, mono_solver);
+                         ho_solver_b, ho_solver_s, lo_solver_b, lo_solver_s,
+                         fct_solver_b, fct_solver_s, mono_solver);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1026,8 +1131,10 @@ int main(int argc, char *argv[])
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      if (lo_solver_b)  { lo_solver_b->UpdateTimeStep(dt_real); }
+      if (fct_solver_b) { fct_solver_b->UpdateTimeStep(dt_real); }
+      if (lo_solver_s)  { lo_solver_s->UpdateTimeStep(dt_real); }
+      if (fct_solver_s) { fct_solver_s->UpdateTimeStep(dt_real); }
 
       if (product_sync)
       {
@@ -1067,6 +1174,16 @@ int main(int argc, char *argv[])
       // Renormalization
       if(renormalization_steps > 0 && ti % renormalization_steps == 0){
          u_system.renormalize();   
+      }
+      // reinitialization
+      if(reinitialization_steps > 0 && ti % reinitialization_steps == 0) {
+         double dt = 1.0;
+         ForwardEulerSolver ode2_solver{};
+         ode2_solver.Init(reinit_oper);
+         for(int i = 0; i < reinitialization_steps; ++i){
+            double t = i * dt;
+            ode2_solver.Step(u_system.udata, t, dt);
+         }
       }
 
       if (dt_control != TimeStepControl::FixedTimeStep)
@@ -1245,6 +1362,7 @@ int main(int argc, char *argv[])
             dc->SetCycle(ti);
             dc->SetTime(t);
             u_system.updateDataCollectionFields();
+//            v_diff_gf.ProjectCoefficient(v_diff_coeff);
             dc->Save();
          }
       }
@@ -1360,9 +1478,11 @@ int main(int argc, char *argv[])
 
    // Free the used memory.
    delete mono_solver;
-   delete fct_solver;
+   delete fct_solver_b;
+   if(fct_solver_s) delete fct_solver_s;
    delete smth_indicator;
-   delete ho_solver;
+   delete ho_solver_b;
+   if(ho_solver_s) delete ho_solver_s;
 
    delete ode_solver;
    delete mesh_fec;
@@ -1383,7 +1503,77 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(int neq, int vsize, std::vector<ParGridFunction> &u_vec,
+void global_blend(ParFiniteElementSpace &pfes, double dt,
+         const ParGridFunction &u, const Vector &m,
+         const Vector &du_s, const Vector &du_b,
+         const Vector &u_min, const Vector &u_max,
+         Vector &du)
+{
+   const int NE = pfes.GetMesh()->GetNE();
+   const int nd = pfes.GetFE(0)->GetDof();
+   Vector f_clip(nd*NE);
+
+   int dof_id;
+   double sumPos, sumNeg, u_new_ho, u_new_lo, new_mass, f_clip_min, f_clip_max;
+   double umin, umax;
+   const double eps = 1.0e-15;
+
+   u.HostRead();
+   m.HostRead();
+   du.HostReadWrite();
+   du_b.HostRead(); du_s.HostRead();
+
+   sumPos = sumNeg = 0.0;
+   // Clip.
+   for (int j = 0; j < NE*nd; j++)
+   {
+      dof_id = j;
+
+      u_new_ho   = u(dof_id) + dt * du_s(dof_id);
+      u_new_lo   = u(dof_id) + dt * du_b(dof_id);
+
+      umin = u_min(dof_id);
+      umax = u_max(dof_id);
+
+      f_clip_min = m(dof_id) / dt * (umin - u_new_lo);
+      f_clip_max = m(dof_id) / dt * (umax - u_new_lo);
+
+      f_clip(j) = m(dof_id) * (du_s(dof_id) - du_b(dof_id));
+      f_clip(j) = fmin(f_clip_max, fmax(f_clip_min, f_clip(j)));
+
+      sumNeg += fmin(f_clip(j), 0.0);
+      sumPos += fmax(f_clip(j), 0.0);
+   }
+
+   new_mass = sumNeg + sumPos;
+   MPI_Allreduce(MPI_IN_PLACE, &new_mass, 1, MPI_DOUBLE, MPI_SUM, pfes.GetComm());
+       MPI_Allreduce(MPI_IN_PLACE, &sumNeg, 1, MPI_DOUBLE, MPI_SUM, pfes.GetParMesh()->GetComm());
+       MPI_Allreduce(MPI_IN_PLACE, &sumPos, 1, MPI_DOUBLE, MPI_SUM, pfes.GetParMesh()->GetComm());
+
+   // Rescale.
+   for (int j = 0; j < NE*nd; j++)
+   {
+      if (new_mass > eps)
+      {
+         f_clip(j) = min(0.0, f_clip(j)) -
+                     max(0.0, f_clip(j)) * sumNeg / sumPos;
+      }
+      if (new_mass < -eps)
+      {
+         f_clip(j) = max(0.0, f_clip(j)) -
+                     min(0.0, f_clip(j)) * sumPos / sumNeg;
+      }
+
+      // Set du to the discrete time derivative featuring the high order
+      // anti-diffusive reconstruction that leads to an forward Euler
+      // updated admissible solution.
+      dof_id = j;
+      du(dof_id) = du_b(dof_id) + f_clip(j) / m(dof_id);
+   }
+}
+
+AdvectionOperator::AdvectionOperator(int neq, int vsize, ParFiniteElementSpace &pfes,
+                                     std::vector<ParGridFunction> &u_vec,
                                      BilinearForm &Mbf_, BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_, ParBilinearForm *Ksharp,
@@ -1396,7 +1586,7 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, std::vector<ParGridFunc
                                      LOSolver *los_b, LOSolver *los_s,
                                      FCTSolver *fct_b, FCTSolver *fct_s,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), pfes(pfes), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -1541,6 +1731,18 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       // user only wants to run LO, this order will give him the LO solution.
       else if (ho_solver_b) { ho_solver_b->CalcHOSolution(u, d_u); }
       else { MFEM_ABORT("No solver was chosen."); }
+
+      // Sharp solution (won't be bounded)
+      if(Ksharp){
+         Vector d_u_s(size), d_u_s_LO(size), d_u_s_HO(size);
+         Vector d_u_b = d_u;
+         lo_solver_s->CalcLOSolution(u, d_u_s_LO);
+         ho_solver_s->CalcHOSolution(u, d_u_s_HO);
+         fct_solver_s->CalcFCTSolution(x_gf, lumpedM, d_u_s_HO, d_u_s_LO,
+            dofs.xi_min, dofs.xi_max, d_u_s);
+         // perform the global blending with the sharpened solution
+         global_blend(pfes, dt, x_gf, lumpedM, d_u_s, d_u_b, dofs.xi_min, dofs.xi_max, d_u);
+      }
 
       // update the du for the last material if multimaterial
       if(nmat > 1 && sharp_cons_corr == 1 && ieq < nmat - 1)

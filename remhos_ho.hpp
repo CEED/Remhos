@@ -41,13 +41,8 @@ class CGHOSolver : public HOSolver
 {
 protected:
    ParBilinearForm &M, &K;
-   ParBilinearForm *Ksharp;
 
 public:
-   CGHOSolver(ParFiniteElementSpace &space,
-              ParBilinearForm &Mbf, ParBilinearForm &Kbf,
-              ParBilinearForm *Ksharp);
-
    CGHOSolver(ParFiniteElementSpace &space,
               ParBilinearForm &Mbf, ParBilinearForm &Kbf);
 
@@ -58,20 +53,15 @@ class LocalInverseHOSolver : public HOSolver
 {
 protected:
    ParBilinearForm &M, &K;
-   ParBilinearForm *Ksharp;
 
 public:
-   LocalInverseHOSolver(ParFiniteElementSpace &space,
-                        ParBilinearForm &Mbf, ParBilinearForm &Kbf,
-                        ParBilinearForm *Ksharp);
-
    LocalInverseHOSolver(ParFiniteElementSpace &space,
                         ParBilinearForm &Mbf, ParBilinearForm &Kbf);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
 };
 
-class Assembly; // Forward Declaration
+class Assembly;
 
 class NeumannHOSolver : public HOSolver
 {
