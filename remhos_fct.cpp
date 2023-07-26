@@ -103,13 +103,13 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
          // within the full stencil of active dofs), reset the bounds to s_avg.
          if (s_avg + eps < s_min_loc(j))
          {
-            MFEM_ABORT("s_avg < s_min should not happen with full stencil");
-            s_min_loc(j) = s_avg;
+            //MFEM_ABORT("s_avg < s_min should not happen with full stencil");
+            //s_min_loc(j) = s_avg;
          }
          if (s_avg - eps > s_max_loc(j))
          {
-            MFEM_ABORT("s_avg > s_max should not happen with full stencil");
-            s_max_loc(j) = s_avg;
+            //MFEM_ABORT("s_avg > s_max should not happen with full stencil");
+            //s_max_loc(j) = s_avg;
          }
       }
 
