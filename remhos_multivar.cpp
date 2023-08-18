@@ -200,19 +200,5 @@ namespace mfem {
          indicator_sum_gf.ProjectCoefficient(sum_coeffs.back());
       }
    }
-
-
-   void VariableSystem::printSmoothnessIndicator(std::string suffix, int precision, SmoothnessIndicator *smth_indicator)
-   {
-      for(int imat = 0; imat < nmat; ++imat){
-         ParGridFunction si_val;
-         smth_indicator->ComputeSmoothnessIndicator(u_vec[imat], si_val);
-         {
-            std::ofstream smth("si_mat" + std::to_string(imat) + suffix + ".gf");
-            smth.precision(8);
-            si_val.SaveAsOne(smth);
-         }
-      }
-   }
 }
 

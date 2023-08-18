@@ -16,6 +16,11 @@
 
 #include "remhos_tools.hpp"
 
+ extern "C" void
+ dgesvd_(char *JOBU, char *JOBVT, int *M, int *N, double *A, int *LDA,
+         double *S, double *U, int *LDU, double *VT, int *LDVT, double *WORK,
+         int *LWORK, int *INFO);
+
 using namespace std;
 
 namespace mfem
@@ -1143,6 +1148,125 @@ void VelocityCoefficient::Eval(Vector &v, ElementTransformation &T,
    else { v = v_new; }
 }
 
+void proj(Vector u, Vector v){
+   double mult = (v * u) / (u * u);
+   u *= mult;
+}
+
+void SharpVelocityCoefficient::Eval(
+   Vector &v, ElementTransformation &T, const IntegrationPoint &ip
+) {
+   v = 0.0;
+   T.SetIntPoint(&ip);
+   // Get the mesh velocity
+   Vector u_mesh(space_dim);
+   v_coeff.Eval(u_mesh, T, ip);
+
+   // Get the material indicator values and gradients at the integration point
+   Vector eta_vals(nmat);
+   std::vector<Vector> eta_grad_vals(nmat);
+
+   for(int imat = 0; imat < nmat; ++imat){
+      eta_grad_vals.resize(space_dim);
+      eta_vals[imat] = etas[imat].GetValue(T, ip);
+      etas_grad[imat].GetVectorValue(T, ip, eta_grad_vals[imat]);
+   }
+
+   double u_mesh_mag = sqrt(u_mesh * u_mesh);
+  
+   /* more constraint version (set all gradient direction = 0)
+   DenseMatrix constraintMat{};
+   constraintMat.SetSize(space_dim, nmat);
+   // Generate the matrix of constraints
+   for(int idim = 0; idim < space_dim; ++idim){
+      for(int imat = 0; imat < nmat; ++imat){
+         constraintMat(idim, imat) = -(1 - pow(eta_vals[imat], 2)) 
+            * u_mesh_mag * eta_grad_vals[imat][idim];
+      }
+   }
+
+   // lapack svd
+   double *a = constraintMat.GetData();
+   char jobu = 'N';
+   char jobvt = 'A';
+   int m = constraintMat.Height();
+   int n = constraintMat.Width();
+   Vector sv(min(m, n));
+   double *s = sv.GetData();
+   double *u = NULL;
+   DenseMatrix VT{};
+   VT.SetSize(n, n);
+   double *vt = VT.GetData();
+   double *work = NULL;
+   int lwork = -1;
+   int info;
+   double qwork;
+
+   dgesvd_(&jobu, &jobvt, &m, &n, a, &m, s, u, &m, vt, &n, &qwork, &lwork, &info);
+   
+   lwork = (int) qwork;
+   work = new double[lwork];
+   dgesvd_(&jobu, &jobvt, &m, &n, a, &m, s, u, &m, vt, &n, work, &lwork, &info);
+   delete[] work;
+   if(info){
+      mfem::err << "Error in lapack svd" << endl;
+   }
+
+   // Generate a normalized nullspace for the constraint (sum of sharp vel = 0)
+   // pick the vector with coefficients are closest to even distribution
+   double dist = std::numeric_limits<double>::max();
+   Vector sigmas(nmat);
+      
+   for(int imat = 0; imat < nmat; ++imat) 
+      if(imat > sv.Size() || (imat <= sv.Size() && abs(sv[imat]) < 1e-8)) 
+      {
+      // get the right singular vector in the nullspace
+      // since lapack assumes rowwise storage, the singular vectors are the columns of VT
+      double *v_i = VT.GetColumn(imat);
+      double dist2 = 0;
+      for(int k = 0; k < n; ++k) dist2 += (1 - v_i[k]) * (1 - v_i[k]);
+      if(dist2 < dist){
+         dist = dist2;
+         sigmas = v_i;
+      }
+   }
+   */
+
+   // super naive nullspace generation
+   Vector sigmas(nmat);
+   double dist = std::numeric_limits<double>::max();
+   for(int imat = 0; imat < nmat; ++imat){
+      // set all other materials sigmas = 1
+      // then find what this one needs to be
+      // then normalize
+      Vector sigmas_i(nmat);
+      sigmas_i = 1;
+      double sum = 0;
+      for(int jmat = 0; jmat < nmat; ++jmat) if(jmat != imat) {
+         double grad_etaj_dot = eta_grad_vals[jmat] * eta_grad_vals[jmat];
+         sum -= (1 - pow(eta_vals[jmat], 2)) * u_mesh_mag * grad_etaj_dot;
+      }
+      if(sum >= 0){ // want a positive sharpening term
+         sigmas_i[imat] = sum;
+         sigmas_i /= sigmas_i.Norml2(); // normalize
+         double dist2 = 0;
+         for(int k = 0; k < nmat; ++k) dist2 += pow(1 - sigmas_i[k], 2);
+         if(dist2 < dist){
+            dist = dist2;
+            sigmas = sigmas_i;
+         }
+      }
+   }
+
+   sigmas /= max(1e-4, sigmas.Norml2()) * 10;
+//   sigmas = 2.0;
+  
+   if(eta_vals[selected_mat] + 1e-12 < 1.0) {
+      v.Add(-sigmas[selected_mat] * (1 - pow(eta_vals[selected_mat],2)) * u_mesh_mag, eta_grad_vals[selected_mat]);
+   }
+
+}
+
 int GetLocalFaceDofIndex3D(int loc_face_id, int face_orient,
                            int face_dof_id, int face_dof1D_cnt)
 {
@@ -1603,5 +1727,18 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
    }
    while (connection_failed);
 }
+
+   void VariableSystem::printSmoothnessIndicator(std::string suffix, int precision, SmoothnessIndicator *smth_indicator)
+   {
+      for(int imat = 0; imat < nmat; ++imat){
+         ParGridFunction si_val;
+         smth_indicator->ComputeSmoothnessIndicator(u_vec[imat], si_val);
+         {
+            std::ofstream smth("si_mat" + std::to_string(imat) + suffix + ".gf");
+            smth.precision(8);
+            si_val.SaveAsOne(smth);
+         }
+      }
+   }
 
 } // namespace mfem

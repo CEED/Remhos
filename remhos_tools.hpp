@@ -19,6 +19,7 @@
 
 #include "mfem.hpp"
 #include "general/forall.hpp"
+#include "remhos_multivar.hpp"
 
 namespace mfem
 {
@@ -282,6 +283,30 @@ public:
 
    virtual void Eval(Vector &v, ElementTransformation &T,
                      const IntegrationPoint &ip);
+};
+
+class SharpVelocityCoefficient: public VectorCoefficient 
+{
+private:
+   int space_dim, nmat, selected_mat = 0;
+   std::vector<ParGridFunction> &etas;
+   std::vector<ParGridFunction> &etas_grad;
+   VectorCoefficient &v_coeff;
+
+public:
+   void SelectMat(int imat){ selected_mat = imat; }
+
+   SharpVelocityCoefficient(
+      int space_dim_arg,
+      int nmat,
+      std::vector<ParGridFunction> &etas,
+      std::vector<ParGridFunction> &etas_grad,
+      VectorCoefficient &v_coeff
+   ) : VectorCoefficient(space_dim_arg), space_dim(space_dim_arg),
+      nmat(nmat), etas(etas), etas_grad(etas_grad),
+      v_coeff(v_coeff) {}
+
+   void Eval(Vector &v, ElementTransformation &T, const IntegrationPoint &ip) override;
 };
 
 class NormalGradCoeff : public VectorCoefficient

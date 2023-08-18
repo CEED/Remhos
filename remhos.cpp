@@ -32,6 +32,7 @@
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include <fenv.h>
 #include <numeric>
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
@@ -65,6 +66,7 @@ int nmat = 1;
 /// 2 - evenly distributed
 /// 3 - distribute amoung existing materials per dof
 int sharp_cons_corr = 0;
+bool do_global_blend = false;
 
 // 0 is standard transport.
 // 1 is standard remap (mesh moves, solution is fixed).
@@ -104,21 +106,22 @@ class ReinitAdvCoefficient : public VectorCoefficient {
          out.Add(1.0, grad_indicator);
       }
       term1 *= beta; // scale by proportionality constant
-      term1 /= out.Norml2(); // normalize gradient
+      term1 /= std::max(1e-8, out.Norml2()); // normalize gradient
       out *= term1; // apply scaling
    }
 };
 
-class ReinitAdvOper : public TimeDependentOperator {
+
+class ReinitDiffOper : public TimeDependentOperator {
    
    int vsize, nmat;
    ParFiniteElementSpace &pfes;
-   ParBilinearForm &Mbf;
-   ParBilinearForm &Kbf;
-   CGHOSolver solver;
+   ParBilinearForm &Mbf; // mass matrix
+   ParBilinearForm &Kbf; // Diffusion bilinearform
+   LocalInverseHOSolver solver;
 
    public:
-   ReinitAdvOper(int vsize, int nmat, ParFiniteElementSpace &pfes, ParBilinearForm &Mbf, ParBilinearForm &Kbf) 
+   ReinitDiffOper(int vsize, int nmat, ParFiniteElementSpace &pfes, ParBilinearForm &Mbf, ParBilinearForm &Kbf) 
       : TimeDependentOperator(vsize * nmat), vsize(vsize), nmat(nmat), pfes(pfes), Mbf(Mbf), Kbf(Kbf),
    solver(pfes, Mbf, Kbf){}
 
@@ -133,15 +136,29 @@ class ReinitAdvOper : public TimeDependentOperator {
       Mbf.BilinearForm::operator=(0.0);
       Mbf.Assemble(0);
 
-      // solve by CG
+      // assemble parmatrix
+      HypreParMatrix *K = Kbf.ParallelAssemble();
+
+      feenableexcept(FE_DIVBYZERO);
+      // solve by local inverse
       for(int imat = 0; imat < nmat; ++imat){
-         Vector u, du;  
+         Vector u, du(vsize);
+         du = 0.0;
          u.MakeRef(*xptr, vsize * imat, vsize);
-         du.MakeRef(Y, vsize * imat, vsize);
          Vector rhs(u.Size());
-         Kbf.Mult(u, rhs);
+         K->Mult(u, rhs);
          solver.CalcHOSolution(rhs, du);
+
+         // scatter to all materials
+         for(int jmat = 0; jmat < nmat; ++jmat){
+            Vector du_j;
+            du_j.MakeRef(Y, vsize * jmat, vsize);
+            du_j.Add(1.0, rhs);
+         }
       }
+
+      delete K;
+      feclearexcept(FE_ALL_EXCEPT);
    }
 };
 
@@ -160,6 +177,7 @@ private:
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
    ParGridFunction &u_max_bounds, &u_max_bounds_grad_dir;
 
+   SharpVelocityCoefficient &v_diff_coeff;
    mutable ParGridFunction x_gf;
 
    double dt;
@@ -192,7 +210,8 @@ public:
                      HOSolver *hos_b, HOSolver *hos_s,
                      LOSolver *los_b, LOSolver *los_s,
                      FCTSolver *fct_b, FCTSolver *fct_s,
-                     MonolithicSolver *mos);
+                     MonolithicSolver *mos,
+                     SharpVelocityCoefficient &v_diff_coeff);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -321,6 +340,9 @@ int main(int argc, char *argv[])
    args.AddOption(&reinitialization_steps, "-reinit", "--reinitialization-steps",
       "perform advection based renormalization of material indicators every n timesteps or not if < 0"
       );
+   args.AddOption(&do_global_blend, "--global-blend", "--no-global-blend", "-gb", "-no-gb",
+      "perform global blending"
+   );
    args.AddOption(&pa, "-pa", "--partial-assembly", "-no-pa",
                   "--no-partial-assembly",
                   "Enable or disable partial assembly for the HO solution.");
@@ -507,7 +529,12 @@ int main(int argc, char *argv[])
                          lin_pfes_grad(&pmesh, &lin_fec, dim);
    ParGridFunction u_max_bounds(&lin_pfes);
    ParGridFunction u_max_bounds_grad_dir(&lin_pfes_grad);
+
+   std::vector<ParGridFunction> mat_max_bounds(nmat, &lin_pfes);
+   std::vector<ParGridFunction> mat_max_bounds_grad(nmat, &lin_pfes_grad);
+
    u_max_bounds = 1.0;
+   for(int imat = 0; imat < nmat; ++imat) mat_max_bounds[imat] = 1.0;
 
    ParFiniteElementSpace lin_vec_pfes(&pmesh, &lin_fec, dim);
    ParGridFunction v_new_vis(&lin_vec_pfes);
@@ -518,6 +545,7 @@ int main(int argc, char *argv[])
    DG_FECollection fec(order, dim, btype);
    ParFiniteElementSpace pfes(&pmesh, &fec);
 
+   VariableSystem u_system(nmat, varset, pfes);
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
                               mono_type != MonolithicSolverType::None;
@@ -577,8 +605,9 @@ int main(int argc, char *argv[])
    VelocityCoefficient v_new_coeff_rem(v_mesh_coeff, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 1, false);
 
-   VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
-                                    u_max_bounds_grad_dir, 1.0, 1, true);
+//   VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
+//                                    u_max_bounds_grad_dir, 1.0, 1, true);
+   SharpVelocityCoefficient v_diff_coeff(pfes.GetMesh()->Dimension(), nmat, mat_max_bounds, mat_max_bounds_grad, v_mesh_coeff);
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -819,7 +848,6 @@ int main(int argc, char *argv[])
 
    Assembly asmbl(dof_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
-   VariableSystem u_system(nmat, varset, pfes);
 
    //initial conditions
    initial_conditions(u_system);
@@ -980,15 +1008,19 @@ int main(int argc, char *argv[])
                                      subcell_scheme, time_dep, mass_lim);
    }
 
-   double reinit_beta = 0.001;
+   double reinit_beta = 0.1;
    ReinitAdvCoefficient reinitadv_coeff(pmesh.Dimension(), u_system, reinit_beta);
    ParBilinearForm K_reinit(&pfes);
-   K_reinit.AddDomainIntegrator(new ConvectionIntegrator(reinitadv_coeff));
-   K_reinit.AddBdrFaceIntegrator(new DGTraceIntegrator(reinitadv_coeff, 1.0, -0.5));
+   ConstantCoefficient mu(0.1);
+   double sigma = -1.0;
+   double kappa = (order + 1) * (order + 1);
+   K_reinit.AddDomainIntegrator(new DiffusionIntegrator(mu));
+   K_reinit.AddInteriorFaceIntegrator(new DGDiffusionIntegrator(mu, sigma, kappa));
+   //K_reinit.AddBdrFaceIntegrator(new DGDiffusionIntegrator(mu, sigma, kappa));
    K_reinit.Assemble(0);
    K_reinit.Finalize(0);
 
-   ReinitAdvOper reinit_oper(pfes.GetVSize(), u_system.nmat, u_system.pfes, M_HO, K_reinit);
+   ReinitDiffOper reinit_oper(pfes.GetVSize(), u_system.nmat, u_system.pfes, M_HO, K_reinit);
 
 
    // Print the starting meshes and initial condition.
@@ -1090,7 +1122,7 @@ int main(int argc, char *argv[])
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
                          ho_solver_b, ho_solver_s, lo_solver_b, lo_solver_s,
-                         fct_solver_b, fct_solver_s, mono_solver);
+                         fct_solver_b, fct_solver_s, mono_solver, v_diff_coeff);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1165,6 +1197,11 @@ int main(int argc, char *argv[])
             v_new_vis.ProjectCoefficient(v_new_coeff_rem);
          }
       }
+      
+      // Update the gradients for velocity coefficient
+      for(int imat = 0; imat < nmat; ++imat){
+         dof_info.ComputeLinMaxBound(u_system[imat], mat_max_bounds[imat], mat_max_bounds_grad[imat]);
+      }
 
       udata_old = u_system.udata;
       ode_solver->Step(u_system.udata, t, dt_real);
@@ -1176,14 +1213,20 @@ int main(int argc, char *argv[])
          u_system.renormalize();   
       }
       // reinitialization
+      const int n_reinit = 100;
       if(reinitialization_steps > 0 && ti % reinitialization_steps == 0) {
-         double dt = 1.0;
-         ForwardEulerSolver ode2_solver{};
-         ode2_solver.Init(reinit_oper);
-         for(int i = 0; i < reinitialization_steps; ++i){
-            double t = i * dt;
-            ode2_solver.Step(u_system.udata, t, dt);
-         }
+         if(myid == 0) std::cout << "reinitialize step\n";
+         GMRESSolver solver(pfes.GetComm());
+         solver.SetOperator(reinit_oper);
+         Vector rhs(u_system.udata.Size());
+         rhs = 0.0;
+//         double dt = 0.00001;
+//         ForwardEulerSolver ode2_solver{};
+//         ode2_solver.Init(reinit_oper);
+//         for(int i = 0; i < n_reinit; ++i){
+//            double t = i * dt;
+//            ode2_solver.Step(u_system.udata, t, dt);
+//         }
       }
 
       if (dt_control != TimeStepControl::FixedTimeStep)
@@ -1585,7 +1628,7 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, ParFiniteElementSpace &
                                      HOSolver *hos_b, HOSolver *hos_s,
                                      LOSolver *los_b, LOSolver *los_s,
                                      FCTSolver *fct_b, FCTSolver *fct_s,
-                                     MonolithicSolver *mos) :
+                                     MonolithicSolver *mos, SharpVelocityCoefficient &v_diff_coeff) :
    TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), pfes(pfes), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
@@ -1597,11 +1640,14 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, ParFiniteElementSpace &
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver_b(hos_b), ho_solver_s(hos_s),
    lo_solver_b(los_b), lo_solver_s(los_s),
-   fct_solver_b(fct_b), fct_solver_s(fct_s), mono_solver(mos) { }
+   fct_solver_b(fct_b), fct_solver_s(fct_s), mono_solver(mos), v_diff_coeff(v_diff_coeff) { }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
  
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
    Vector d_u_last;
    d_u_last.MakeRef(Y, vsize * (nmat - 1), vsize);
    d_u_last = 0.0;
@@ -1609,14 +1655,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    Vector d_u_accumulate(vsize);
    d_u_accumulate = 0.0;
 
+
    // if the conservation correction is applied to the last material 
    // we ignore the advection of this material and accumulate d_u_last
    int matignore = (nmat > 1 && sharp_cons_corr == 1) ? nmat - 1 : -1;
    for(int ieq = 0; ieq < neq; ++ieq) if( ieq != matignore ){
      
-      // Needed because X and Y are allocated on the host by the ODESolver.
-      X.Read(); Y.Read();
-
+      if(ieq < nmat) v_diff_coeff.SelectMat(ieq);
       Vector u, d_u;
       Vector *xptr = const_cast<Vector*>(&X);
 
@@ -1738,10 +1783,18 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          Vector d_u_b = d_u;
          lo_solver_s->CalcLOSolution(u, d_u_s_LO);
          ho_solver_s->CalcHOSolution(u, d_u_s_HO);
-         fct_solver_s->CalcFCTSolution(x_gf, lumpedM, d_u_s_HO, d_u_s_LO,
-            dofs.xi_min, dofs.xi_max, d_u_s);
-         // perform the global blending with the sharpened solution
-         global_blend(pfes, dt, x_gf, lumpedM, d_u_s, d_u_b, dofs.xi_min, dofs.xi_max, d_u);
+         if(fct_solver_s){
+            fct_solver_s->CalcFCTSolution(x_gf, lumpedM, d_u_s_HO, d_u_s_LO,
+               dofs.xi_min, dofs.xi_max, d_u_s);
+         } else {
+            d_u_s = d_u_s_HO;
+         }
+         if(do_global_blend){
+            // perform the global blending with the sharpened solution
+            global_blend(pfes, dt, x_gf, lumpedM, d_u_s, d_u_b, dofs.xi_min, dofs.xi_max, d_u);
+         } else { // just set the ksharp solution
+            d_u = d_u_s;
+         }
       }
 
       // update the du for the last material if multimaterial

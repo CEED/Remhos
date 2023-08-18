@@ -29,8 +29,8 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
+#pragma once
 #include "mfem.hpp"
-#include "remhos_tools.hpp"
 #include <string>
 #include <fem/pgridfunc.hpp>
 
@@ -44,6 +44,10 @@ enum class VARIABLE_SET {
    PRIMITIVE_VARIABLES /// Material indicators (eta_i), densities (rho_i), specific internal energies (e_i)
 };
 namespace mfem {
+   
+// Forward Declaration
+class SmoothnessIndicator;
+
 /**
  * @brief multivariable system
  * Organizes a set of gridfunctions to represent

@@ -51,6 +51,9 @@ set(SOURCE_FILES
     remhos_sync.cpp
 )
 
+find_package(LAPACK REQUIRED)
+
 add_executable(remhos ${SOURCE_FILES})
 target_link_libraries(remhos PRIVATE ${MFEM_LIBRARIES})
+target_link_libraries(remhos PRIVATE LAPACK::LAPACK)
 target_include_directories(remhos PRIVATE ${MFEM_INCUDE_DIRS})
