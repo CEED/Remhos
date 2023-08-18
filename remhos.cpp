@@ -65,6 +65,7 @@ int nmat = 1;
 /// 1 - correction on last material
 /// 2 - evenly distributed
 /// 3 - distribute amoung existing materials per dof
+/// 4 - Calculate sum conservative sharpening coefficients
 int sharp_cons_corr = 0;
 bool do_global_blend = false;
 
@@ -177,7 +178,7 @@ private:
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
    ParGridFunction &u_max_bounds, &u_max_bounds_grad_dir;
 
-   SharpVelocityCoefficient &v_diff_coeff;
+   SharpVelocityCoefficient *v_diff_coeff;
    mutable ParGridFunction x_gf;
 
    double dt;
@@ -211,7 +212,7 @@ public:
                      LOSolver *los_b, LOSolver *los_s,
                      FCTSolver *fct_b, FCTSolver *fct_s,
                      MonolithicSolver *mos,
-                     SharpVelocityCoefficient &v_diff_coeff);
+                     SharpVelocityCoefficient *v_diff_coeff);
 
    virtual void Mult(const Vector &x, Vector &y) const;
 
@@ -605,9 +606,15 @@ int main(int argc, char *argv[])
    VelocityCoefficient v_new_coeff_rem(v_mesh_coeff, u_max_bounds,
                                        u_max_bounds_grad_dir, 1.0, 1, false);
 
-//   VelocityCoefficient v_diff_coeff(v_mesh_coeff, u_max_bounds,
-//                                    u_max_bounds_grad_dir, 1.0, 1, true);
-   SharpVelocityCoefficient v_diff_coeff(pfes.GetMesh()->Dimension(), nmat, mat_max_bounds, mat_max_bounds_grad, v_mesh_coeff);
+   VectorCoefficient *v_diff_coeff;
+   SharpVelocityCoefficient *corrected_coeff = NULL;
+   if(sharp_cons_corr == 4) {
+      corrected_coeff = new SharpVelocityCoefficient(pfes.GetMesh()->Dimension(), nmat, mat_max_bounds, mat_max_bounds_grad, v_mesh_coeff);
+      v_diff_coeff = corrected_coeff;
+   } else {
+      v_diff_coeff = new VelocityCoefficient(v_mesh_coeff, u_max_bounds,
+                                    u_max_bounds_grad_dir, 1.0, 1, true);
+   }
 
    ParBilinearForm k(&pfes);
    ParBilinearForm K_HO(&pfes);
@@ -650,8 +657,8 @@ int main(int argc, char *argv[])
 
          if (sharp == true)
          {
-            auto ci  = new ConvectionIntegrator(v_diff_coeff, -1.0);
-            auto dgt = new DGTraceIntegrator(v_diff_coeff, 1.0, -0.5);
+            auto ci  = new ConvectionIntegrator(*v_diff_coeff, -1.0);
+            auto dgt = new DGTraceIntegrator(*v_diff_coeff, 1.0, -0.5);
             Ksharp->AddDomainIntegrator(new TransposeIntegrator(ci));
             Ksharp->AddInteriorFaceIntegrator(dgt);
          }
@@ -1038,7 +1045,7 @@ int main(int argc, char *argv[])
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
    DataCollection *dc = NULL;
-   Vector v_diff_vec(pfes.GetVSize() * v_diff_coeff.GetVDim());
+   Vector v_diff_vec(pfes.GetVSize() * v_diff_coeff->GetVDim());
    ParGridFunction v_diff_gf(&pfes, v_diff_vec);
    if (visit)
    {
@@ -1122,7 +1129,7 @@ int main(int argc, char *argv[])
                          x, xsub, v_gf, v_sub_gf, u_max_bounds, u_max_bounds_grad_dir,
                          asmbl, lom, dof_info,
                          ho_solver_b, ho_solver_s, lo_solver_b, lo_solver_s,
-                         fct_solver_b, fct_solver_s, mono_solver, v_diff_coeff);
+                         fct_solver_b, fct_solver_s, mono_solver, corrected_coeff);
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1628,7 +1635,7 @@ AdvectionOperator::AdvectionOperator(int neq, int vsize, ParFiniteElementSpace &
                                      HOSolver *hos_b, HOSolver *hos_s,
                                      LOSolver *los_b, LOSolver *los_s,
                                      FCTSolver *fct_b, FCTSolver *fct_s,
-                                     MonolithicSolver *mos, SharpVelocityCoefficient &v_diff_coeff) :
+                                     MonolithicSolver *mos, SharpVelocityCoefficient *v_diff_coeff) :
    TimeDependentOperator(neq * vsize), neq(neq), vsize(vsize), pfes(pfes), u_vec(u_vec), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_), Ksharp(Ksharp),
    lumpedM(_lumpedM),
@@ -1661,7 +1668,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    int matignore = (nmat > 1 && sharp_cons_corr == 1) ? nmat - 1 : -1;
    for(int ieq = 0; ieq < neq; ++ieq) if( ieq != matignore ){
      
-      if(ieq < nmat) v_diff_coeff.SelectMat(ieq);
+      if(v_diff_coeff != NULL && ieq < nmat) v_diff_coeff->SelectMat(ieq);
       Vector u, d_u;
       Vector *xptr = const_cast<Vector*>(&X);
 

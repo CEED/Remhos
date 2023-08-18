@@ -1230,10 +1230,11 @@ void SharpVelocityCoefficient::Eval(
          sigmas = v_i;
       }
    }
-   */
-
+   
+*/
    // super naive nullspace generation
    Vector sigmas(nmat);
+   sigmas = 0.0;
    double dist = std::numeric_limits<double>::max();
    for(int imat = 0; imat < nmat; ++imat){
       // set all other materials sigmas = 1
@@ -1246,7 +1247,7 @@ void SharpVelocityCoefficient::Eval(
          double grad_etaj_dot = eta_grad_vals[jmat] * eta_grad_vals[jmat];
          sum -= (1 - pow(eta_vals[jmat], 2)) * u_mesh_mag * grad_etaj_dot;
       }
-      if(sum >= 0){ // want a positive sharpening term
+      if(true /* sum >= 0 */){ // want a positive sharpening term
          sigmas_i[imat] = sum;
          sigmas_i /= sigmas_i.Norml2(); // normalize
          double dist2 = 0;
@@ -1258,9 +1259,9 @@ void SharpVelocityCoefficient::Eval(
       }
    }
 
-   sigmas /= max(1e-4, sigmas.Norml2()) * 10;
+   sigmas /= max(1e-4, sigmas.Norml2());
 //   sigmas = 2.0;
-  
+ 
    if(eta_vals[selected_mat] + 1e-12 < 1.0) {
       v.Add(-sigmas[selected_mat] * (1 - pow(eta_vals[selected_mat],2)) * u_mesh_mag, eta_grad_vals[selected_mat]);
    }
