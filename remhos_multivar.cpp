@@ -92,6 +92,7 @@ namespace mfem {
       double total_mass = 0.0;
       for(int imat = 0; imat < nmat; ++imat){
          double mass_loc = 0;
+         double mass_glob = 0.0;
 // TODO: check total mass calculations
          if(varset == VARIABLE_SET::MATERIAL_INDICATORS){
             mass_loc = lumpedM * u_vec[imat];
@@ -106,7 +107,8 @@ namespace mfem {
             partial_dens.ProjectCoefficient(partial_dens_coeff);
             mass_loc = lumpedM * partial_dens;
          }
-         MPI_Allreduce(&mass_loc, &total_mass, 1, MPI_DOUBLE, MPI_SUM, comm);
+         MPI_Allreduce(&mass_loc, &mass_glob, 1, MPI_DOUBLE, MPI_SUM, comm);
+         total_mass += mass_glob;
       }
 //      TODO: product_sync
 //      if (product_sync)
