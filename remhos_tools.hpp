@@ -166,9 +166,12 @@ public:
 
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,
-                              Vector &u_min, Vector &u_max,
+                              Vector &el_min, Vector &el_max,
                               Array<bool> *active_el,
                               Array<bool> *active_dof) const;
+   void ComputeLinMaxBound(const ParGridFunction &u,
+                           ParGridFunction &u_lin_max,
+                           ParGridFunction &u_lin_max_grad);
 };
 
 class Assembly
@@ -256,6 +259,47 @@ public:
                                        const FiniteElement &te_el,
                                        ElementTransformation &Trans,
                                        DenseMatrix &elmat);
+};
+
+class VelocityCoefficient : public VectorCoefficient
+{
+private:
+   const ParGridFunction &u_max;
+   const ParGridFunction &u_max_grad_dir;
+   VectorCoefficient &v_coeff;
+   const double interface_val;
+   int exec_mode;
+   bool take_v_difference;
+
+public:
+   VelocityCoefficient(VectorCoefficient &vc,
+                       const ParGridFunction &umax,
+                       const ParGridFunction &umgd,
+                       double interface, int mode, bool take_v_diff)
+      : VectorCoefficient(umax.ParFESpace()->GetMesh()->Dimension()),
+        v_coeff(vc), u_max(umax), u_max_grad_dir(umgd),
+        interface_val(interface), exec_mode(mode),
+        take_v_difference(take_v_diff) { }
+
+   virtual void Eval(Vector &v, ElementTransformation &T,
+                     const IntegrationPoint &ip);
+};
+
+class NormalGradCoeff : public VectorCoefficient
+{
+private:
+   const ParGridFunction &u;
+
+public:
+   NormalGradCoeff(const ParGridFunction &u_gf) :
+      VectorCoefficient(u_gf.ParFESpace()->GetMesh()->Dimension()), u(u_gf) { }
+
+   virtual void Eval(Vector &V, ElementTransformation &T,
+                     const IntegrationPoint &ip)
+   {
+      u.GetGradient(T, V);
+      V /= sqrt(V*V + 1e-12);
+   }
 };
 
 } // namespace mfem

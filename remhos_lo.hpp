@@ -49,14 +49,15 @@ protected:
    const Array<int> &K_smap;
    const Vector &M_lumped;
    Assembly &assembly;
-   const bool update_D;
+   const bool update_D, lump_flux;
 
    void ComputeDiscreteUpwindMatrix() const;
+   void ApplyDiscreteUpwindMatrix(ParGridFunction &u, Vector &du) const;
 
 public:
    DiscreteUpwind(ParFiniteElementSpace &space, const SparseMatrix &adv,
                   const Array<int> &adv_smap, const Vector &Mlump,
-                  Assembly &asmbly, bool updateD);
+                  Assembly &asmbly, bool updateD, bool lumpFlux);
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
