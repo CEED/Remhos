@@ -574,12 +574,8 @@ int main(int argc, char *argv[])
    VectorGridFunctionCoefficient v_sub_coef;
    Vector x0_sub;
 
-   if (order > 1)
+   if (use_subcell_RD)
    {
-      // The mesh corresponding to Bezier subcells of order p is constructed.
-      // NOTE: The mesh is assumed to consist of quads or hexes.
-      MFEM_VERIFY(order > 1, "This code should not be entered for order = 1.");
-
       // Get a uniformly refined mesh.
       const int btype = BasisType::ClosedUniform;
       subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, btype));
@@ -1037,11 +1033,13 @@ int main(int argc, char *argv[])
          x0.HostReadWrite(); v_sub_gf.HostReadWrite();
          x.HostReadWrite();
          add(x0, t, v_gf, x);
-         x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
-         MFEM_VERIFY(xsub != NULL,
-                     "xsub == NULL/This code should not be entered for order = 1.");
-         xsub->HostReadWrite();
-         add(x0_sub, t, v_sub_gf, *xsub);
+         if (use_subcell_RD)
+         {
+            x0_sub.HostReadWrite(); v_sub_gf.HostReadWrite();
+            MFEM_VERIFY(xsub != NULL, "Subcell mesh not defined!");
+            xsub->HostReadWrite();
+            add(x0_sub, t, v_sub_gf, *xsub);
+         }
       }
 
       if (problem_num != 6 && problem_num != 7 && problem_num != 8)
@@ -1220,7 +1218,7 @@ int main(int argc, char *argv[])
    delete lom.pk;
    delete dc;
 
-   if (order > 1)
+   if (use_subcell_RD)
    {
       delete subcell_mesh;
       delete fec_sub;
