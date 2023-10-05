@@ -21,6 +21,161 @@ using namespace std;
 namespace mfem
 {
 
+void ComputeLORMassMatRef(Geometry::Type gtype, bool UseDiagonalNbrs, DenseMatrix &RefMat)
+{
+   switch (gtype)
+   {
+      case Geometry::SEGMENT:
+      {
+         RefMat = 1.0;
+         RefMat(0,0) = RefMat(1,1) = 2.0;
+         RefMat *= 1./6.;
+         break;
+      }
+      case Geometry::SQUARE:
+      {
+         RefMat = 2.0;
+         if (UseDiagonalNbrs)
+         {
+            RefMat(0,0) = RefMat(1,1) = RefMat(2,2) = RefMat(3,3) = 4.0;
+            RefMat(0,3) = RefMat(1,2) = RefMat(2,1) = RefMat(3,0) = 1.0;
+         }
+         else
+         {
+            RefMat(0,0) = RefMat(1,1) = RefMat(2,2) = RefMat(3,3) = 5.0;
+            RefMat(0,3) = RefMat(1,2) = RefMat(2,1) = RefMat(3,0) = 0.0;
+         }
+         RefMat *= 1.0/36.0;
+         break;
+      }
+      case Geometry::CUBE:
+      {
+         if (UseDiagonalNbrs)
+         {
+            RefMat = 2.0;
+            RefMat(0,0) = RefMat(1,1) = RefMat(2,2) = RefMat(3,3) = 8.0;
+            RefMat(4,4) = RefMat(5,5) = RefMat(6,6) = RefMat(7,7) = 8.0;
+            RefMat(0,7) = RefMat(1,6) = RefMat(2,5) = RefMat(3,4) = 1.0;
+            RefMat(4,3) = RefMat(5,2) = RefMat(6,1) = RefMat(7,0) = 1.0;
+         }
+         else
+         {
+            RefMat = 0.;
+            RefMat(0,0) = RefMat(1,1) = RefMat(2,2) = RefMat(3,3) = 15.0;
+            RefMat(4,4) = RefMat(5,5) = RefMat(6,6) = RefMat(7,7) = 15.0;
+         }
+
+         RefMat(0,1) = RefMat(0,2) = RefMat(1,0) = RefMat(1,3) = 4.0;
+         RefMat(2,0) = RefMat(2,3) = RefMat(3,1) = RefMat(3,2) = 4.0;
+         RefMat(4,5) = RefMat(4,6) = RefMat(5,4) = RefMat(5,7) = 4.0;
+         RefMat(6,4) = RefMat(6,7) = RefMat(7,5) = RefMat(7,6) = 4.0;
+         RefMat(0,4) = RefMat(1,5) = RefMat(2,6) = RefMat(3,7) = 4.0;
+         RefMat(4,0) = RefMat(5,1) = RefMat(6,2) = RefMat(7,3) = 4.0;
+
+         RefMat *= 1.0/216.0;
+         break;
+      }
+      default:
+         MFEM_ABORT("Unsupported Geometry.");
+   }
+}
+
+void GetDistOps(const FiniteElement *dummy, DenseMatrix &DistMat,
+                DenseMatrix &MassMatLOR)
+{
+   const int p = dummy->GetOrder();
+   const int dim = dummy->GetDim();
+   const int nd = dummy->GetDof();
+   const Geometry::Type gtype = dummy->GetGeomType();
+   const int ndSub = int(pow(2, dim)); // number of closest neighbors
+   const int nSub = int(pow(p, dim)); // number of subcells
+
+   DenseMatrix Sub2Ind(nSub, ndSub);
+
+   for (int m = 0; m < nSub; m++)
+   {
+      for (int j = 0; j < ndSub; j++)
+      {
+         if (dim == 1) { Sub2Ind(m,j) = m + j; }
+         else if (dim == 2 && gtype == Geometry::SQUARE)
+         {
+            int aux = m + m/p;
+            switch (j)
+            {
+               case 0: Sub2Ind(m,j) =  aux; break;
+               case 1: Sub2Ind(m,j) =  aux + 1; break;
+               case 2: Sub2Ind(m,j) =  aux + p+1; break;
+               case 3: Sub2Ind(m,j) =  aux + p+2; break;
+            }
+         }
+         else if (dim == 3 && gtype == Geometry::CUBE)
+         {
+            int aux = m + m/p + (p+1)*(m/(p*p));
+            switch (j)
+            {
+               case 0: Sub2Ind(m,j) = aux; break;
+               case 1: Sub2Ind(m,j) = aux + 1; break;
+               case 2: Sub2Ind(m,j) = aux + p+1; break;
+               case 3: Sub2Ind(m,j) = aux + p+2; break;
+               case 4: Sub2Ind(m,j) = aux + (p+1)*(p+1); break;
+               case 5: Sub2Ind(m,j) = aux + (p+1)*(p+1)+1; break;
+               case 6: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+1; break;
+               case 7: Sub2Ind(m,j) = aux + (p+1)*(p+1)+p+2; break;
+            }
+         }
+         else
+         {
+            MFEM_ABORT("Simplices not required(?).");
+         }
+      }
+   }
+ 
+   MassMatLOR.SetSize(nd, nd);
+   MassMatLOR = 0.0;
+   DenseMatrix RefMat(ndSub, ndSub);
+   ComputeLORMassMatRef(gtype, false, RefMat);
+
+   for (int m = 0; m < nSub; m++)
+   {
+      for (int i = 0; i < ndSub; i++)
+      {
+         int I = Sub2Ind(m,i);
+         for (int j = 0; j < ndSub; j++)
+         {
+            int J = Sub2Ind(m,j);
+            MassMatLOR(I,J) += RefMat(i,j);
+         }
+      }
+   }
+
+   Vector MassMatLORLumped(nd);
+   DenseMatrix LowOrderRefinedMat(MassMatLOR);
+   LowOrderRefinedMat *= -1.0;
+   LowOrderRefinedMat.GetRowSums(MassMatLORLumped);
+
+   for (int i = 0; i < nd; i++)
+   {
+      LowOrderRefinedMat(i,i) -= MassMatLORLumped(i);
+      LowOrderRefinedMat(0,i) = 1.0;
+   }
+
+   DenseMatrixInverse InvLowOrderRefinedMat(&LowOrderRefinedMat);
+   InvLowOrderRefinedMat.Factor();
+   InvLowOrderRefinedMat.GetInverseMatrix(DistMat);
+}
+
+void ApplyDistOp(const DenseMatrix &DistMat, const Vector &elem_vec,
+                 Vector &elem_vec_dist)
+{
+   DistMat.Mult(elem_vec, elem_vec_dist);
+}
+
+double GetAntiDiffFlux(const DenseMatrix &MassMatLOR,
+                       Vector &elem_vec_dist, int i, int j)
+{
+   return MassMatLOR(i,j) * (elem_vec_dist(i) - elem_vec_dist(j));
+}
+
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
                                          ParFiniteElementSpace &pfes_DG_,
