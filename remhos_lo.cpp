@@ -667,7 +667,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
 
          double Bu0[max_Q1D];
          double Bu1[max_Q1D];
@@ -735,7 +735,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
 
          double Bu0[max_Q1D];
          for (int q=0; q<Q1D; ++q)
@@ -806,10 +806,10 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
       auto Y = mfem::Reshape(y_loc.ReadWrite(), dofs1D, dofs1D, 2, nf);
       auto D = mfem::Reshape(D_int.Read(), quad1D, quad1D, 2, nf);
 
-      MFEM_FORALL(f, nf,
+      mfem::forall(nf, [=] MFEM_HOST_DEVICE (int f)
       {
-         constexpr int max_Q1D = MAX_Q1D;
-         constexpr int max_D1D = MAX_D1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
 
          double BX0[max_Q1D][max_D1D];
          double BX1[max_Q1D][max_D1D];
@@ -909,8 +909,8 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = MAX_Q1D;
-         constexpr int max_D1D = MAX_D1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
 
          double BX0[max_Q1D][max_D1D];
          for (int k2=0; k2<Q1D; ++k2)
@@ -1394,8 +1394,8 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
       {
 
          constexpr int iDIM = 2;
-         constexpr int max_Q1D = MAX_Q1D;
-         constexpr int max_D1D = MAX_D1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
          double U[iDIM][max_D1D][max_Q1D];
 
          for (int j1 = 0; j1 < quad1D; ++j1)
@@ -1487,8 +1487,8 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
       MFEM_FORALL(e, NE,
       {
 
-         constexpr int max_Q1D = MAX_Q1D;
-         constexpr int max_D1D = MAX_D1D;
+         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
 
          //qpt x dof x dof
          double BX[max_D1D][max_D1D][max_Q1D];

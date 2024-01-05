@@ -1766,17 +1766,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                    active_dofs_blend, us_new);
    check_violation(us_new, us_min, us_max, "us-blend-mult", &active_dofs_blend);
    for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us_old(i))/dt; }
-
-
-//   if (evolve_sharp)
-//   {
-
-//      //         cout << "126 in mult u_bound:  " << u_b_new(126) << endl;
-//      //         cout << "126 in mult u_blend:  " << u_new(126) << endl;
-//      //         cout << "126 in mult us_mm: " << us_min(126) << " "
-//      //                                       << us_max(126) << endl;
-
-//   }
 }
 
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
