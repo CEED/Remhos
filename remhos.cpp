@@ -1671,8 +1671,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    Vector *xptr = const_cast<Vector*>(&X);
 
+   MFEM_VERIFY(X.Size() > size, "This branch must be used with -ps.");
    MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO & LO solvers.");
-   MFEM_VERIFY(X.Size() > size, "Must be used with product remap.");
 
    Vector u_old, d_u;
    u_old.MakeRef(*xptr, 0, size);
@@ -1747,6 +1747,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
 
    if (evolve_sharp == false) { d_u = d_u_b; d_us = d_us_b; return; }
+
    //
    //  Sharpening starts here.
    //
@@ -1782,22 +1783,8 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    fct_solver_b->ScaleProductBounds(s_min, s_max, u_new,
                                     active_elem_bound, active_dofs_bound,
                                     us_min, us_max);
-   //check_violation(us_b, us_min, us_max, "us-bound-2-mult", &active_dofs_bound);
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u_old(i)) / dt; }
    ComputeBoolIndicators(NE, u_b, active_elem_blend, active_dofs_blend);
-
-//   Step 2.
-//   fct_solver_b->ScaleProductBounds(rho_min, rho_max, ind_blend,
-//                                    active_elem_blend, active_dofs_blend,
-//                                    ind_rho_min, ind_rho_max);
-//   blend_global_u(ind_rho_b, ind_rho_s, lumpedM, ind_rho_min, ind_rho_max,
-//                  active_dofs_blend, e_min, e_max, ind_rho_e_bound, ind_rho_new);
-//   check_violation(ind_rho_new, ind_rho_min, ind_rho_max, "ind_rho_blend");
-//   fct_solver_b->ScaleProductBounds(e_min, e_max, ind_rho_blend,
-//                                    active_elem_blend, active_dofs_blend,
-//                                    ind_rho_e_min, ind_rho_e_max);
-//   check_violation(ind_rho_e_bound, ind_rho_e_min, ind_rho_e_max,
-//                   "ind_rho_e_bound_as_LO", &active_dofs_blend);
 
    //
    // Sharp solution us_s (not in bounds).
