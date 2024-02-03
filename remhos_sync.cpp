@@ -47,11 +47,9 @@ void ComputeBoolIndicators(int NE, const Vector &u,
 }
 
 // This function assumes a DG space.
-void ComputeRatio(int NE, const Vector &us, const Vector &u,
-                  Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof)
+void ComputeRatio(int NE, const Vector &us, const Vector &u, Vector &s,
+                  const Array<bool> &bool_el, const Array<bool> &bool_dof)
 {
-   ComputeBoolIndicators(NE, u, bool_el, bool_dof);
-
    us.HostRead();
    u.HostRead();
    s.HostWrite();
@@ -119,6 +117,8 @@ void ComputeMinMaxS(int NE, const Vector &us, const Vector &u,
    const int size = u.Size();
    Vector s(size);
    Array<bool> bool_el, bool_dofs;
+
+   ComputeBoolIndicators(NE, u, bool_el, bool_dofs);
    ComputeRatio(NE, us, u, s, bool_el, bool_dofs);
 
    bool_dofs.HostRead();

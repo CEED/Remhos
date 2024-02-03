@@ -27,8 +27,8 @@ namespace mfem
 void ComputeBoolIndicators(int NE, const Vector &u,
                            Array<bool> &ind_elem, Array<bool> &ind_dofs);
 
-void ComputeRatio(int NE, const Vector &u_s, const Vector &u,
-                  Vector &s, Array<bool> &bool_el, Array<bool> &bool_dof);
+void ComputeRatio(int NE, const Vector &u_s, const Vector &u, Vector &s,
+                  const Array<bool> &bool_el, const Array<bool> &bool_dof);
 
 void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
                       const Array<bool> &ind_dofs, Vector &u);
