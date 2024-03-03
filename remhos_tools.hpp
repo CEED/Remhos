@@ -169,8 +169,8 @@ public:
    // Computes the min and max values of u over each element.
    void ComputeElementsMinMax(const Vector &u,
                               Vector &el_min, Vector &el_max,
-                              Array<bool> *active_el,
-                              Array<bool> *active_dof) const;
+                              const Array<bool> *active_el,
+                              const Array<bool> *active_dof) const;
    void ComputeLinMaxBound(const ParGridFunction &u,
                            ParGridFunction &u_lin_max,
                            ParGridFunction &u_lin_max_grad);

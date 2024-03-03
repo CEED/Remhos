@@ -176,7 +176,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
-   bool product_sync = false;
+   int levels = 1;
    int vis_steps = 100;
    const char *device_config = "cpu";
 
@@ -253,9 +253,8 @@ int main(int argc, char *argv[])
    args.AddOption(&verify_bounds, "-vb", "--verify-bounds", "-no-vb",
                   "--no-verify-bounds",
                   "Verify solution bounds after each time step.");
-   args.AddOption(&product_sync, "-ps", "--product-sync", "-no-ps",
-                  "--no-product-sync",
-                  "Enable remap of synchronized product fields.");
+   args.AddOption(&levels, "-lev", "--product-levels",
+                  "Levels to synchronize (1 u / 2 us / 3 usq).");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
    args.Parse();
@@ -663,7 +662,7 @@ int main(int argc, char *argv[])
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
-   Array<int> offset((product_sync) ? 4 : 2);
+   Array<int> offset(levels + 1);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
@@ -675,31 +674,39 @@ int main(int argc, char *argv[])
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us, q, usq;
    Array<bool> u_bool_el, u_bool_dofs;
-   if (product_sync)
+   if (levels > 1)
    {
       ComputeBoolIndicators(pmesh.GetNE(), u, u_bool_el, u_bool_dofs);
 
       s.SetSpace(&pfes);
       BoolFunctionCoefficient sc(s0_function, u_bool_el);
       s.ProjectCoefficient(sc);
-
-      q.SetSpace(&pfes);
-      BoolFunctionCoefficient qc(q0_function, u_bool_el);
-      q.ProjectCoefficient(qc);
-
       us.MakeRef(&pfes, S, offset[1]);
-      usq.MakeRef(&pfes, S, offset[2]);
-      double *h_us = us.HostWrite(), *h_usq = usq.HostWrite();
       const double *h_u = u.HostRead();
-      const double *h_s = s.HostRead(), *h_q = q.HostRead();
-      // Simple - we don't target conservation at initialization.
+      double *h_us = us.HostWrite();
+      const double *h_s = s.HostRead();
       for (int i = 0; i < s.Size(); i++)
       {
+         // Simple - we don't target conservation at initialization.
          h_us[i]  = h_u[i] * h_s[i];
-         h_usq[i] = h_us[i] * h_q[i];
       }
       us.SyncAliasMemory(S);
-      usq.SyncAliasMemory(S);
+
+      if (levels > 2)
+      {
+         q.SetSpace(&pfes);
+         BoolFunctionCoefficient qc(q0_function, u_bool_el);
+         q.ProjectCoefficient(qc);
+         usq.MakeRef(&pfes, S, offset[2]);
+         double *h_usq = usq.HostWrite();
+         const double *h_q = q.HostRead();
+         // Simple - we don't target conservation at initialization.
+         for (int i = 0; i < s.Size(); i++)
+         {
+            h_usq[i] = h_us[i] * h_q[i];
+         }
+         usq.SyncAliasMemory(S);
+      }
    }
 
    // Smoothness indicator.
@@ -866,16 +873,19 @@ int main(int argc, char *argv[])
       s.HostRead();
       q.HostRead();
       VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
-      if (product_sync)
+      if (levels > 1)
       {
          VisualizeField(vis_us, vishost, visport, us, "Solution us",
                         Wx, 400, Ww, Wh);
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
                         Wx + Ww, 400, Ww, Wh);
-         VisualizeField(vis_usq, vishost, visport, usq, "Solution usq",
-                        Wx, 750, Ww, Wh);
-         VisualizeField(vis_q, vishost, visport, q, "Solution q",
-                        Wx + Ww, 750, Ww, Wh);
+         if (levels > 2)
+         {
+            VisualizeField(vis_usq, vishost, visport, usq, "Solution usq",
+                           Wx, 750, Ww, Wh);
+            VisualizeField(vis_q, vishost, visport, q, "Solution q",
+                           Wx + Ww, 750, Ww, Wh);
+         }
       }
    }
 
@@ -884,12 +894,16 @@ int main(int argc, char *argv[])
    const double mass0_u_loc = lumpedM * u;
    double mass0_u, mass0_us, mass0_usq;
    MPI_Allreduce(&mass0_u_loc, &mass0_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-   if (product_sync)
+   if (levels > 1)
    {
       const double mass0_us_loc = lumpedM * us;
       MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-      const double mass0_usq_loc = lumpedM * usq;
-      MPI_Allreduce(&mass0_usq_loc, &mass0_usq, 1, MPI_DOUBLE, MPI_SUM, comm);
+      if (levels > 2)
+      {
+         const double mass0_usq_loc = lumpedM * usq;
+         MPI_Allreduce(&mass0_usq_loc, &mass0_usq, 1,
+                       MPI_DOUBLE, MPI_SUM, comm);
+      }
    }
 
    // Setup of the FCT solver (if any).
@@ -953,13 +967,8 @@ int main(int argc, char *argv[])
 
    // Data at the beginninng of the time step.
    BlockVector S_old(S);
-   ParGridFunction u_old(&pfes), s_old, us_old;
+   ParGridFunction u_old(&pfes);
    u_old.MakeRef(&pfes, S_old, offset[0]);
-   if (product_sync)
-   {
-      s_old.SetSpace(&pfes);
-      us_old.MakeRef(&pfes, S_old, offset[1]);
-   }
 
    int ti_total = 0, ti = 0;
    while (done == false)
@@ -973,7 +982,7 @@ int main(int argc, char *argv[])
       if (lo_solver_s)  { lo_solver_s->UpdateTimeStep(dt_real); }
       if (fct_solver_s) { fct_solver_s->UpdateTimeStep(dt_real); }
 
-      if (product_sync)
+      if (levels > 1)
       {
          ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
@@ -1040,7 +1049,7 @@ int main(int argc, char *argv[])
       Vector new_m(size);
       Array<bool> active_elem, active_dofs;
 
-      if (product_sync)
+      if (levels > 1)
       {
 //         // Compute s-bounds.
 //         ComputeBoolIndicators(NE, u_old, active_elem, active_dofs);
@@ -1157,7 +1166,7 @@ int main(int argc, char *argv[])
                VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Vel",
                               Wx+2*Ww, Wy, Ww, Wh);
             }
-            if (product_sync)
+            if (levels > 1)
             {
                ComputeBoolIndicators(NE, u, u_bool_el, u_bool_dofs);
 
@@ -1169,11 +1178,15 @@ int main(int argc, char *argv[])
                               Wx + Ww, 400, Ww, Wh);
 
                // Recompute q = usq / us.
-               VisualizeField(vis_usq, vishost, visport, usq, "Solution usq",
-                              Wx, 750, Ww, Wh);
-               ComputeRatio(pmesh.GetNE(), usq, us, q, u_bool_el, u_bool_dofs);
-               VisualizeField(vis_q, vishost, visport, q, "Solution q",
-                              Wx + Ww, 750, Ww, Wh);
+               if (levels > 2)
+               {
+                  VisualizeField(vis_usq, vishost, visport, usq,
+                                 "Solution usq", Wx, 750, Ww, Wh);
+                  ComputeRatio(pmesh.GetNE(), usq, us, q,
+                               u_bool_el, u_bool_dofs);
+                  VisualizeField(vis_q, vishost, visport, q, "Solution q",
+                                 Wx + Ww, 750, Ww, Wh);
+               }
             }
          }
 
@@ -1217,33 +1230,34 @@ int main(int argc, char *argv[])
       lumpedM.HostRead();
       ml.SpMat().GetDiag(lumpedM);
       mass_u_loc = lumpedM * u;
-      if (product_sync)
+      if (levels > 1)
       {
          mass_us_loc = lumpedM * us;
-         mass_usq_loc = lumpedM * usq;
+         if (levels > 2) { mass_usq_loc = lumpedM * usq; }
       }
    }
    else
    {
       mass_u_loc = masses * u;
-      if (product_sync)
+      if (levels > 1)
       {
          mass_us_loc = masses * us;
-         mass_usq_loc = masses * usq;
+         if (levels > 2) { mass_usq_loc = masses * usq; }
       }
    }
    double mass_u, mass_us, mass_usq, s_max;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
-   if (product_sync)
+   if (levels > 1)
    {
       ComputeBoolIndicators(NE, u, u_bool_el, u_bool_dofs);
       ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
       const double s_max_loc = s.Max();
-      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
-      MPI_Allreduce(&mass_usq_loc, &mass_usq, 1, MPI_DOUBLE, MPI_SUM, comm);
       MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
+      MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
+      if (levels > 2)
+      { MPI_Allreduce(&mass_usq_loc, &mass_usq, 1, MPI_DOUBLE, MPI_SUM, comm); }
    }
    if (myid == 0)
    {
@@ -1251,33 +1265,39 @@ int main(int argc, char *argv[])
            << "Final mass u:   " << mass_u << endl
            << "Max value u:    " << umax << endl << setprecision(6)
            << "Mass loss u:    " << abs(mass0_u - mass_u) << endl;
-      if (product_sync)
+      if (levels > 1)
       {
          cout << setprecision(10)
               << "Final mass us:  " << mass_us << endl
               << "Max value s:    " << s_max << endl << setprecision(6)
               << "Mass loss us:   " << abs(mass0_us - mass_us) << endl;
 
-         cout << setprecision(10)
-              << "Final mass usq: " << mass_usq << endl
-              << "Mass loss usq:  " << abs(mass0_usq - mass_usq) << endl;
+         if (levels > 2)
+         {
+            cout << setprecision(10)
+                 << "Final mass usq: " << mass_usq << endl
+                 << "Mass loss usq:  " << abs(mass0_usq - mass_usq) << endl;
+         }
       }
    }
 
    ConstantCoefficient zero(0.0);
    double norm_u = u.ComputeL2Error(zero), norm_us = 0.0, norm_usq = 0.0;
-   if (product_sync)
+   if (levels > 1)
    {
       norm_us  = us.ComputeL2Error(zero);
-      norm_usq = usq.ComputeL2Error(zero);
+      if (levels > 2) { norm_usq = usq.ComputeL2Error(zero); }
    }
    if (myid == 0)
    {
       cout << setprecision(12) << "L2-norm u:   " << norm_u << endl;
-      if (product_sync)
+      if (levels > 1)
       {
-         cout << "L2-norm us:  " << norm_us  << endl
-              << "L2-norm usq: " << norm_usq << endl;
+         cout << "L2-norm us:  " << norm_us  << endl;
+         if (levels > 2)
+         {
+            cout << "L2-norm usq: " << norm_usq << endl;
+         }
       }
    }
 
@@ -1413,14 +1433,60 @@ void clean_roundoff(const Vector &u_min, const Vector &u_max,
 
 }
 
-void blend_global_u(const Vector &u_b, const Vector &u_s, const Vector &m,
-                    Vector &u_min, Vector &u_max,
-                    const Array<bool> &active_dofs,
-                    const Vector &s_min, const Vector &s_max,
-                    const Vector &us_b, double s_glob,
-                    const Vector &q_min, const Vector &q_max,
-                    const Vector &usq_b, double q_glob,
-                    Vector &u)
+void blend_global_u_1(const Vector &u_b, const Vector &u_s, const Vector &m,
+                      Vector &u_min, Vector &u_max,
+                      const Array<bool> &active_dofs,
+                      const Vector &us_b, Vector &u)
+{
+   const double eps = 1e-12;
+   const int size = u_b.Size();
+
+   Vector f_clip(size);
+   f_clip = 0.0;
+   u.SetSize(size);
+
+   // Clip.
+   double Sp = 0.0, Sn = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { continue; }
+
+      double f_clip_min = u_min(i) - u_b(i),
+             f_clip_max = u_max(i) - u_b(i);
+
+      f_clip(i) = u_s(i) - u_b(i);
+      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
+      Sp += fmax(m(i) * f_clip(i), 0.0);
+      Sn += fmin(m(i) * f_clip(i), 0.0);
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double S = Sp + Sn;
+
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { u(i) = 0.0; continue; }
+
+      if (S > eps && f_clip(i) > 0.0)
+      {
+         f_clip(i) *= - Sn / Sp;
+      }
+      if (S < -eps && f_clip(i) < 0.0)
+      {
+         f_clip(i) *= - Sp / Sn;
+      }
+
+      u(i) = u_b(i) + f_clip(i);
+   }
+}
+
+void blend_global_u_2(const Vector &u_b, const Vector &u_s, const Vector &m,
+                      Vector &u_min, Vector &u_max,
+                      const Array<bool> &active_dofs,
+                      const Vector &s_min, const Vector &s_max,
+                      const Vector &us_b, double s_glob,
+                      Vector &u)
 {
    const double eps = 1e-12;
    const int size = u_b.Size();
@@ -1436,58 +1502,92 @@ void blend_global_u(const Vector &u_b, const Vector &u_s, const Vector &m,
       if (active_dofs[i] == false) { continue; }
 
       double u_max_i = u_max(i);
-      if (s_min(i) - s_glob > eps)
-      {
-         u_max_i = fmin(u_max_i,
-                        (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
-         u_max_i = fmax(u_max_i, u_b(i));
-      }
-      if (s_max(i) - s_glob < -eps)
+      if (u_s(i) * (s_max(i) - s_glob) < us_b(i) - u_b(i) * s_glob)
       {
          u_max_i = fmin(u_max_i,
                         (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
-         u_max_i = fmax(u_max_i, u_b(i));
-      }
-      if (s_glob * q_min(i) - s_glob * q_glob > eps)
-      {
-         u_max_i = fmin(u_max_i,
-                        u_b(i) + fmax(usq_b(i) - us_b(i) * q_min(i), 0.0) /
-                                 (s_glob * q_min(i) - s_glob * q_glob));
-         u_max_i = fmax(u_max_i, u_b(i));
-      }
-      if (s_glob * q_max(i) - s_glob * q_glob < -eps)
-      {
-         u_max_i = fmin(u_max_i,
-                        u_b(i) + fmin(usq_b(i) - us_b(i) * q_max(i), 0.0) /
-                                 (s_glob * q_max(i) - s_glob * q_glob));
          u_max_i = fmax(u_max_i, u_b(i));
       }
 
       double u_min_i = u_min(i);
-      if (s_max(i) - s_glob > eps)
-      {
-         u_min_i = fmax(u_min_i,
-                        (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
-         u_min_i = fmin(u_min_i, u_b(i));
-      }
-      if (s_min(i) - s_glob < -eps)
+      if (u_s(i) * (s_min(i) - s_glob) > us_b(i) - u_b(i) * s_glob)
       {
          u_min_i = fmax(u_min_i,
                         (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
          u_min_i = fmin(u_min_i, u_b(i));
       }
-      if (s_glob * q_min(i) - s_glob * q_glob < -eps)
+
+      u_min(i) = u_min_i;
+      u_max(i) = u_max_i;
+
+      double f_clip_min = u_min(i) - u_b(i),
+             f_clip_max = u_max(i) - u_b(i);
+
+      f_clip(i) = u_s(i) - u_b(i);
+      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
+      Sp += fmax(m(i) * f_clip(i), 0.0);
+      Sn += fmin(m(i) * f_clip(i), 0.0);
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double S = Sp + Sn;
+
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { u(i) = 0.0; continue; }
+
+      if (S > eps && f_clip(i) > 0.0)
+      {
+         f_clip(i) *= - Sn / Sp;
+      }
+      if (S < -eps && f_clip(i) < 0.0)
+      {
+         f_clip(i) *= - Sp / Sn;
+      }
+
+      u(i) = u_b(i) + f_clip(i);
+   }
+}
+
+void blend_global_u_3(const Vector &u_b, const Vector &u_s, const Vector &m,
+                      Vector &u_min, Vector &u_max,
+                      const Array<bool> &active_dofs,
+                      const Vector &us_b, double s_glob,
+                      const Vector &q_min, const Vector &q_max,
+                      const Vector &usq_b, double q_glob,
+                      Vector &u)
+{
+   const double eps = 1e-12;
+   const int size = u_b.Size();
+
+   Vector f_clip(size);
+   f_clip = 0.0;
+   u.SetSize(size);
+
+   // Clip.
+   double Sp = 0.0, Sn = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { continue; }
+
+      double u_max_i = u_max(i);
+      if (u_s(i) * (s_glob * q_max(i) - s_glob * q_glob) >
+          fmin(usq_b(i) - us_b(i) * q_max(i), 0.0))
+      {
+         u_max_i = fmin(u_max_i,
+                        u_b(i) + fmin(usq_b(i) - us_b(i) * q_max(i), 0.0) /
+                                     (s_glob * q_max(i) - s_glob * q_glob));
+         u_max_i = fmax(u_max_i, u_b(i));
+      }
+
+      double u_min_i = u_min(i);
+      if (u_s(i) * (s_glob * q_min(i) - s_glob * q_glob) <
+          fmax(usq_b(i) - us_b(i) * q_min(i), 0.0))
       {
          u_min_i = fmax(u_min_i,
                         u_b(i) + fmax(usq_b(i) - us_b(i) * q_min(i), 0.0) /
-                                 (s_glob * q_min(i) - s_glob * q_glob));
-         u_min_i = fmin(u_min_i, u_b(i));
-      }
-      if (s_glob * q_max(i) - s_glob * q_glob > eps)
-      {
-         u_min_i = fmax(u_min_i,
-                        u_b(i) + fmin(usq_b(i) - us_b(i) * q_max(i), 0.0) /
-                                 (s_glob * q_max(i) - s_glob * q_glob));
+                                     (s_glob * q_min(i) - s_glob * q_glob));
          u_min_i = fmin(u_min_i, u_b(i));
       }
 
@@ -1823,8 +1923,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    Vector *xptr = const_cast<Vector*>(&X);
 
-   MFEM_VERIFY(X.Size() > size, "This branch must be used with -ps.");
    MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO & LO solvers.");
+
+   int levels = 1;
+   if (X.Size() > size) { levels++; }
+   if (X.Size() > 2*size) { levels++; }
 
    // u.
    Vector u_old, d_u;
@@ -1833,13 +1936,19 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 
    // us.
    Vector us_old, d_us;
-   us_old.MakeRef(*xptr, size, size);
-   d_us.MakeRef(Y, size, size);
+   if (levels > 1)
+   {
+      us_old.MakeRef(*xptr, size, size);
+      d_us.MakeRef(Y, size, size);
+   }
 
    // usq.
    Vector usq_old, d_usq;
-   usq_old.MakeRef(*xptr, 2*size, size);
-   d_usq.MakeRef(Y, 2*size, size);
+   if (levels > 2)
+   {
+      usq_old.MakeRef(*xptr, 2*size, size);
+      d_usq.MakeRef(Y, 2*size, size);
+   }
 
    Array<bool> active_elem_old, active_dofs_old,
                active_elem_bound, active_dofs_bound,
@@ -1851,14 +1960,17 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Compute the ratio s = us_old / u_old, on the old active dofs.
    Vector s(size), s_min(size), s_max(size);
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
-   ComputeRatio(NE, us_old, u_old, s, active_elem_old, active_dofs_old);
-   // Bounds for s, based on the old values (and old active dofs).
-   // This doesn't consider s values from the old inactive dofs, because
-   // there were no bounds restriction on them at the previous time step.
-   dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
-                              &active_elem_old, &active_dofs_old);
-   dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
-                      s_min, s_max, 1, &active_elem_old);
+   if (levels > 1)
+   {
+      ComputeRatio(NE, us_old, u_old, s, active_elem_old, active_dofs_old);
+      // Bounds for s, based on the old values (and old active dofs).
+      // This doesn't consider s values from the old inactive dofs, because
+      // there were no bounds restriction on them at the previous time step.
+      dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+                                 &active_elem_old, &active_dofs_old);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                         s_min, s_max, 1, &active_elem_old);
+   }
 
    //
    // Stuff related to q = usq_old / us_old.
@@ -1866,14 +1978,17 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Compute the ratio q = usq_old / us_old, on the old active dofs.
    Vector q(size), q_min(size), q_max(size);
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
-   ComputeRatio(NE, usq_old, us_old, q, active_elem_old, active_dofs_old);
-   // Bounds for q, based on the old values (and old active dofs).
-   // This doesn't consider q values from the old inactive dofs, because
-   // there were no bounds restriction on them at the previous time step.
-   dofs.ComputeElementsMinMax(q, dofs.xe_min, dofs.xe_max,
-                              &active_elem_old, &active_dofs_old);
-   dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
-                      q_min, q_max, 1, &active_elem_old);
+   if (levels > 2)
+   {
+      ComputeRatio(NE, usq_old, us_old, q, active_elem_old, active_dofs_old);
+      // Bounds for q, based on the old values (and old active dofs).
+      // This doesn't consider q values from the old inactive dofs, because
+      // there were no bounds restriction on them at the previous time step.
+      dofs.ComputeElementsMinMax(q, dofs.xe_min, dofs.xe_max,
+                                 &active_elem_old, &active_dofs_old);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
+                         q_min, q_max, 1, &active_elem_old);
+   }
 
    //
    // Bounded solution u_b.
@@ -1902,51 +2017,57 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Bounded solution us_b.
    //
    ParGridFunction us_old_gf(K_bound.ParFESpace());
-   us_old_gf = us_old; us_old_gf.ExchangeFaceNbrData();
    Vector d_us_HO(size), d_us_LO, d_us_b(size);
-   if (fct_solver_b->NeedsLOProductInput())
-   {
-      d_us_LO.SetSize(size);
-      lo_solver_b->CalcLOSolution(us_old, d_us_LO);
-   }
-   ho_solver_b->CalcHOSolution(us_old, d_us_HO);
-   fct_solver_b->CalcFCTProduct(us_old_gf, lumpedM, d_us_HO, d_us_LO,
-                                s_min, s_max, u_b,
-                                active_elem_bound, active_dofs_bound, d_us_b);
-   // Evolve us_b, check violations.
    Vector us_b(size), us_min(size), us_max(size);
-   add(1.0, us_old, dt, d_us_b, us_b);
-   fct_solver_b->ScaleProductBounds(s_min, s_max, u_b,
-                                    active_elem_bound, active_dofs_bound,
-                                    us_min, us_max);
-   check_violation(us_b, us_min, us_max, "us-b-mult",
-                   1e-12, &active_dofs_bound);
-   clean_roundoff(us_min, us_max, us_b, &active_dofs_bound);
+   if (levels > 1)
+   {
+      us_old_gf = us_old; us_old_gf.ExchangeFaceNbrData();
+      if (fct_solver_b->NeedsLOProductInput())
+      {
+         d_us_LO.SetSize(size);
+         lo_solver_b->CalcLOSolution(us_old, d_us_LO);
+      }
+      ho_solver_b->CalcHOSolution(us_old, d_us_HO);
+      fct_solver_b->CalcFCTProduct(us_old_gf, lumpedM, d_us_HO, d_us_LO,
+                                   s_min, s_max, u_b,
+                                   active_elem_bound, active_dofs_bound, d_us_b);
+      // Evolve us_b, check violations.
+      add(1.0, us_old, dt, d_us_b, us_b);
+      fct_solver_b->ScaleProductBounds(s_min, s_max, u_b,
+                                       active_elem_bound, active_dofs_bound,
+                                       us_min, us_max);
+      check_violation(us_b, us_min, us_max, "us-b-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(us_min, us_max, us_b, &active_dofs_bound);
+   }
 
    //
    // Bounded solution usq_b.
    //
    ParGridFunction usq_old_gf(K_bound.ParFESpace());
-   usq_old_gf = usq_old; usq_old_gf.ExchangeFaceNbrData();
    Vector d_usq_HO(size), d_usq_LO, d_usq_b(size);
-   if (fct_solver_b->NeedsLOProductInput())
-   {
-      d_usq_LO.SetSize(size);
-      lo_solver_b->CalcLOSolution(usq_old, d_usq_LO);
-   }
-   ho_solver_b->CalcHOSolution(usq_old, d_usq_HO);
-   fct_solver_b->CalcFCTProduct(usq_old_gf, lumpedM, d_usq_HO, d_usq_LO,
-                                q_min, q_max, us_b,
-                                active_elem_bound, active_dofs_bound, d_usq_b);
-   // Evolve usq_b, check violations.
    Vector usq_b(size), usq_min(size), usq_max(size);
-   add(1.0, usq_old, dt, d_usq_b, usq_b);
-   fct_solver_b->ScaleProductBounds(q_min, q_max, us_b,
-                                    active_elem_bound, active_dofs_bound,
-                                    usq_min, usq_max);
-   check_violation(usq_b, usq_min, usq_max, "usq-b-mult",
-                   1e-12, &active_dofs_bound);
-   clean_roundoff(usq_min, usq_max, usq_b, &active_dofs_bound);
+   if (levels > 2)
+   {
+      usq_old_gf = usq_old; usq_old_gf.ExchangeFaceNbrData();
+      if (fct_solver_b->NeedsLOProductInput())
+      {
+         d_usq_LO.SetSize(size);
+         lo_solver_b->CalcLOSolution(usq_old, d_usq_LO);
+      }
+      ho_solver_b->CalcHOSolution(usq_old, d_usq_HO);
+      fct_solver_b->CalcFCTProduct(usq_old_gf, lumpedM, d_usq_HO, d_usq_LO,
+                                   q_min, q_max, us_b,
+                                   active_elem_bound, active_dofs_bound, d_usq_b);
+      // Evolve usq_b, check violations.
+      add(1.0, usq_old, dt, d_usq_b, usq_b);
+      fct_solver_b->ScaleProductBounds(q_min, q_max, us_b,
+                                       active_elem_bound, active_dofs_bound,
+                                       usq_min, usq_max);
+      check_violation(usq_b, usq_min, usq_max, "usq-b-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(usq_min, usq_max, usq_b, &active_dofs_bound);
+   }
 
    if (evolve_sharp == false)
    { d_u = d_u_b; d_us = d_us_b; d_usq = d_usq_b; return; }
@@ -1965,97 +2086,141 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                  u_min, u_max, d_u_s);
    add(1.0, u_old, dt, d_u_s, u_s);
 
-   double Vol = 0.0, Mass = 0.0, Energy = 0.0;
-   for (int i = 0; i < size; i++)
+   // double Vol = 0.0, Mass = 0.0, Energy = 0.0;
+   // for (int i = 0; i < size; i++)
+   // {
+   //    if (active_dofs_bound[i] == false) { continue; }
+   //    Vol    += u_b(i) * lumpedM(i);
+   //    Mass   += us_b(i) * lumpedM(i);
+   //    Energy += usq_b(i) * lumpedM(i);
+   // }
+   // MPI_Allreduce(MPI_IN_PLACE, &Vol, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   // MPI_Allreduce(MPI_IN_PLACE, &Mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   // MPI_Allreduce(MPI_IN_PLACE, &Energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   // const double s_glob = Mass / Vol,
+   //              q_glob = Energy / Mass;
+
+   double s_glob = s_max.Max(), q_glob = q_max.Max();
+   if (levels > 1)
    {
-      if (active_dofs_bound[i] == false) { continue; }
-      Vol    += u_b(i) * lumpedM(i);
-      Mass   += us_b(i) * lumpedM(i);
-      Energy += usq_b(i) * lumpedM(i);
+      MPI_Allreduce(MPI_IN_PLACE, &s_glob, 1,
+                    MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
    }
-   MPI_Allreduce(MPI_IN_PLACE, &Vol, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &Mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &Energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   const double s_glob = Mass / Vol,
-                q_glob = Energy / Mass;
+   if (levels > 2)
+   {
+      MPI_Allreduce(MPI_IN_PLACE, &q_glob, 1,
+                    MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   }
 
    //
    // Blended solution u_new (in bounds).
    //
    Vector u_new(size);
-   blend_global_u(u_b, u_s, lumpedM, u_min, u_max, active_dofs_bound,
-                  s_min, s_max, us_b, s_glob,
-                  q_min, q_max, usq_b, q_glob,
-                  u_new);
+   blend_global_u_1(u_b, u_s, lumpedM, u_min, u_max, active_dofs_bound,
+                    us_b, u_new);
    ComputeBoolIndicators(NE, u_b, active_elem_blend, active_dofs_blend);
-   check_violation(u_new, u_min, u_max, "u-blend-mult", 1e-12, nullptr);
+   check_violation(u_new, u_min, u_max, "u-blend-mult-1", 1e-12, nullptr);
    clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
+   if (levels > 1)
+   {
+      u_s = u_new;
+      blend_global_u_2(u_b, u_s, lumpedM, u_min, u_max, active_dofs_blend,
+                       s_min, s_max, us_b, s_glob, u_new);
+      check_violation(u_new, u_min, u_max, "u-blend-mult-2", 1e-12, nullptr);
+      clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
+   }
+   if (levels > 2)
+   {
+      u_s = u_new;
+      blend_global_u_3(u_b, u_s, lumpedM, u_min, u_max, active_dofs_blend,
+                       us_b, s_glob,
+                       q_min, q_max, usq_b, q_glob, u_new);
+      check_violation(u_new, u_min, u_max, "u-blend-mult-3", 1e-12, nullptr);
+      clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
+   }
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u_old(i)) / dt; }
+
    // Updated bounds for us.
-   fct_solver_b->ScaleProductBounds(s_min, s_max, u_new,
-                                    active_elem_blend, active_dofs_blend,
-                                    us_min, us_max);
+   if (levels > 1)
+   {
+      fct_solver_b->ScaleProductBounds(s_min, s_max, u_new,
+                                       active_elem_blend, active_dofs_blend,
+                                       us_min, us_max);
+   }
 
    //
    // Sharp solution us_s (not in bounds).
    //
-   Vector d_us_s(size);
-   if (fct_solver_b->NeedsLOProductInput())
+   Vector d_us_s(size), us_s(size);
+   if (levels > 1)
    {
-      d_us_LO.SetSize(size);
-      lo_solver_s->CalcLOSolution(us_old, d_us_LO);
+      if (fct_solver_b->NeedsLOProductInput())
+      {
+         d_us_LO.SetSize(size);
+         lo_solver_s->CalcLOSolution(us_old, d_us_LO);
+      }
+      ho_solver_s->CalcHOSolution(us_old, d_us_HO);
+      fct_solver_s->CalcFCTProduct(us_old_gf, lumpedM, d_us_HO, d_us_LO,
+                                   s_min, s_max, u_b,
+                                   active_elem_blend, active_dofs_blend, d_us_s);
+      add(1.0, us_old, dt, d_us_s, us_s);
    }
-   ho_solver_s->CalcHOSolution(us_old, d_us_HO);
-   fct_solver_s->CalcFCTProduct(us_old_gf, lumpedM, d_us_HO, d_us_LO,
-                                s_min, s_max, u_b,
-                                active_elem_blend, active_dofs_blend, d_us_s);
-   Vector us_s(size);
-   add(1.0, us_old, dt, d_us_s, us_s);
 
    //
    // Blended solution us_new (in bounds).
    //
    Vector us_new(size);
-   blend_global_us(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
-                   active_dofs_blend,
-                   q_min, q_max, usq_b, s_glob, q_glob,
-                   us_new);
-   check_violation(us_new, us_min, us_max, "us-blend-mult",
-                   1e-12, &active_dofs_blend);
-   clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
-   for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us_old(i))/dt; }
+   if (levels > 1)
+   {
+      blend_global_us(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
+                      active_dofs_blend,
+                      q_min, q_max, usq_b, s_glob, q_glob,
+                      us_new);
+      check_violation(us_new, us_min, us_max, "us-blend-mult",
+                      1e-12, &active_dofs_blend);
+      clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
+      for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us_old(i))/dt; }
+   }
+
    // Updated bounds for usq.
-   fct_solver_b->ScaleProductBounds(q_min, q_max, us_new,
-                                    active_elem_blend, active_dofs_blend,
-                                    usq_min, usq_max);
+   if (levels > 2)
+   {
+      fct_solver_b->ScaleProductBounds(q_min, q_max, us_new,
+                                       active_elem_blend, active_dofs_blend,
+                                       usq_min, usq_max);
+   }
 
    //
    // Sharp solution usq_s (not in bounds).
    //
-   Vector d_usq_s(size);
-   if (fct_solver_b->NeedsLOProductInput())
+   Vector d_usq_s(size), usq_s(size);
+   if (levels > 2)
    {
-      d_usq_LO.SetSize(size);
-      lo_solver_s->CalcLOSolution(usq_old, d_usq_LO);
+      if (fct_solver_b->NeedsLOProductInput())
+      {
+         d_usq_LO.SetSize(size);
+         lo_solver_s->CalcLOSolution(usq_old, d_usq_LO);
+      }
+      ho_solver_s->CalcHOSolution(usq_old, d_usq_HO);
+      fct_solver_s->CalcFCTProduct(usq_old_gf, lumpedM, d_usq_HO, d_usq_LO,
+                                   q_min, q_max, us_b,
+                                   active_elem_blend, active_dofs_blend, d_usq_s);
+      add(1.0, usq_old, dt, d_usq_s, usq_s);
    }
-   ho_solver_s->CalcHOSolution(usq_old, d_usq_HO);
-   fct_solver_s->CalcFCTProduct(usq_old_gf, lumpedM, d_usq_HO, d_usq_LO,
-                                q_min, q_max, us_b,
-                                active_elem_blend, active_dofs_blend, d_usq_s);
-   Vector usq_s(size);
-   add(1.0, usq_old, dt, d_usq_s, usq_s);
 
    //
    // Blended solution usq_new (in bounds).
    //
    Vector usq_new(size);
-   blend_global_usq(us_new, us_b, usq_b, usq_s, lumpedM, usq_min, usq_max,
-                    active_dofs_blend, q_glob, usq_new);
-   check_violation(usq_new, usq_min, usq_max, "usq-blend-mult",
-                   1e-12, &active_dofs_blend);
-   clean_roundoff(usq_min, usq_max, usq_new, &active_dofs_blend);
-   for (int i = 0; i < size; i++) { d_usq(i) = (usq_new(i) - usq_old(i))/dt; }
-
+   if (levels > 2)
+   {
+      blend_global_usq(us_new, us_b, usq_b, usq_s, lumpedM, usq_min, usq_max,
+                       active_dofs_blend, q_glob, usq_new);
+      check_violation(usq_new, usq_min, usq_max, "usq-blend-mult",
+                      1e-12, &active_dofs_blend);
+      clean_roundoff(usq_min, usq_max, usq_new, &active_dofs_blend);
+      for (int i = 0; i < size; i++) { d_usq(i) = (usq_new(i) - usq_old(i))/dt; }
+   }
 }
 
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,

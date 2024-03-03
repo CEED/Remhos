@@ -502,8 +502,8 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
 
 void DofInfo::ComputeElementsMinMax(const Vector &u,
                                     Vector &el_min, Vector &el_max,
-                                    Array<bool> *active_el,
-                                    Array<bool> *active_dof) const
+                                    const Array<bool> *active_el,
+                                    const Array<bool> *active_dof) const
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
    int dof_id;
