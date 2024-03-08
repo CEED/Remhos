@@ -852,7 +852,7 @@ int main(int argc, char *argv[])
       dc->Save();
    }
 
-   socketstream sout, vis_b, vis_v_new, vis_s, vis_us, vis_q, vis_usq;
+   socketstream vis_u, vis_b, vis_v_new, vis_a, vis_s, vis_us, vis_q, vis_usq;
    char vishost[] = "localhost";
    int  visport   = 19916;
    if (visualization)
@@ -861,7 +861,7 @@ int main(int argc, char *argv[])
       // another set of GLVis connections (one from each rank):
       MPI_Barrier(pmesh.GetComm());
 
-      sout.precision(8);
+      vis_u.precision(8);
       vis_s.precision(8);
       vis_us.precision(8);
       vis_q.precision(8);
@@ -872,7 +872,7 @@ int main(int argc, char *argv[])
       u.HostRead();
       s.HostRead();
       q.HostRead();
-      VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      VisualizeField(vis_u, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
       if (levels > 1)
       {
          VisualizeField(vis_us, vishost, visport, us, "Solution us",
@@ -997,7 +997,7 @@ int main(int argc, char *argv[])
 #endif
       }
 
-      // needed for velocity modifications.
+      // Needed for velocity modifications.
       dof_info.ComputeLinMaxBound(u, u_max_bounds, u_max_bounds_grad_dir);
       // needed for velocity visualization.
       if (sharp == true)
@@ -1155,9 +1155,18 @@ int main(int argc, char *argv[])
 
          if (visualization)
          {
+            ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+            L2_FECollection fec_0(0, dim);
+            ParFiniteElementSpace fes_0(&pmesh, &fec_0);
+            ParGridFunction bool_el_gf(&fes_0); bool_el_gf = 0.0;
+            for (int i = 0; i < NE; i++)
+            {
+               if (active_elem[i]) { bool_el_gf(i) = 1.0; }
+            }
+
             int Wx = 0, Wy = 0; // window position
             int Ww = 300, Wh = 300; // window size
-            VisualizeField(sout, vishost, visport, u, "Solution u",
+            VisualizeField(vis_u, vishost, visport, u, "Solution u",
                            Wx, Wy, Ww, Wh);
             VisualizeField(vis_b, vishost, visport, u_max_bounds, "Bounds",
                            Wx+Ww, Wy, Ww, Wh);
@@ -1166,6 +1175,9 @@ int main(int argc, char *argv[])
                VisualizeField(vis_v_new, vishost, visport, v_new_vis, "Vel",
                               Wx+2*Ww, Wy, Ww, Wh);
             }
+            VisualizeField(vis_a, vishost, visport, bool_el_gf, "Active El",
+                           Wx+3*Ww, Wy, Ww, Wh);
+
             if (levels > 1)
             {
                ComputeBoolIndicators(NE, u, u_bool_el, u_bool_dofs);
@@ -1624,13 +1636,68 @@ void blend_global_u_3(const Vector &u_b, const Vector &u_s, const Vector &m,
    }
 }
 
-void blend_global_us(const Vector &u, const Vector &u_b,
-                     const Vector &us_b, const Vector &us_s, const Vector &m,
-                     Vector &us_min, Vector &us_max,
-                     const Array<bool> &active_dofs,
-                     const Vector &q_min, const Vector &q_max,
-                     const Vector &usq_b,
-                     double s_glob, double q_glob, Vector &us)
+void blend_global_us_1(const Vector &u, const Vector &u_b,
+                       const Vector &us_b, const Vector &us_s, const Vector &m,
+                       Vector &us_min, Vector &us_max,
+                       const Array<bool> &active_dofs,
+                       double s_glob, Vector &us)
+{
+   const double eps = 1e-12;
+   const int size = us_b.Size();
+
+   Vector f_clip(size);
+   f_clip = 0.0;
+   us.SetSize(size);
+
+   Vector us_LO(size);
+   for (int i = 0; i < size; i++)
+   {
+      us_LO(i) = us_b(i) + (u(i) - u_b(i)) * s_glob;
+   }
+
+   // Clip.
+   double Sp = 0.0, Sn = 0.0;
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { continue; }
+
+      double f_clip_min = us_min(i) - us_LO(i);
+      double f_clip_max = us_max(i) - us_LO(i);
+
+      f_clip(i) = us_s(i) - us_LO(i);
+      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
+      Sp += fmax(m(i) * f_clip(i), 0.0);
+      Sn += fmin(m(i) * f_clip(i), 0.0);
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double S = Sp + Sn;
+
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs[i] == false) { us(i) = 0.0; continue; }
+
+      if (S > eps && f_clip(i) > 0.0)
+      {
+         f_clip(i) *= - Sn / Sp;
+      }
+      if (S < -eps && f_clip(i) < 0.0)
+      {
+         f_clip(i) *= - Sp / Sn;
+      }
+
+      us(i) = us_LO(i) + f_clip(i);
+   }
+}
+
+void blend_global_us_2(const Vector &u, const Vector &u_b,
+                       const Vector &us_b, const Vector &us_s, const Vector &m,
+                       Vector &us_min, Vector &us_max,
+                       const Array<bool> &active_dofs,
+                       const Vector &q_min, const Vector &q_max,
+                       const Vector &usq_b,
+                       double s_glob, double q_glob, Vector &us)
 {
    const double eps = 1e-12;
    const int size = us_b.Size();
@@ -1652,13 +1719,7 @@ void blend_global_us(const Vector &u, const Vector &u_b,
       if (active_dofs[i] == false) { continue; }
 
       double us_max_i = us_max(i);
-      if (q_min(i) - q_glob > eps)
-      {
-         us_max_i = fmin(us_max_i,
-                         (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
-         us_max_i = fmax(us_max_i, us_LO(i));
-      }
-      if (q_max(i) - q_glob < -eps)
+      if (us_s(i) * (q_max(i) - q_glob) < usq_b(i) - us_b(i) * q_glob)
       {
          us_max_i = fmin(us_max_i,
                          (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
@@ -1666,16 +1727,10 @@ void blend_global_us(const Vector &u, const Vector &u_b,
       }
 
       double us_min_i = us_min(i);
-      if (q_max(i) - q_glob > eps)
+      if (us_s(i) * (q_min(i) - q_glob) > usq_b(i) - us_b(i) * q_glob)
       {
          us_min_i = fmax(us_min_i,
-                         (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
-         us_min_i = fmin(us_min_i, us_LO(i));
-      }
-      if (q_min(i) - q_glob < -eps)
-      {
-         us_min_i = fmax(us_min_i,
-                        (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
+                         (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
          us_min_i = fmin(us_min_i, us_LO(i));
       }
 
@@ -1926,7 +1981,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    MFEM_VERIFY(ho_solver_b && lo_solver_b, "FCT requires HO & LO solvers.");
 
    int levels = 1;
-   if (X.Size() > size) { levels++; }
+   if (X.Size() > size)   { levels++; }
    if (X.Size() > 2*size) { levels++; }
 
    // u.
@@ -2172,13 +2227,22 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    Vector us_new(size);
    if (levels > 1)
    {
-      blend_global_us(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
-                      active_dofs_blend,
-                      q_min, q_max, usq_b, s_glob, q_glob,
-                      us_new);
-      check_violation(us_new, us_min, us_max, "us-blend-mult",
+      blend_global_us_1(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
+                        active_dofs_blend, s_glob, us_new);
+      check_violation(us_new, us_min, us_max, "us-blend-mult-1",
                       1e-12, &active_dofs_blend);
       clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
+      if (levels > 2)
+      {
+         us_s = us_new;
+         blend_global_us_2(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
+                           active_dofs_blend,
+                           q_min, q_max, usq_b, s_glob, q_glob,
+                           us_new);
+         check_violation(us_new, us_min, us_max, "us-blend-mult-2",
+                         1e-12, &active_dofs_blend);
+         clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
+      }
       for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us_old(i))/dt; }
    }
 
