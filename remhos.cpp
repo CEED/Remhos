@@ -92,6 +92,7 @@ private:
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
 
    mutable ParGridFunction x_gf;
+   mutable Vector s_old, q_old;
 
    double dt;
    TimeStepControl dt_control;
@@ -145,6 +146,9 @@ public:
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
+
+   void SetInitialS(Vector &s) { s_old = s; }
+   void SetInitialQ(Vector &q) { q_old = q; }
 
    virtual ~AdvectionOperator() { }
 };
@@ -940,6 +944,8 @@ int main(int argc, char *argv[])
                          lo_solver_b, lo_solver_s,
                          fct_solver_b, fct_solver_s, mono_solver);
    adv.evolve_sharp = sharp;
+   if (levels > 1) { adv.SetInitialS(s); }
+   if (levels > 2) { adv.SetInitialQ(q); }
 
    double t = 0.0;
    adv.SetTime(t);
@@ -1408,6 +1414,7 @@ AdvectionOperator::AdvectionOperator(int size,
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    x_gf(K_sharp.ParFESpace()), dofs(_dofs),
+   s_old(0), q_old(0),
    ho_solver_b(hos_b), ho_solver_s(hos_s),
    lo_solver_b(los_b), lo_solver_s(los_s),
    fct_solver_b(fct_b), fct_solver_s(fct_s), mono_solver(mos) { }
@@ -1514,7 +1521,7 @@ void blend_global_u_2(const Vector &u_b, const Vector &u_s, const Vector &m,
       if (active_dofs[i] == false) { continue; }
 
       double u_max_i = u_max(i);
-      if (u_s(i) * (s_max(i) - s_glob) < us_b(i) - u_b(i) * s_glob)
+      if (u_s(i) * (s_max(i) - s_glob) + eps < us_b(i) - u_b(i) * s_glob)
       {
          u_max_i = fmin(u_max_i,
                         (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
@@ -1522,7 +1529,7 @@ void blend_global_u_2(const Vector &u_b, const Vector &u_s, const Vector &m,
       }
 
       double u_min_i = u_min(i);
-      if (u_s(i) * (s_min(i) - s_glob) > us_b(i) - u_b(i) * s_glob)
+      if (u_s(i) * (s_min(i) - s_glob) - eps > us_b(i) - u_b(i) * s_glob)
       {
          u_min_i = fmax(u_min_i,
                         (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
@@ -1584,7 +1591,7 @@ void blend_global_u_3(const Vector &u_b, const Vector &u_s, const Vector &m,
       if (active_dofs[i] == false) { continue; }
 
       double u_max_i = u_max(i);
-      if (u_s(i) * (s_glob * q_max(i) - s_glob * q_glob) >
+      if (u_s(i) * (s_glob * q_max(i) - s_glob * q_glob) - eps >
           fmin(usq_b(i) - us_b(i) * q_max(i), 0.0))
       {
          u_max_i = fmin(u_max_i,
@@ -1594,7 +1601,7 @@ void blend_global_u_3(const Vector &u_b, const Vector &u_s, const Vector &m,
       }
 
       double u_min_i = u_min(i);
-      if (u_s(i) * (s_glob * q_min(i) - s_glob * q_glob) <
+      if (u_s(i) * (s_glob * q_min(i) - s_glob * q_glob) + eps <
           fmax(usq_b(i) - us_b(i) * q_min(i), 0.0))
       {
          u_min_i = fmax(u_min_i,
@@ -1719,7 +1726,7 @@ void blend_global_us_2(const Vector &u, const Vector &u_b,
       if (active_dofs[i] == false) { continue; }
 
       double us_max_i = us_max(i);
-      if (us_s(i) * (q_max(i) - q_glob) < usq_b(i) - us_b(i) * q_glob)
+      if (us_s(i) * (q_max(i) - q_glob) + eps < usq_b(i) - us_b(i) * q_glob)
       {
          us_max_i = fmin(us_max_i,
                          (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
@@ -1727,7 +1734,7 @@ void blend_global_us_2(const Vector &u, const Vector &u_b,
       }
 
       double us_min_i = us_min(i);
-      if (us_s(i) * (q_min(i) - q_glob) > usq_b(i) - us_b(i) * q_glob)
+      if (us_s(i) * (q_min(i) - q_glob) - eps > usq_b(i) - us_b(i) * q_glob)
       {
          us_min_i = fmax(us_min_i,
                          (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
@@ -2017,11 +2024,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
    if (levels > 1)
    {
-      ComputeRatio(NE, us_old, u_old, s, active_elem_old, active_dofs_old);
       // Bounds for s, based on the old values (and old active dofs).
       // This doesn't consider s values from the old inactive dofs, because
       // there were no bounds restriction on them at the previous time step.
-      dofs.ComputeElementsMinMax(s, dofs.xe_min, dofs.xe_max,
+      dofs.ComputeElementsMinMax(s_old, dofs.xe_min, dofs.xe_max,
                                  &active_elem_old, &active_dofs_old);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                          s_min, s_max, 1, &active_elem_old);
@@ -2035,11 +2041,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
    if (levels > 2)
    {
-      ComputeRatio(NE, usq_old, us_old, q, active_elem_old, active_dofs_old);
       // Bounds for q, based on the old values (and old active dofs).
       // This doesn't consider q values from the old inactive dofs, because
       // there were no bounds restriction on them at the previous time step.
-      dofs.ComputeElementsMinMax(q, dofs.xe_min, dofs.xe_max,
+      dofs.ComputeElementsMinMax(q_old, dofs.xe_min, dofs.xe_max,
                                  &active_elem_old, &active_dofs_old);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max,
                          q_min, q_max, 1, &active_elem_old);
@@ -2094,6 +2099,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       check_violation(us_b, us_min, us_max, "us-b-mult",
                       1e-12, &active_dofs_bound);
       clean_roundoff(us_min, us_max, us_b, &active_dofs_bound);
+      // Update s_old.
+      ComputeRatio(NE, us_b, u_b, s_old, active_elem_bound, active_dofs_bound);
+      check_violation(s_old, s_min, s_max, "s-b-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(s_min, s_max, s_old, &active_dofs_bound);
    }
 
    //
@@ -2113,7 +2123,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       ho_solver_b->CalcHOSolution(usq_old, d_usq_HO);
       fct_solver_b->CalcFCTProduct(usq_old_gf, lumpedM, d_usq_HO, d_usq_LO,
                                    q_min, q_max, us_b,
-                                   active_elem_bound, active_dofs_bound, d_usq_b);
+                                   active_elem_bound,active_dofs_bound,d_usq_b);
       // Evolve usq_b, check violations.
       add(1.0, usq_old, dt, d_usq_b, usq_b);
       fct_solver_b->ScaleProductBounds(q_min, q_max, us_b,
@@ -2122,6 +2132,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       check_violation(usq_b, usq_min, usq_max, "usq-b-mult",
                       1e-12, &active_dofs_bound);
       clean_roundoff(usq_min, usq_max, usq_b, &active_dofs_bound);
+      // Update q_old.
+      ComputeRatio(NE, usq_b, us_b, q_old, active_elem_bound,active_dofs_bound);
+      check_violation(q_old, q_min, q_max, "q-b-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(q_min, q_max, q_old, &active_dofs_bound);
    }
 
    if (evolve_sharp == false)
@@ -2243,6 +2258,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                          1e-12, &active_dofs_blend);
          clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
       }
+
+      // Update s_old.
+      ComputeRatio(NE, us_new, u_new, s_old,
+                   active_elem_bound, active_dofs_bound);
+      check_violation(s_old, s_min, s_max, "s-blend-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(s_min, s_max, s_old, &active_dofs_bound);
+
       for (int i = 0; i < size; i++) { d_us(i) = (us_new(i) - us_old(i))/dt; }
    }
 
@@ -2283,6 +2306,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       check_violation(usq_new, usq_min, usq_max, "usq-blend-mult",
                       1e-12, &active_dofs_blend);
       clean_roundoff(usq_min, usq_max, usq_new, &active_dofs_blend);
+
+      // Update q_old.
+      ComputeRatio(NE, usq_new, us_new, q_old,
+                   active_elem_bound, active_dofs_bound);
+      check_violation(q_old, q_min, q_max, "q-blend-mult",
+                      1e-12, &active_dofs_bound);
+      clean_roundoff(q_min, q_max, q_old, &active_dofs_bound);
+
       for (int i = 0; i < size; i++) { d_usq(i) = (usq_new(i) - usq_old(i))/dt; }
    }
 }
