@@ -2023,10 +2023,12 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                  u_min, u_max, d_u_s);
    add(1.0, u_old, dt, d_u_s, u_s);
 
+   const bool local_avg = false;
    double Vol = 0.0, Mass = 0.0, Energy = 0.0;
    for (int i = 0; i < size; i++)
    {
       if (active_dofs_bound[i] == false) { continue; }
+      if (local_avg && fabs(u_b(i) - u_s(i)) < 1e-12) { continue; }
       Vol    += u_b(i) * lumpedM(i);
       Mass   += us_b(i) * lumpedM(i);
       Energy += usq_b(i) * lumpedM(i);
