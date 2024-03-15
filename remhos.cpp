@@ -1269,10 +1269,6 @@ int main(int argc, char *argv[])
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (levels > 1)
    {
-      ComputeBoolIndicators(NE, u, u_bool_el, u_bool_dofs);
-      ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
-      const double s_max_loc = s.Max();
-      MPI_Allreduce(&s_max_loc, &s_max, 1, MPI_DOUBLE, MPI_MAX, comm);
       MPI_Allreduce(&mass_us_loc, &mass_us, 1, MPI_DOUBLE, MPI_SUM, comm);
       if (levels > 2)
       { MPI_Allreduce(&mass_usq_loc, &mass_usq, 1, MPI_DOUBLE, MPI_SUM, comm); }
@@ -1287,7 +1283,6 @@ int main(int argc, char *argv[])
       {
          cout << setprecision(10)
               << "Final mass us:  " << mass_us << endl
-              << "Max value s:    " << s_max << endl << setprecision(6)
               << "Mass loss us:   " << abs(mass0_us - mass_us) << endl;
 
          if (levels > 2)
@@ -1452,10 +1447,14 @@ void clean_roundoff(const Vector &u_min, const Vector &u_max,
 
 }
 
-void blend_global_u_1(const Vector &u_b, const Vector &u_s, const Vector &m,
-                      Vector &u_min, Vector &u_max,
-                      const Array<bool> &active_dofs,
-                      const Vector &us_b, Vector &u)
+void blend_global_u(int levels, const Vector &u_b, const Vector &u_s,
+                    const Vector &m, Vector &u_min, Vector &u_max,
+                    const Array<bool> &active_dofs,
+                    const Vector &s_min, const Vector &s_max,
+                    const Vector &us_b, double s_glob,
+                    const Vector &q_min, const Vector &q_max,
+                    const Vector &usq_b, double q_glob,
+                    Vector &u)
 {
    const double eps = 1e-12;
    const int size = u_b.Size();
@@ -1469,6 +1468,66 @@ void blend_global_u_1(const Vector &u_b, const Vector &u_s, const Vector &m,
    for (int i = 0; i < size; i++)
    {
       if (active_dofs[i] == false) { continue; }
+
+      // eq (3c), right inequality.
+      if (levels > 1 && s_max(i) - s_glob < -eps)
+      {
+         u_max(i) = fmin(u_max(i),
+                         (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
+         u_max(i) = fmax(u_max(i), u_b(i));
+      }
+      if (levels > 1 && s_max(i) - s_glob > eps)
+      {
+         u_min(i) = fmax(u_min(i),
+                         (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
+         u_min(i) = fmin(u_min(i), u_b(i));
+      }
+
+      // eq (3c), left inequality.
+      if (levels > 1 && s_min(i) - s_glob < - eps)
+      {
+         u_min(i) = fmax(u_min(i),
+                         (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
+         u_min(i) = fmin(u_min(i), u_b(i));
+      }
+      if (levels > 1 && s_min(i) - s_glob > eps)
+      {
+         u_max(i) = fmin(u_max(i),
+                         (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
+         u_max(i) = fmax(u_max(i), u_b(i));
+      }
+
+      // eq (3d), right inequality.
+      if (levels > 2 && s_glob * q_max(i) - s_glob * q_glob < - eps)
+      {
+         u_max(i) = fmin(u_max(i),
+                         u_b(i) + (usq_b(i) - us_b(i) * q_max(i)) /
+                                  (s_glob * q_max(i) - s_glob * q_glob));
+         u_max(i) = fmax(u_max(i), u_b(i));
+      }
+      if (levels > 2 && s_glob * q_max(i) - s_glob * q_glob > eps)
+      {
+         u_min(i) = fmax(u_min(i),
+                         u_b(i) + (usq_b(i) - us_b(i) * q_max(i)) /
+                                  (s_glob * q_max(i) - s_glob * q_glob));
+         u_min(i) = fmin(u_min(i), u_b(i));
+      }
+
+      // eq (3d), left inequality.
+      if (levels > 2 && s_glob * q_min(i) - s_glob * q_glob < - eps)
+      {
+         u_min(i) = fmax(u_min(i),
+                         u_b(i) + (usq_b(i) - us_b(i) * q_min(i)) /
+                                  (s_glob * q_min(i) - s_glob * q_glob));
+         u_min(i) = fmin(u_min(i), u_b(i));
+      }
+      if (levels > 2 && s_glob * q_min(i) - s_glob * q_glob > eps)
+      {
+         u_max(i) = fmin(u_max(i),
+                         u_b(i) + (usq_b(i) - us_b(i) * q_min(i)) /
+                                  (s_glob * q_min(i) - s_glob * q_glob));
+         u_max(i) = fmax(u_max(i), u_b(i));
+      }
 
       double f_clip_min = u_min(i) - u_b(i),
              f_clip_max = u_max(i) - u_b(i);
@@ -1500,154 +1559,13 @@ void blend_global_u_1(const Vector &u_b, const Vector &u_s, const Vector &m,
    }
 }
 
-void blend_global_u_2(const Vector &u_b, const Vector &u_s, const Vector &m,
-                      Vector &u_min, Vector &u_max,
-                      const Array<bool> &active_dofs,
-                      const Vector &s_min, const Vector &s_max,
-                      const Vector &us_b, double s_glob,
-                      Vector &u)
-{
-   const double eps = 1e-12;
-   const int size = u_b.Size();
-
-   Vector f_clip(size);
-   f_clip = 0.0;
-   u.SetSize(size);
-
-   // Clip.
-   double Sp = 0.0, Sn = 0.0;
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { continue; }
-
-      double u_max_i = u_max(i);
-      if (u_s(i) * (s_max(i) - s_glob) + eps < us_b(i) - u_b(i) * s_glob)
-      {
-         u_max_i = fmin(u_max_i,
-                        (us_b(i) - u_b(i) * s_glob) / (s_max(i) - s_glob));
-         u_max_i = fmax(u_max_i, u_b(i));
-      }
-
-      double u_min_i = u_min(i);
-      if (u_s(i) * (s_min(i) - s_glob) - eps > us_b(i) - u_b(i) * s_glob)
-      {
-         u_min_i = fmax(u_min_i,
-                        (us_b(i) - u_b(i) * s_glob) / (s_min(i) - s_glob));
-         u_min_i = fmin(u_min_i, u_b(i));
-      }
-
-      u_min(i) = u_min_i;
-      u_max(i) = u_max_i;
-
-      double f_clip_min = u_min(i) - u_b(i),
-             f_clip_max = u_max(i) - u_b(i);
-
-      f_clip(i) = u_s(i) - u_b(i);
-      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
-      Sp += fmax(m(i) * f_clip(i), 0.0);
-      Sn += fmin(m(i) * f_clip(i), 0.0);
-   }
-
-   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   const double S = Sp + Sn;
-
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { u(i) = 0.0; continue; }
-
-      if (S > eps && f_clip(i) > 0.0)
-      {
-         f_clip(i) *= - Sn / Sp;
-      }
-      if (S < -eps && f_clip(i) < 0.0)
-      {
-         f_clip(i) *= - Sp / Sn;
-      }
-
-      u(i) = u_b(i) + f_clip(i);
-   }
-}
-
-void blend_global_u_3(const Vector &u_b, const Vector &u_s, const Vector &m,
-                      Vector &u_min, Vector &u_max,
-                      const Array<bool> &active_dofs,
-                      const Vector &us_b, double s_glob,
-                      const Vector &q_min, const Vector &q_max,
-                      const Vector &usq_b, double q_glob,
-                      Vector &u)
-{
-   const double eps = 1e-12;
-   const int size = u_b.Size();
-
-   Vector f_clip(size);
-   f_clip = 0.0;
-   u.SetSize(size);
-
-   // Clip.
-   double Sp = 0.0, Sn = 0.0;
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { continue; }
-
-      double u_max_i = u_max(i);
-      if (u_s(i) * (s_glob * q_max(i) - s_glob * q_glob) - eps >
-          fmin(usq_b(i) - us_b(i) * q_max(i), 0.0))
-      {
-         u_max_i = fmin(u_max_i,
-                        u_b(i) + fmin(usq_b(i) - us_b(i) * q_max(i), 0.0) /
-                                     (s_glob * q_max(i) - s_glob * q_glob));
-         u_max_i = fmax(u_max_i, u_b(i));
-      }
-
-      double u_min_i = u_min(i);
-      if (u_s(i) * (s_glob * q_min(i) - s_glob * q_glob) + eps <
-          fmax(usq_b(i) - us_b(i) * q_min(i), 0.0))
-      {
-         u_min_i = fmax(u_min_i,
-                        u_b(i) + fmax(usq_b(i) - us_b(i) * q_min(i), 0.0) /
-                                     (s_glob * q_min(i) - s_glob * q_glob));
-         u_min_i = fmin(u_min_i, u_b(i));
-      }
-
-      u_min(i) = u_min_i;
-      u_max(i) = u_max_i;
-
-      double f_clip_min = u_min(i) - u_b(i),
-             f_clip_max = u_max(i) - u_b(i);
-
-      f_clip(i) = u_s(i) - u_b(i);
-      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
-      Sp += fmax(m(i) * f_clip(i), 0.0);
-      Sn += fmin(m(i) * f_clip(i), 0.0);
-   }
-
-   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   const double S = Sp + Sn;
-
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { u(i) = 0.0; continue; }
-
-      if (S > eps && f_clip(i) > 0.0)
-      {
-         f_clip(i) *= - Sn / Sp;
-      }
-      if (S < -eps && f_clip(i) < 0.0)
-      {
-         f_clip(i) *= - Sp / Sn;
-      }
-
-      u(i) = u_b(i) + f_clip(i);
-   }
-}
-
-void blend_global_us_1(const Vector &u, const Vector &u_b,
-                       const Vector &us_b, const Vector &us_s, const Vector &m,
-                       Vector &us_min, Vector &us_max,
-                       const Array<bool> &active_dofs,
-                       double s_glob, Vector &us)
+void blend_global_us(int levels, const Vector &u, const Vector &u_b,
+                     const Vector &us_b, const Vector &us_s, const Vector &m,
+                     Vector &us_min, Vector &us_max,
+                     const Array<bool> &active_dofs,
+                     const Vector &q_min, const Vector &q_max,
+                     const Vector &usq_b,
+                     double s_glob, double q_glob, Vector &us)
 {
    const double eps = 1e-12;
    const int size = us_b.Size();
@@ -1668,81 +1586,33 @@ void blend_global_us_1(const Vector &u, const Vector &u_b,
    {
       if (active_dofs[i] == false) { continue; }
 
-      double f_clip_min = us_min(i) - us_LO(i);
-      double f_clip_max = us_max(i) - us_LO(i);
-
-      f_clip(i) = us_s(i) - us_LO(i);
-      f_clip(i) = fmin(f_clip_max, fmax(f_clip_min, f_clip(i)));
-      Sp += fmax(m(i) * f_clip(i), 0.0);
-      Sn += fmin(m(i) * f_clip(i), 0.0);
-   }
-
-   MPI_Allreduce(MPI_IN_PLACE, &Sp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &Sn, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   const double S = Sp + Sn;
-
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { us(i) = 0.0; continue; }
-
-      if (S > eps && f_clip(i) > 0.0)
+      // eq (4c), right inequality.
+      if (levels > 2 && q_max(i) - q_glob < -eps)
       {
-         f_clip(i) *= - Sn / Sp;
+         us_max(i) = fmin(us_max(i),
+                          (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
+         us_max(i) = fmax(us_max(i), us_LO(i));
       }
-      if (S < -eps && f_clip(i) < 0.0)
+      if (levels > 2 && q_max(i) - q_glob > eps)
       {
-         f_clip(i) *= - Sp / Sn;
+         us_min(i) = fmax(us_min(i),
+                          (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
+         us_min(i) = fmin(us_min(i), us_LO(i));
       }
 
-      us(i) = us_LO(i) + f_clip(i);
-   }
-}
-
-void blend_global_us_2(const Vector &u, const Vector &u_b,
-                       const Vector &us_b, const Vector &us_s, const Vector &m,
-                       Vector &us_min, Vector &us_max,
-                       const Array<bool> &active_dofs,
-                       const Vector &q_min, const Vector &q_max,
-                       const Vector &usq_b,
-                       double s_glob, double q_glob, Vector &us)
-{
-   const double eps = 1e-12;
-   const int size = us_b.Size();
-
-   Vector f_clip(size);
-   f_clip = 0.0;
-   us.SetSize(size);
-
-   Vector us_LO(size);
-   for (int i = 0; i < size; i++)
-   {
-      us_LO(i) = us_b(i) + (u(i) - u_b(i)) * s_glob;
-   }
-
-   // Clip.
-   double Sp = 0.0, Sn = 0.0;
-   for (int i = 0; i < size; i++)
-   {
-      if (active_dofs[i] == false) { continue; }
-
-      double us_max_i = us_max(i);
-      if (us_s(i) * (q_max(i) - q_glob) + eps < usq_b(i) - us_b(i) * q_glob)
+      // eq (4c), left inequality.
+      if (levels > 2 && q_min(i) - q_glob < -eps)
       {
-         us_max_i = fmin(us_max_i,
-                         (usq_b(i) - us_b(i) * q_glob) / (q_max(i) - q_glob));
-         us_max_i = fmax(us_max_i, us_LO(i));
+         us_min(i) = fmax(us_min(i),
+                          (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
+         us_min(i) = fmin(us_min(i), us_LO(i));
       }
-
-      double us_min_i = us_min(i);
-      if (us_s(i) * (q_min(i) - q_glob) - eps > usq_b(i) - us_b(i) * q_glob)
+      if (levels > 2 && q_min(i) - q_glob > eps)
       {
-         us_min_i = fmax(us_min_i,
-                         (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
-         us_min_i = fmin(us_min_i, us_LO(i));
+         us_max(i) = fmin(us_max(i),
+                          (usq_b(i) - us_b(i) * q_glob) / (q_min(i) - q_glob));
+         us_max(i) = fmax(us_max(i), us_LO(i));
       }
-
-      us_min(i) = us_min_i;
-      us_max(i) = us_max_i;
 
       double f_clip_min = us_min(i) - us_LO(i);
       double f_clip_max = us_max(i) - us_LO(i);
@@ -2186,28 +2056,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Blended solution u_new (in bounds).
    //
    Vector u_new(size);
-   blend_global_u_1(u_b, u_s, lumpedM, u_min, u_max, active_dofs_bound,
-                    us_b, u_new);
+   blend_global_u(levels, u_b, u_s, lumpedM,
+                  u_min, u_max, active_dofs_bound,
+                  s_min, s_max, us_b, s_glob,
+                  q_min, q_max, usq_b, q_glob,
+                  u_new);
    ComputeBoolIndicators(NE, u_b, active_elem_blend, active_dofs_blend);
-   check_violation(u_new, u_min, u_max, "u-blend-mult-1", 1e-12, nullptr);
+   check_violation(u_new, u_min, u_max, "u-blend-mult-3", 1e-12, nullptr);
    clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
-   if (levels > 1)
-   {
-      u_s = u_new;
-      blend_global_u_2(u_b, u_s, lumpedM, u_min, u_max, active_dofs_blend,
-                       s_min, s_max, us_b, s_glob, u_new);
-      check_violation(u_new, u_min, u_max, "u-blend-mult-2", 1e-12, nullptr);
-      clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
-   }
-   if (levels > 2)
-   {
-      u_s = u_new;
-      blend_global_u_3(u_b, u_s, lumpedM, u_min, u_max, active_dofs_blend,
-                       us_b, s_glob,
-                       q_min, q_max, usq_b, q_glob, u_new);
-      check_violation(u_new, u_min, u_max, "u-blend-mult-3", 1e-12, nullptr);
-      clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
-   }
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u_old(i)) / dt; }
 
    // Updated bounds for us.
@@ -2242,22 +2098,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    Vector us_new(size);
    if (levels > 1)
    {
-      blend_global_us_1(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
-                        active_dofs_blend, s_glob, us_new);
-      check_violation(us_new, us_min, us_max, "us-blend-mult-1",
+      blend_global_us(levels, u_new, u_b, us_b, us_s,
+                      lumpedM, us_min, us_max, active_dofs_blend,
+                      q_min, q_max, usq_b, s_glob, q_glob,
+                      us_new);
+      check_violation(us_new, us_min, us_max, "us-blend-mult",
                       1e-12, &active_dofs_blend);
       clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
-      if (levels > 2)
-      {
-         us_s = us_new;
-         blend_global_us_2(u_new, u_b, us_b, us_s, lumpedM, us_min, us_max,
-                           active_dofs_blend,
-                           q_min, q_max, usq_b, s_glob, q_glob,
-                           us_new);
-         check_violation(us_new, us_min, us_max, "us-blend-mult-2",
-                         1e-12, &active_dofs_blend);
-         clean_roundoff(us_min, us_max, us_new, &active_dofs_blend);
-      }
 
       // Update s_old.
       ComputeRatio(NE, us_new, u_new, s_old,
