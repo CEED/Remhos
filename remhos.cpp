@@ -1887,7 +1887,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Stuff related to s = us_old / u_old.
    //
    // Compute the ratio s = us_old / u_old, on the old active dofs.
-   Vector s(size), s_min(size), s_max(size);
+   Vector s_min(size), s_max(size);
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
    if (levels > 1)
    {
@@ -1904,7 +1904,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Stuff related to q = usq_old / us_old.
    //
    // Compute the ratio q = usq_old / us_old, on the old active dofs.
-   Vector q(size), q_min(size), q_max(size);
+   Vector q_min(size), q_max(size);
    ComputeBoolIndicators(NE, u_old, active_elem_old, active_dofs_old);
    if (levels > 2)
    {
@@ -2023,7 +2023,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                  u_min, u_max, d_u_s);
    add(1.0, u_old, dt, d_u_s, u_s);
 
-   const bool local_avg = false;
+   const bool local_avg = true;
    double Vol = 0.0, Mass = 0.0, Energy = 0.0;
    for (int i = 0; i < size; i++)
    {
@@ -2049,7 +2049,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                   q_min, q_max, usq_b, q_glob,
                   u_new);
    ComputeBoolIndicators(NE, u_b, active_elem_blend, active_dofs_blend);
-   check_violation(u_new, u_min, u_max, "u-blend-mult-3", 1e-12, nullptr);
+   check_violation(u_new, u_min, u_max, "u-blend-mult", 1e-12, nullptr);
    clean_roundoff(u_min, u_max, u_new, &active_dofs_blend);
    for (int i = 0; i < size; i++) { d_u(i) = (u_new(i) - u_old(i)) / dt; }
 
