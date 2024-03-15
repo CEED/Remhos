@@ -1071,10 +1071,7 @@ int main(int argc, char *argv[])
 //         fct_solver_b->ScaleProductBounds(dof_info.xi_min, dof_info.xi_max, u,
 //                                          active_elem, active_dofs,
 //                                          us_min, us_max);
-//         cout << "in loop u:  " << u(5339) << endl;
-//         cout << "in loop us: " << us(5339) << endl;
-//         cout << "in loop ss_mm: " << us_min(5339) << " "
-//                                   << us_max(5339) << endl;
+
          // Must always be ok with RK1.
          // check_violation(us, us_min, us_max, "us-full", &active_dofs);
       }
@@ -2026,31 +2023,19 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                  u_min, u_max, d_u_s);
    add(1.0, u_old, dt, d_u_s, u_s);
 
-   // double Vol = 0.0, Mass = 0.0, Energy = 0.0;
-   // for (int i = 0; i < size; i++)
-   // {
-   //    if (active_dofs_bound[i] == false) { continue; }
-   //    Vol    += u_b(i) * lumpedM(i);
-   //    Mass   += us_b(i) * lumpedM(i);
-   //    Energy += usq_b(i) * lumpedM(i);
-   // }
-   // MPI_Allreduce(MPI_IN_PLACE, &Vol, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   // MPI_Allreduce(MPI_IN_PLACE, &Mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   // MPI_Allreduce(MPI_IN_PLACE, &Energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-   // const double s_glob = Mass / Vol,
-   //              q_glob = Energy / Mass;
-
-   double s_glob = s_max.Max(), q_glob = q_max.Max();
-   if (levels > 1)
+   double Vol = 0.0, Mass = 0.0, Energy = 0.0;
+   for (int i = 0; i < size; i++)
    {
-      MPI_Allreduce(MPI_IN_PLACE, &s_glob, 1,
-                    MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      if (active_dofs_bound[i] == false) { continue; }
+      Vol    += u_b(i) * lumpedM(i);
+      Mass   += us_b(i) * lumpedM(i);
+      Energy += usq_b(i) * lumpedM(i);
    }
-   if (levels > 2)
-   {
-      MPI_Allreduce(MPI_IN_PLACE, &q_glob, 1,
-                    MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-   }
+   MPI_Allreduce(MPI_IN_PLACE, &Vol, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &Energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   const double s_glob = Mass / Vol,
+                q_glob = Energy / Mass;
 
    //
    // Blended solution u_new (in bounds).
