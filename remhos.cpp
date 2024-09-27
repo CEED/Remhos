@@ -809,6 +809,8 @@ int main(int argc, char *argv[])
                   "Mass-Based LO solver requires a choice of a HO solver.");
       lo_solver_b = new MassBasedAvg(pfes, *ho_solver_b,
                                    (exec_mode == 1) ? &v_gf : nullptr);
+      lo_solver_s = new MassBasedAvg(pfes, *ho_solver_s,
+                                     (exec_mode == 1) ? &v_gf : nullptr);
    }
 
    // Setup of the monolithic solver (if any).

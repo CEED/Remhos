@@ -288,7 +288,7 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    if (mesh_v)
    {
       // Remap mode - get the positions of the mesh at time [t + dt].
-      x_new.Add(dt, *mesh_v);
+      //x_new.Add(dt, *mesh_v);
    }
 
    const int NE = pfes.GetNE();
