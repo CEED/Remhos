@@ -20,6 +20,11 @@
 
 using namespace std;
 
+#if MFEM_VERSION >= 40600
+#define MAX_D1D DofQuadLimits::MAX_D1D
+#define MAX_Q1D DofQuadLimits::MAX_Q1D
+#endif
+
 namespace mfem
 {
 
