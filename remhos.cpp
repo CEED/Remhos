@@ -918,38 +918,16 @@ int main(int argc, char *argv[])
 
    if (mono_type == MonolithicSolverType::Interpolation)
    {
-      InterpolationRemap interpolator;
+      InterpolationRemap interpolator(pmesh);
       ParGridFunction uu(&pfes);
       interpolator.Remap(u, x_final, uu);
       if (visualization)
       {
-         socketstream sock_u, sock_uu;
-
-         VisualizeField(sock_u, "localhost", 19916, u, "Solution u",
-                        0, 0, 400, 400);
+         socketstream sock_uu;
          x = x_final;
-         VisualizeField(sock_uu, "localhost", 19916, uu, "Solution uu",
+         VisualizeField(sock_uu, "localhost", 19916, uu, "Interpolated u",
                         400, 0, 400, 400);
-      }
-      // Check for mass conservation.
-      double mss = 0.0;
-      if (exec_mode == 1)
-      {
-         x = x_final;
-         ml.BilinearForm::operator=(0.0);
-         ml.Assemble();
-         lumpedM.HostRead();
-         ml.SpMat().GetDiag(lumpedM);
-         mss = lumpedM * uu;
-      }
-      double mss_u;
-      MPI_Allreduce(&mss, &mss_u, 1, MPI_DOUBLE, MPI_SUM, comm);
-      if (myid == 0)
-      {
-         cout << setprecision(10)
-              << "Final mass u:  " << mss_u << endl
-              << "Mass loss u:   " << abs(mass0_u - mss_u) << endl
-              << "Mass loss %:   " << abs(mass0_u - mss_u)/mass0_u << endl;
+         x = x0;
       }
       return 0;
    }
