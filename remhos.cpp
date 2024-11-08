@@ -27,7 +27,11 @@
 // as part of the Eulerian phase in Arbitrary-Lagrangian Eulerian (ALE)
 // simulations.
 //
-// Sample runs: see README.md, section 'Verification of Results'.
+// single step:
+// mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 3 -dt 0.002 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1 -vs 20
+// RK2:
+// mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 3 -dt 0.002 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 2 -vs 20
+//
 
 #include "mfem.hpp"
 #include <fstream>
@@ -984,7 +988,7 @@ int main(int argc, char *argv[])
             if (active_dofs[i] == false) { continue; }
 
             double us_min = u(i) * s_min_glob;
-            if (us(i) < us_min) { us(i) = us_min; }
+            //if (us(i) < us_min) { us(i) = us_min; }
          }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
