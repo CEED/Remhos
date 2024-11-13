@@ -88,6 +88,8 @@ private:
    double dt;
    TimeStepControl dt_control;
    mutable double dt_est;
+   mutable TimingData timer;
+
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -132,6 +134,8 @@ public:
       start_submesh_pos = sm_pos;
    }
 
+   void PrintTimingData(int steps) const;
+
    virtual ~AdvectionOperator() { }
 };
 
@@ -158,6 +162,7 @@ int main(int argc, char *argv[])
    double t_final = 4.0;
    TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
+   int max_tsteps = -1;
    bool visualization = true;
    bool visit = false;
    bool verify_bounds = false;
@@ -227,6 +232,8 @@ int main(int argc, char *argv[])
                   "                   1 - Bounds violation of the LO sltn.");
    args.AddOption(&dt, "-dt", "--time-step",
                   "Initial time step size (dt might change based on -dtc).");
+   args.AddOption(&max_tsteps, "-ms", "--max-steps",
+                  "Maximum number of steps (negative means no restriction).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -770,8 +777,7 @@ int main(int argc, char *argv[])
    {
       MFEM_VERIFY(ho_solver != nullptr,
                   "Mass-Based LO solver requires a choice of a HO solver.");
-      lo_solver = new MassBasedAvg(pfes, *ho_solver,
-                                   (exec_mode == 1) ? &v_gf : nullptr);
+      lo_solver = new MassBasedAvg(pfes, *ho_solver);
    }
 
    // Setup of the monolithic solver (if any).
@@ -1062,6 +1068,8 @@ int main(int argc, char *argv[])
          else { res = u; }
       }
 
+      if (ti_total == max_tsteps) { done = true; }
+
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
@@ -1095,6 +1103,8 @@ int main(int argc, char *argv[])
          }
       }
    }
+
+   adv.PrintTimingData(ti_total);
 
    if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
    {
@@ -1249,6 +1259,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    x_gf(Kbf.ParFESpace()),
+   timer(M_HO.Size()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
@@ -1339,13 +1350,21 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
+      // Low-order solution.
+      timer.sw_LO.Start();
       lo_solver->CalcLOSolution(u, du_LO);
+      timer.sw_LO.Stop();
+
+      // High-order solution.
       ho_solver->CalcHOSolution(u, du_HO);
 
+      // Computation of bounds and FCT blending.
+      timer.sw_FCT.Start();
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+      timer.sw_FCT.Stop();
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
@@ -1439,6 +1458,27 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       else { MFEM_ABORT("No solver was chosen."); }
 
       d_us.SyncAliasMemory(Y);
+   }
+}
+
+void AdvectionOperator::PrintTimingData(int steps) const
+{
+   const MPI_Comm com = M_HO.ParFESpace()->GetComm();
+   const int myid = M_HO.ParFESpace()->GetMyRank();
+
+   double my_rt[5], T[5];
+   my_rt[0] = timer.sw_L2inv.RealTime();
+   my_rt[1] = timer.sw_rhs.RealTime();
+   my_rt[2] = timer.sw_LO.RealTime();
+   my_rt[3] = timer.sw_FCT.RealTime();
+   my_rt[4] = my_rt[0] + my_rt[2] + my_rt[3];
+   MPI_Reduce(my_rt, T, 5, MPI_DOUBLE, MPI_MAX, 0, com);
+
+   if (myid == 0)
+   {
+      std::cout << "LO  kernel time:   " << T[2] << std::endl
+                << "FCT kernel time:   " << T[3] << std::endl
+                << "Total kernel time: " << T[4] << std::endl;
    }
 }
 
