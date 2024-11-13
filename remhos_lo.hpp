@@ -22,6 +22,8 @@
 namespace mfem
 {
 
+struct TimingData;
+
 // Low-Order Solver.
 class LOSolver
 {
@@ -37,6 +39,8 @@ public:
    virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
+
+   TimingData *timer = nullptr;
 };
 
 class Assembly;

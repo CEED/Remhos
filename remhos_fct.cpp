@@ -484,6 +484,8 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
                                       const Vector &u_min, const Vector &u_max,
                                       Vector &du) const
 {
+   timer->sw_FCT.Start();
+
    const int NE = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
    Vector f_clip(nd);
@@ -556,6 +558,8 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
          du(dof_id) = du_lo(dof_id) + f_clip(j) / m(dof_id);
       }
    }
+
+   timer->sw_FCT.Stop();
 }
 
 void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,

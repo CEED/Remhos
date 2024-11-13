@@ -22,6 +22,8 @@
 namespace mfem
 {
 
+struct TimingData;
+
 // High-Order Solver.
 // Conserve mass / provide high-order convergence / may violate the bounds.
 class HOSolver
@@ -35,6 +37,8 @@ public:
    virtual ~HOSolver() { }
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
+
+   TimingData *timer = nullptr;
 };
 
 class CGHOSolver : public HOSolver

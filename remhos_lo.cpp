@@ -246,6 +246,8 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
 void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 {
+   timer->sw_LO.Start();
+
    // Compute the new HO solution.
    ParGridFunction u_HO_new(&pfes);
    if (du_HO)
@@ -275,6 +277,8 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
          du(k*ndofs + i) = (u_LO_new - u(k*ndofs + i)) / dt;
       }
    }
+
+   timer->sw_LO.Stop();
 }
 
 void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,

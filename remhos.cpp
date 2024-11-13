@@ -1104,7 +1104,15 @@ int main(int argc, char *argv[])
       }
    }
 
-   adv.PrintTimingData(ti_total);
+   int steps = ti_total;
+   switch (ode_solver_type)
+   {
+   case 2: steps *= 2; break;
+   case 3: steps *= 3; break;
+   case 4: steps *= 4; break;
+   case 6: steps *= 6; break;
+   }
+   adv.PrintTimingData(steps);
 
    if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
    {
@@ -1261,7 +1269,12 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    x_gf(Kbf.ParFESpace()),
    timer(M_HO.Size()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos)
+{
+   if (ho_solver)  { ho_solver->timer  = &timer; }
+   if (lo_solver)  { lo_solver->timer  = &timer; }
+   if (fct_solver) { fct_solver->timer = &timer; }
+}
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
@@ -1288,10 +1301,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       lumpedM.HostReadWrite();
       ml.SpMat().GetDiag(lumpedM);
 
+      timer.sw_L2inv.Start();
       M_HO.BilinearForm::operator=(0.0);
       M_HO.Assemble();
+      timer.sw_L2inv.Stop();
+
+      timer.sw_rhs.Start();
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
+      timer.sw_rhs.Stop();
 
       if (lom.pk)
       {
@@ -1357,17 +1375,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       if (mba) { mba->SetHOSolution(du_HO); }
 
       // Low-order solution.
-      timer.sw_LO.Start();
       lo_solver->CalcLOSolution(u, du_LO);
-      timer.sw_LO.Stop();
 
       // Computation of bounds and FCT blending.
       timer.sw_FCT.Start();
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      timer.sw_FCT.Stop();
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
-      timer.sw_FCT.Stop();
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
@@ -1470,18 +1486,30 @@ void AdvectionOperator::PrintTimingData(int steps) const
    const int myid = M_HO.ParFESpace()->GetMyRank();
 
    double my_rt[5], T[5];
-   my_rt[0] = timer.sw_L2inv.RealTime();
-   my_rt[1] = timer.sw_rhs.RealTime();
+   my_rt[0] = timer.sw_rhs.RealTime();
+   my_rt[1] = timer.sw_L2inv.RealTime();
    my_rt[2] = timer.sw_LO.RealTime();
    my_rt[3] = timer.sw_FCT.RealTime();
    my_rt[4] = my_rt[0] + my_rt[2] + my_rt[3];
    MPI_Reduce(my_rt, T, 5, MPI_DOUBLE, MPI_MAX, 0, com);
 
+   const HYPRE_BigInt dofs_steps = M_HO.ParFESpace()->GlobalVSize() * steps;
+
    if (myid == 0)
    {
-      std::cout << "LO  kernel time:   " << T[2] << std::endl
-                << "FCT kernel time:   " << T[3] << std::endl
+      std::cout << "---" << std::endl;
+      std::cout << "RHS   kernel time: " << T[0] << std::endl
+                << "L2inv kernel time: " << T[1] << std::endl
+                << "LO    kernel time: " << T[2] << std::endl
+                << "FCT   kernel time: " << T[3] << std::endl
                 << "Total kernel time: " << T[4] << std::endl;
+      std::cout << "---" << std::endl;
+      std::cout << "FOM RHS: " << 1e-6 * dofs_steps / T[0] << std::endl
+                << "FOM INV: " << 1e-6 * dofs_steps / T[1] << std::endl
+                << "FOM LO:  " << 1e-6 * dofs_steps / T[2] << std::endl
+                << "FOM FCT: " << 1e-6 * dofs_steps / T[3] << std::endl
+                << "FOM:     " << 1e-6 * dofs_steps / T[4] << std::endl;
+      std::cout << "(megadofs x time steps / second)\n---" << std::endl;
    }
 }
 

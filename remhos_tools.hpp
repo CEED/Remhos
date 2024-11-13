@@ -49,7 +49,7 @@ class DofInfo;
 struct TimingData
 {
    // Total times for all major computations.
-   StopWatch sw_L2inv, sw_rhs, sw_LO, sw_FCT;
+   StopWatch sw_rhs, sw_L2inv, sw_LO, sw_FCT;
 
    // Store the number of local L2 dofs.
    const HYPRE_Int L2dof;

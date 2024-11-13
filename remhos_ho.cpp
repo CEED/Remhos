@@ -78,14 +78,16 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
    MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
                "PA for DG is not supported for Local Inverse.");
+   MFEM_VERIFY(timer, "Timer not set.");
 
+   timer->sw_rhs.Start();
    Vector rhs(u.Size());
-
    K.SpMat().HostReadWriteI();
    K.SpMat().HostReadWriteJ();
    K.SpMat().HostReadWriteData();
    HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
    K_mat->Mult(u, rhs);
+   timer->sw_rhs.Stop();
 
    const int ne = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
@@ -97,9 +99,11 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    {
       pfes.GetElementDofs(i, dofs);
       rhs.GetSubVector(dofs, rhs_loc);
+      timer->sw_L2inv.Start();
       M.SpMat().GetSubMatrix(dofs, dofs, M_loc);
       M_loc_inv.Factor();
       M_loc_inv.Mult(rhs_loc, du_loc);
+      timer->sw_L2inv.Stop();
       du.SetSubVector(dofs, du_loc);
    }
 
