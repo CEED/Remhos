@@ -1350,13 +1350,16 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
+      // High-order solution.
+      ho_solver->CalcHOSolution(u, du_HO);
+
+      auto mba = dynamic_cast<MassBasedAvg *>(lo_solver);
+      if (mba) { mba->SetHOSolution(du_HO); }
+
       // Low-order solution.
       timer.sw_LO.Start();
       lo_solver->CalcLOSolution(u, du_LO);
       timer.sw_LO.Stop();
-
-      // High-order solution.
-      ho_solver->CalcHOSolution(u, du_HO);
 
       // Computation of bounds and FCT blending.
       timer.sw_FCT.Start();

@@ -247,10 +247,18 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 {
    // Compute the new HO solution.
-   Vector du_HO(u.Size());
    ParGridFunction u_HO_new(&pfes);
-   ho_solver.CalcHOSolution(u, du_HO);
-   add(1.0, u, dt, du_HO, u_HO_new);
+   if (du_HO)
+   {
+      add(1.0, u, dt, *du_HO, u_HO_new);
+      du_HO = nullptr;
+   }
+   else
+   {
+      Vector du_HO(u.Size());
+      ho_solver.CalcHOSolution(u, du_HO);
+      add(1.0, u, dt, du_HO, u_HO_new);
+   }
 
    // Mesh positions for the new HO solution.
    ParMesh *pmesh = pfes.GetParMesh();
