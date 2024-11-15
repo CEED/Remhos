@@ -23,9 +23,9 @@ RK2IDPSolver::RK2IDPSolver()
 {
 }
 
-void RK2IDPSolver::Init(TimeDependentOperator &f)
+void RK2IDPSolver::Init(LimitedTimeDependentOperator &f)
 {
-   ODESolver::Init(f);
+   IDPODESolver::Init(f);
    dx12.SetSize(f.Height());
    dx.SetSize(f.Height());
 }

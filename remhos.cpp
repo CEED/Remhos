@@ -79,7 +79,7 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
-class AdvectionOperator : public TimeDependentOperator
+class AdvectionOperator : public LimitedTimeDependentOperator
 {
 private:
    BilinearForm &Mbf, &ml;
@@ -119,7 +119,12 @@ public:
                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                      MonolithicSolver *mos);
 
-   virtual void Mult(const Vector &x, Vector &y) const;
+   void Mult(const Vector &x, Vector &y) const override;
+
+   void MultUnlimited(const Vector &x, Vector &y) const override
+   { Mult(x, y); }
+
+   void LimitMult(const Vector &x, Vector &y) const override { }
 
    void SetTimeStepControl(TimeStepControl tsc)
    {
@@ -291,18 +296,18 @@ int main(int argc, char *argv[])
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
-   ODESolver *ode_solver = NULL;
+   IDPODESolver *ode_solver = NULL;
    switch (ode_solver_type)
    {
-      case 1: ode_solver = new ForwardEulerSolver; break;
+      //case 1: ode_solver = new ForwardEulerSolver; break;
       case 2: ode_solver = new RK2IDPSolver(); break;
-      case 3: ode_solver = new RK3SSPSolver; break;
+      /*case 3: ode_solver = new RK3SSPSolver; break;
       case 4:
          if (myid == 0) { MFEM_WARNING("RK4 may violate the bounds."); }
          ode_solver = new RK4Solver; break;
       case 6:
          if (myid == 0) { MFEM_WARNING("RK6 may violate the bounds."); }
-         ode_solver = new RK6Solver; break;
+         ode_solver = new RK6Solver; break;*/
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
@@ -1251,7 +1256,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   LimitedTimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
