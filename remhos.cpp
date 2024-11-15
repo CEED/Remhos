@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
    IDPODESolver *ode_solver = NULL;
    switch (ode_solver_type)
    {
-      //case 1: ode_solver = new ForwardEulerSolver; break;
+      case 1: ode_solver = new ForwardEulerIDPSolver(); break;
       case 2: ode_solver = new RK2IDPSolver(); break;
       /*case 3: ode_solver = new RK3SSPSolver; break;
       case 4:

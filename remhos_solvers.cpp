@@ -19,8 +19,21 @@
 namespace mfem
 {
 
-RK2IDPSolver::RK2IDPSolver()
+void ForwardEulerIDPSolver::Init(LimitedTimeDependentOperator &f)
 {
+   IDPODESolver::Init(f);
+   dx.SetSize(f.Height());
+}
+
+void ForwardEulerIDPSolver::Step(Vector &x, double &t, double &dt)
+{
+   f->SetTime(t);
+   f->SetDt(dt);
+   f->MultUnlimited(x, dx);
+   f->LimitMult(x, dx);
+
+   x.Add(dt, dx);
+   t += dt;
 }
 
 void RK2IDPSolver::Init(LimitedTimeDependentOperator &f)

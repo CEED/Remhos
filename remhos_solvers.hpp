@@ -72,12 +72,19 @@ public:
    { ODESolver::Init(f_); f = &f_; }
 };
 
+class ForwardEulerIDPSolver : public IDPODESolver
+{
+   Vector dx;
+public:
+   void Init(LimitedTimeDependentOperator &f) override;
+   void Step(Vector &x, double &t, double &dt) override;
+};
+
 class RK2IDPSolver : public IDPODESolver
 {
    Vector dx12, dx;
 
 public:
-   RK2IDPSolver();
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;
 };
