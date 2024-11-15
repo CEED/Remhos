@@ -1470,7 +1470,7 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          const int myid = x_gf.ParFESpace()->GetMyRank();
          if (myid == 0) { std::cout << "      --- RK stage" << std::endl; }
-         std::cout << "      in:  ";
+         if (myid == 0) { std::cout << "      in:  "; }
          ComputeMinMaxS(s, s_bool_dofs, myid);
 #endif
 
@@ -1496,7 +1496,7 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          Vector us_new(size), s_new(size);
          add(1.0, us, dt, d_us, us_new);
-         std::cout << "      out: ";
+         if (myid == 0) { std::cout << "      out: "; }
          ComputeRatio(NE, us_new, u_new, s_new, s_bool_el_new, s_bool_dofs_new);
          ComputeMinMaxS(s_new, s_bool_dofs_new, myid);
 #endif
