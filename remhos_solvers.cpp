@@ -34,14 +34,16 @@ void RK2IDPSolver::Step(Vector &x, double &t, double &dt)
 {
    f->SetTime(t);
    f->SetDt(dt/2.);
-   f->Mult(x, dx12);
+   f->MultUnlimited(x, dx12);
+   f->LimitMult(x, dx12);
 
    x.Add(dt/2., dx12);
    f->SetTime(t+dt/2.);
    //f->SetDt(dt/2.);
-   f->Mult(x, dx);
+   f->MultUnlimited(x, dx);
 
    add(2., dx, -1., dx12, dx);
+   f->LimitMult(x, dx);
 
    x.Add(dt/2., dx);
    t += dt;

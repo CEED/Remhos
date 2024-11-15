@@ -120,12 +120,9 @@ public:
                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                      MonolithicSolver *mos);
 
-   void Mult(const Vector &x, Vector &y) const override;
+   void MultUnlimited(const Vector &x, Vector &y) const override;
 
-   void MultUnlimited(const Vector &x, Vector &y) const override
-   { Mult(x, y); }
-
-   void LimitMult(const Vector &x, Vector &y) const override { }
+   void LimitMult(const Vector &x, Vector &y) const override;
 
    void SetTimeStepControl(TimeStepControl tsc)
    {
@@ -1271,7 +1268,7 @@ AdvectionOperator::AdvectionOperator(const Array<int> &offsets,
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
-void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
+void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
 {
    if (exec_mode == 1)
    {
@@ -1338,9 +1335,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
    }
 
-   const int size = Kbf.ParFESpace()->GetVSize();
-   const int NE   = Kbf.ParFESpace()->GetNE();
-
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
@@ -1348,28 +1342,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    BlockVector block_Y(Y, block_offsets);
    const Vector &u = block_X.GetBlock(0);
    Vector &d_u = block_Y.GetBlock(0);
-   Vector du_HO(u.Size()), du_LO(u.Size());
-
-   x_gf = u;
-   x_gf.ExchangeFaceNbrData();
 
    if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
    else if (fct_solver)
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
+      ho_solver->CalcHOSolution(u, d_u);
 
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
-
-      if (dt_control == TimeStepControl::LOBoundsError)
-      {
-         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      }
+      // Limiting is deferred to LimitMult()
    }
    else if (lo_solver)
    {
@@ -1399,21 +1380,84 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       const Vector &us = block_X.GetBlock(1);
       Vector &d_us = block_Y.GetBlock(1);
 
-      x_gf = us;
-      x_gf.ExchangeFaceNbrData();
-
       if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
       else if (fct_solver)
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector d_us_HO(us.Size()), d_us_LO;
+         ho_solver->CalcHOSolution(us, d_us);
+
+         // Limiting is deferred to LimitMult()
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
+   }
+}
+
+void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
+{
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
+   const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   BlockVector block_Y(Y, block_offsets);
+   const Vector &u = block_X.GetBlock(0);
+   Vector &d_u = block_Y.GetBlock(0);
+
+
+   if (fct_solver)
+   {
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      x_gf = u;
+      x_gf.ExchangeFaceNbrData();
+
+      Vector du_HO(d_u), du_LO(u.Size());
+
+      lo_solver->CalcLOSolution(u, du_LO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, d_u);
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      }
+   }
+
+   d_u.SyncAliasMemory(Y);
+
+   // Remap the product field, if there is a product field.
+   if (block_offsets.Size() > 2)
+   {
+      MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
+      MFEM_VERIFY(dt_control == TimeStepControl::FixedTimeStep,
+                  "Automatic time step is not implemented for product remap.");
+
+      const Vector &us = block_X.GetBlock(1);
+      Vector &d_us = block_Y.GetBlock(1);
+
+      if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         x_gf = us;
+         x_gf.ExchangeFaceNbrData();
+
+         Vector d_us_HO(d_us), d_us_LO;
          if (fct_solver->NeedsLOProductInput())
          {
             d_us_LO.SetSize(us.Size());
             lo_solver->CalcLOSolution(us, d_us_LO);
          }
-         ho_solver->CalcHOSolution(us, d_us_HO);
+
+         const int size = Kbf.ParFESpace()->GetVSize();
+         const int NE   = Kbf.ParFESpace()->GetNE();
 
          // Compute the ratio s = us_old / u_old, and old active dofs.
          Vector s(size);
@@ -1453,9 +1497,6 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
          ComputeMinMaxS(s_new, s_bool_dofs_new, myid);
 #endif
       }
-      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
-      else { MFEM_ABORT("No solver was chosen."); }
 
       d_us.SyncAliasMemory(Y);
    }
