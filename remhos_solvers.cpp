@@ -33,10 +33,12 @@ void RK2IDPSolver::Init(LimitedTimeDependentOperator &f)
 void RK2IDPSolver::Step(Vector &x, double &t, double &dt)
 {
    f->SetTime(t);
+   f->SetDt(dt/2.);
    f->Mult(x, dx12);
 
    x.Add(dt/2., dx12);
    f->SetTime(t+dt/2.);
+   //f->SetDt(dt/2.);
    f->Mult(x, dx);
 
    add(2., dx, -1., dx12, dx);

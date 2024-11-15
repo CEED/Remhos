@@ -24,6 +24,9 @@ namespace mfem
 
 class LimitedTimeDependentOperator : public TimeDependentOperator
 {
+protected:
+   real_t dt;
+
 public:
    /** @brief Construct a "square" LimitedTimeDependentOperator (u,t) -> k(u,t),
       where u and k have the same dimension @a n. */
@@ -36,6 +39,9 @@ public:
       : TimeDependentOperator(h, w, t) { }
 
    virtual ~LimitedTimeDependentOperator() { }
+
+   virtual void SetDt(double dt_) { dt = dt_; }
+   virtual real_t GetDt() const { return dt; }
 
    void Mult(const Vector &u, Vector &k) const override
    {
