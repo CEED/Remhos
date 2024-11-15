@@ -82,6 +82,8 @@ Vector bb_min, bb_max;
 class AdvectionOperator : public LimitedTimeDependentOperator
 {
 private:
+   const Array<int> &block_offsets;
+
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
@@ -109,8 +111,8 @@ private:
                                const Vector &x_min, const Vector &x_max) const;
 
 public:
-   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
-                     Vector &_lumpedM,
+   AdvectionOperator(const Array<int> &offsets, BilinearForm &Mbf_,
+                     BilinearForm &_ml, Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                      GridFunction &pos, GridFunction *sub_pos,
@@ -896,7 +898,7 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(offset, m, ml, lumpedM, k, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
@@ -1246,7 +1248,8 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
+AdvectionOperator::AdvectionOperator(const Array<int> &offsets,
+                                     BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -1256,7 +1259,8 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   LimitedTimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   LimitedTimeDependentOperator(offsets.Last()), block_offsets(offsets),
+   Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -1339,10 +1343,10 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector u, d_u;
-   Vector* xptr = const_cast<Vector*>(&X);
-   u.MakeRef(*xptr, 0, size);
-   d_u.MakeRef(Y, 0, size);
+   const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   BlockVector block_Y(Y, block_offsets);
+   const Vector &u = block_X.GetBlock(0);
+   Vector &d_u = block_Y.GetBlock(0);
    Vector du_HO(u.Size()), du_LO(u.Size());
 
    x_gf = u;
@@ -1385,15 +1389,14 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u.SyncAliasMemory(Y);
 
    // Remap the product field, if there is a product field.
-   if (X.Size() > size)
+   if (block_offsets.Size() > 2)
    {
       MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
       MFEM_VERIFY(dt_control == TimeStepControl::FixedTimeStep,
                   "Automatic time step is not implemented for product remap.");
 
-      Vector us, d_us;
-      us.MakeRef(*xptr, size, size);
-      d_us.MakeRef(Y, size, size);
+      const Vector &us = block_X.GetBlock(1);
+      Vector &d_us = block_Y.GetBlock(1);
 
       x_gf = us;
       x_gf.ExchangeFaceNbrData();
