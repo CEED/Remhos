@@ -48,9 +48,11 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
+                          NonlinearPenalty, FCTProject
+                         };
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased
+                        };
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};

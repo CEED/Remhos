@@ -91,11 +91,11 @@ protected:
                                    Vector &el_mass, Vector &el_vol) const;
 
 public:
-  MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
-               const GridFunction *mesh_vel)
-     : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+   MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
+                const GridFunction *mesh_vel)
+      : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
 
-  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };
 
 //PA based Residual Distribution
