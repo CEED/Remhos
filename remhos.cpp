@@ -1436,10 +1436,11 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                     s_bool_el_new, s_bool_dofs_new, d_us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-         Vector us_new(size);
+         Vector us_new(size), s_new(size);
          add(1.0, us, dt, d_us, us_new);
          std::cout << "      out: ";
-         ComputeMinMaxS(NE, us_new, u_new, myid);
+         ComputeRatio(NE, us_new, u_new, s_new, s_bool_el_new, s_bool_dofs_new);
+         ComputeMinMaxS(s_new, s_bool_dofs_new, myid);
 #endif
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
