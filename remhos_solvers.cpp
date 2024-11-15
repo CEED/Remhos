@@ -42,6 +42,7 @@ void RK2IDPSolver::Step(Vector &x, double &t, double &dt)
    add(2., dx, -1., dx12, dx);
 
    x.Add(dt/2., dx);
+   t += dt;
 }
 
 } // namespace mfem
