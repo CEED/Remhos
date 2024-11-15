@@ -134,7 +134,13 @@ public:
       dt_control = tsc;
    }
 
-   void SetDt(double _dt) override { LimitedTimeDependentOperator::SetDt(_dt); dt_est = dt; }
+   void SetDt(double _dt) override
+   {
+      LimitedTimeDependentOperator::SetDt(_dt);
+      dt_est = dt;
+      if (lo_solver)  { lo_solver->UpdateTimeStep(dt); }
+      if (fct_solver) { fct_solver->UpdateTimeStep(dt); }
+   }
 
    double GetTimeStepEstimate() { return dt_est; }
 
@@ -931,8 +937,6 @@ int main(int argc, char *argv[])
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
 
       if (product_sync)
       {
