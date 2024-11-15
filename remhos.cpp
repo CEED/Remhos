@@ -982,6 +982,7 @@ int main(int argc, char *argv[])
          // now we have implemented only the minimum global bound.
          u.HostRead();
          us.HostReadWrite();
+#if 0
          const int s = u.Size();
          Array<bool> active_elem, active_dofs;
          ComputeBoolIndicators(NE, u, active_elem, active_dofs);
@@ -990,8 +991,9 @@ int main(int argc, char *argv[])
             if (active_dofs[i] == false) { continue; }
 
             double us_min = u(i) * s_min_glob;
-            //if (us(i) < us_min) { us(i) = us_min; }
+            if (us(i) < us_min) { us(i) = us_min; }
          }
+#endif
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
