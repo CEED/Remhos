@@ -78,6 +78,16 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+class RK2IDPSolver : public ODESolver
+{
+   Vector dx12, dx;
+
+public:
+   RK2IDPSolver();
+   void Init(TimeDependentOperator &f) override;
+   void Step(Vector &x, double &t, double &dt) override;
+};
+
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
@@ -294,7 +304,7 @@ int main(int argc, char *argv[])
    switch (ode_solver_type)
    {
       case 1: ode_solver = new ForwardEulerSolver; break;
-      case 2: ode_solver = new RK2Solver(1.0); break;
+      case 2: ode_solver = new RK2IDPSolver(); break;
       case 3: ode_solver = new RK3SSPSolver; break;
       case 4:
          if (myid == 0) { MFEM_WARNING("RK4 may violate the bounds."); }
@@ -1862,4 +1872,29 @@ double inflow_function(const Vector &x)
       return 0.25*(1.+tanh((r+c-a)/b))*(1.-tanh((r-c-a)/b));
    }
    else { return 0.0; }
+}
+
+RK2IDPSolver::RK2IDPSolver()
+{
+}
+
+void RK2IDPSolver::Init(TimeDependentOperator &f)
+{
+   ODESolver::Init(f);
+   dx12.SetSize(f.Height());
+   dx.SetSize(f.Height());
+}
+
+void RK2IDPSolver::Step(Vector &x, double &t, double &dt)
+{
+   f->SetTime(t);
+   f->Mult(x, dx12);
+
+   x.Add(dt/2., dx12);
+   f->SetTime(t+dt/2.);
+   f->Mult(x, dx);
+
+   add(2., dx, -1., dx12, dx);
+
+   x.Add(dt/2., dx);
 }
