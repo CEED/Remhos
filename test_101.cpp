@@ -2,7 +2,8 @@
 #include <cassert>
 #include <memory>
 #include <sstream>
-
+#include <unordered_map>
+#include <functional>
 // #include "mfem.hpp"
 
 #include <remhos.hpp>
@@ -16,21 +17,29 @@ int remhos(int argc, char *argv[], double &final_mass_u);
 ///////////////////////////////////////////////////////////////////////////////
 struct Test
 {
-   const char *cmd;
-   double final_mass_u;
+   static constexpr const char *binary = "remhos ";
+   static constexpr const char *common = "-no-vis -vs 1";
+   std::string mesh, options;
+   const double result = 0.0;
+   Test(const char * msh, const char * extra, double result)
+      : mesh(msh), options(std::string(extra) + common), result(result) {}
+   std::string Command() const { return binary + mesh + options; }
 };
+
 
 ///////////////////////////////////////////////////////////////////////////////
 const Test runs[] =
 {
    {
-      "remhos -m ../data/inline-quad.mesh -p 14 -rs 1 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -vs 1 -ms 5 -no-vis",
+      "-m ../data/inline-quad.mesh ",
+      "-p 14 -rs 1 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.0847944657512583
    },
-   /*{
-      "remhos -m ../data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -vs 1 -ms 5 -no-vis",
+   {
+      "-m ../data/cube01_hex.mesh ",
+      "-p 10 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.11972857593296446
-   }*/
+   }
 };
 
 using args_ptr_t = std::vector<std::unique_ptr<char[]>>;
@@ -42,7 +51,8 @@ int RemhosTest(const Test & test)
    static args_ptr_t args_ptr;
 
    args_t args;
-   std::istringstream iss(test.cmd);
+
+   std::istringstream iss(test.Command());
 
    std::string token;
    while (iss >> token)
@@ -58,16 +68,11 @@ int RemhosTest(const Test & test)
    double final_mass_u{};
    remhos(args.size()-1, args.data(), final_mass_u);
 
-   dbg("final_mass_u: {} vs. {}", final_mass_u, test.final_mass_u);
+   dbg("final_mass_u: {} vs. {}", final_mass_u, test.result);
 
-   if (AlmostEq(final_mass_u, test.final_mass_u))
-   {
-      dbg("✅");
-      return EXIT_SUCCESS;
-   }
+   if (AlmostEq(final_mass_u, test.result)) { return dbg("✅"), EXIT_SUCCESS; }
 
-   dbg("❌");
-   return EXIT_FAILURE;
+   return dbg("❌"), EXIT_FAILURE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
