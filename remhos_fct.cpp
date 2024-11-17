@@ -18,6 +18,9 @@
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 
+#define DBG_COLOR ::debug::kTomato
+#include "debug.hpp"
+
 using namespace std;
 
 namespace mfem
@@ -490,74 +493,92 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    const int nd = pfes.GetFE(0)->GetDof();
    Vector f_clip(nd);
 
-   int dof_id;
-   double sumPos, sumNeg, u_new_ho, u_new_lo, new_mass, f_clip_min, f_clip_max;
-   double umin, umax;
-   const double eps = 1.0e-15;
-
    // Smoothness indicator.
    ParGridFunction si_val;
+
    if (smth_indicator)
    {
+      MFEM_ABORT("smth_indicator not supported in kernel!");
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
-   u.HostRead();
-   m.HostRead();
-   du.HostReadWrite();
-   du_lo.HostRead(); du_ho.HostRead();
-   for (int k = 0; k < NE; k++)
+   const auto U = mfem::Reshape(u.Read(), NE*nd);
+   const auto M = mfem::Reshape(m.Read(), NE*nd);
+   const auto DU_LO = mfem::Reshape(du_lo.Read(), NE*nd);
+   const auto DU_HO = mfem::Reshape(du_ho.Read(), NE*nd);
+
+   using u_mnx_t = decltype(mfem::Reshape(u_min.Read(), NE*nd));
+   u_mnx_t U_MIN = mfem::Reshape(u_min.Read(), NE*nd);
+   u_mnx_t U_MAX = mfem::Reshape(u_max.Read(), NE*nd);
+   if (Device::Allows(Backend::DEBUG_DEVICE)) // 🔥🔥 debug
    {
-      sumPos = sumNeg = 0.0;
+      U_MIN = mfem::Reshape(u_min.HostRead(), NE*nd);
+      U_MAX = mfem::Reshape(u_max.HostRead(), NE*nd);
+   }
+   auto F_CLIP = mfem::Reshape(f_clip.Write(), nd);
+   auto DU = mfem::Reshape(du.Write(), NE*nd);
+
+   const double δt = dt;
+
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
+   {
+      const double eps = 1.0e-15;
+      double sumPos = 0.0, sumNeg = 0.0;
 
       // Clip.
       for (int j = 0; j < nd; j++)
       {
-         dof_id = k*nd+j;
+         const int dof_id = k*nd+j;
 
-         u_new_ho   = u(dof_id) + dt * du_ho(dof_id);
-         u_new_lo   = u(dof_id) + dt * du_lo(dof_id);
+         double u_new_lo   = U(dof_id) + δt * DU_LO(dof_id);
 
-         umin = u_min(dof_id);
-         umax = u_max(dof_id);
+         double umin = U_MIN(dof_id);
+         double umax = U_MAX(dof_id);
+
          if (smth_indicator)
          {
+            double u_new_ho   = U(dof_id) + δt * DU_HO(dof_id);
             smth_indicator->UpdateBounds(dof_id, u_new_ho, si_val, umin, umax);
          }
 
-         f_clip_min = m(dof_id) / dt * (umin - u_new_lo);
-         f_clip_max = m(dof_id) / dt * (umax - u_new_lo);
+         double f_clip_min = M(dof_id) / δt * (umin - u_new_lo);
+         double f_clip_max = M(dof_id) / δt * (umax - u_new_lo);
 
-         f_clip(j) = m(dof_id) * (du_ho(dof_id) - du_lo(dof_id));
-         f_clip(j) = min(f_clip_max, max(f_clip_min, f_clip(j)));
+         F_CLIP[j] = M(dof_id) * (DU_HO(dof_id) - DU_LO(dof_id));
+         F_CLIP[j] = fmin(f_clip_max, fmax(f_clip_min, F_CLIP[j]));
 
-         sumNeg += min(f_clip(j), 0.0);
-         sumPos += max(f_clip(j), 0.0);
+         sumNeg += fmin(F_CLIP[j], 0.0);
+         sumPos += fmax(F_CLIP[j], 0.0);
       }
 
-      new_mass = sumNeg + sumPos;
+      double new_mass = sumNeg + sumPos;
 
       // Rescale.
       for (int j = 0; j < nd; j++)
       {
          if (new_mass > eps)
          {
-            f_clip(j) = min(0.0, f_clip(j)) -
-                        max(0.0, f_clip(j)) * sumNeg / sumPos;
+            F_CLIP[j] = fmin(0.0, F_CLIP[j]) -
+                        fmax(0.0, F_CLIP[j]) * sumNeg / sumPos;
          }
          if (new_mass < -eps)
          {
-            f_clip(j) = max(0.0, f_clip(j)) -
-                        min(0.0, f_clip(j)) * sumPos / sumNeg;
+            F_CLIP[j] = fmax(0.0, F_CLIP[j]) -
+                        fmin(0.0, F_CLIP[j]) * sumPos / sumNeg;
          }
 
          // Set du to the discrete time derivative featuring the high order
          // anti-diffusive reconstruction that leads to an forward Euler
          // updated admissible solution.
-         dof_id = k*nd+j;
-         du(dof_id) = du_lo(dof_id) + f_clip(j) / m(dof_id);
+         const int dof_id = k*nd+j;
+         DU(dof_id) = DU_LO(dof_id) + F_CLIP[j] / M(dof_id);
       }
-   }
+   });
+
+   // u.HostRead(), m.HostRead();
+   // du_lo.HostRead(), du_ho.HostRead();
+   // u_min.HostRead(), u_max.HostRead();
+   // du.HostRead();
 
    timer->sw_FCT.Stop();
 }
@@ -749,12 +770,13 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
    } // element loop
 }
 
-void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
-                                     const Vector &d_us_HO, const Vector &d_us_LO,
-                                     Vector &s_min, Vector &s_max,
-                                     const Vector &u_new,
-                                     const Array<bool> &active_el,
-                                     const Array<bool> &active_dofs, Vector &d_us)
+void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us,
+                                          const Vector &m,
+                                          const Vector &d_us_HO, const Vector &d_us_LO,
+                                          Vector &s_min, Vector &s_max,
+                                          const Vector &u_new,
+                                          const Array<bool> &active_el,
+                                          const Array<bool> &active_dofs, Vector &d_us)
 {
    us.HostRead();
    s_min.HostReadWrite();
