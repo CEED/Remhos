@@ -57,6 +57,7 @@ class LocalInverseHOSolver : public HOSolver
 {
 protected:
    ParBilinearForm &M, &K;
+   mutable DGMassInverse M_inv;
 
 public:
    LocalInverseHOSolver(ParFiniteElementSpace &space,

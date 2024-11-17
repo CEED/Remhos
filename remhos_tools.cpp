@@ -1507,8 +1507,8 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
          sock << "solution\n";
       }
 
-      pmesh.PrintAsOne(sock);
-      gf.SaveAsOne(sock);
+      // pmesh.PrintAsOne(sock);
+      // gf.SaveAsOne(sock);
 
       if (myid == 0 && newly_opened)
       {

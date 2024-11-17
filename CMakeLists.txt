@@ -43,8 +43,8 @@ add_library(Remhos STATIC remhos.cpp remhos_fct.cpp
 # Testing options *************************************************************
 enable_testing()
 function(add_remhos_test name)
-    set(file ${name}_tests.cpp)
-    set(target ${name}_tests)
+    set(file ${name}.cpp)
+    set(target ${name})
     list(LENGTH ARGN ARGN_COUNT)
     if(ARGN_COUNT GREATER 0) 
         list(GET ARGN 0 extra)
@@ -66,4 +66,5 @@ function(add_remhos_test name)
     add_test(NAME ${target}_n3 COMMAND mpirun -n 3 ${target})
 endfunction()
 
-add_remhos_test(remhos)
+add_remhos_test(remhos_main)
+add_remhos_test(remhos_tests)

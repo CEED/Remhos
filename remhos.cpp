@@ -808,17 +808,17 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Print the starting meshes and initial condition.
-   ofstream meshHO("meshHO_init.mesh");
-   meshHO.precision(precision);
+   // ofstream meshHO("meshHO_init.mesh");
+   // meshHO.precision(precision);
    // pmesh.PrintAsOne(meshHO);
    if (subcell_mesh)
    {
-      ofstream meshLO("meshLO_init.mesh");
-      meshLO.precision(precision);
+      // ofstream meshLO("meshLO_init.mesh");
+      // meshLO.precision(precision);
       // subcell_mesh->PrintAsOne(meshLO);
    }
-   ofstream sltn("sltn_init.gf");
-   sltn.precision(precision);
+   // ofstream sltn("sltn_init.gf");
+   // sltn.precision(precision);
    // u.SaveAsOne(sltn);
 
    // Create data collection for solution output: either VisItDataCollection for
@@ -1131,18 +1131,18 @@ int remhos(int argc, char *argv[], double &final_mass_u)
 
    // Print the final meshes and solution.
    {
-      ofstream meshHO("meshHO_final.mesh");
-      meshHO.precision(precision);
-      pmesh.PrintAsOne(meshHO);
+      // ofstream meshHO("meshHO_final.mesh");
+      // meshHO.precision(precision);
+      // pmesh.PrintAsOne(meshHO);
       if (subcell_mesh)
       {
-         ofstream meshLO("meshLO_final.mesh");
-         meshLO.precision(precision);
-         subcell_mesh->PrintAsOne(meshLO);
+         // ofstream meshLO("meshLO_final.mesh");
+         // meshLO.precision(precision);
+         // subcell_mesh->PrintAsOne(meshLO);
       }
-      ofstream sltn("sltn_final.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
+      // ofstream sltn("sltn_final.gf");
+      // sltn.precision(precision);
+      // u.SaveAsOne(sltn);
    }
 
    // Check for mass conservation.
@@ -1230,7 +1230,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
       {
          ofstream smth("si_final.gf");
          smth.precision(precision);
-         si_val.SaveAsOne(smth);
+         // si_val.SaveAsOne(smth);
       }
    }
 

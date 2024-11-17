@@ -108,11 +108,14 @@ double u0_function(const Vector &x)
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf) { }
+   : HOSolver(space), M(Mbf), K(Kbf), M_inv(space, BasisType::GaussLegendre)
+{
+   M_inv.SetAbsTol(1e-16);
+   M_inv.SetRelTol(0.0);
+}
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   dbg();
    const bool pa = M.GetAssemblyLevel() == AssemblyLevel::PARTIAL;
 
    MFEM_VERIFY(timer, "Timer not set.");
@@ -121,7 +124,6 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 
    if (!pa)
    {
-      dbg("rhs");
       timer->sw_rhs.Start();
       K.SpMat().HostReadWriteI();
       K.SpMat().HostReadWriteJ();
@@ -130,7 +132,6 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       K_mat->Mult(u, rhs);
       timer->sw_rhs.Stop();
 
-      dbg("L2inv");
       const int ne = pfes.GetMesh()->GetNE();
       const int nd = pfes.GetFE(0)->GetDof();
       DenseMatrix M_loc(nd);
@@ -152,31 +153,13 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    }
    else
    {
-      dbg("rhs");
       timer->sw_rhs.Start();
       K.Mult(u, rhs);
       timer->sw_rhs.Stop();
 
-#if 0
-      static CGSolver CG_EMass(pfes.GetParMesh()->GetComm());
-      CG_EMass.SetOperator(M);
-      CG_EMass.iterative_mode = false;
-      CG_EMass.SetRelTol(1e-12);
-      CG_EMass.SetAbsTol(0);
-      CG_EMass.SetMaxIter(1000);
-      CG_EMass.SetPrintLevel(3);
       timer->sw_L2inv.Start();
-      CG_EMass.Mult(rhs, du);
+      M_inv.Update(), M_inv.Mult(rhs, du);
       timer->sw_L2inv.Stop();
-#else
-      DGMassInverse m_inv(pfes, BasisType::GaussLegendre);
-
-      m_inv.SetAbsTol(1e-16);
-      m_inv.SetRelTol(0.0);
-      timer->sw_L2inv.Start();
-      m_inv.Mult(rhs, du);
-      timer->sw_L2inv.Stop();
-#endif
    }
 
 }
