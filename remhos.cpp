@@ -30,6 +30,8 @@
 // Sample runs: see README.md, section 'Verification of Results'.
 
 #include "mfem.hpp"
+#define DBG_COLOR ::debug::kMagenta
+#include "debug.hpp"
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
@@ -44,9 +46,11 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
+                          NonlinearPenalty, FCTProject
+                         };
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased
+                        };
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
@@ -139,10 +143,11 @@ public:
    virtual ~AdvectionOperator() { }
 };
 
-int main(int argc, char *argv[])
+int remhos(int argc, char *argv[], double &final_mass_u)
 {
+   dbg();
    // Initialize MPI.
-   mfem::MPI_Session mpi(argc, argv);
+   static mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
    const char *mesh_file = "data/periodic-square.mesh";
@@ -254,7 +259,7 @@ int main(int argc, char *argv[])
       if (myid == 0) { args.PrintUsage(cout); }
       return 1;
    }
-   if (myid == 0) { args.PrintOptions(cout); }
+   // if (myid == 0) { args.PrintOptions(cout); }
 
    // Enable hardware devices such as GPUs, and programming models such as
    // CUDA, OCCA, RAJA and OpenMP based on command line options.
@@ -1107,10 +1112,10 @@ int main(int argc, char *argv[])
    int steps = ti_total;
    switch (ode_solver_type)
    {
-   case 2: steps *= 2; break;
-   case 3: steps *= 3; break;
-   case 4: steps *= 4; break;
-   case 6: steps *= 6; break;
+      case 2: steps *= 2; break;
+      case 3: steps *= 3; break;
+      case 4: steps *= 4; break;
+      case 6: steps *= 6; break;
    }
    adv.PrintTimingData(steps);
 
@@ -1154,6 +1159,7 @@ int main(int argc, char *argv[])
    }
    double mass_u, mass_us = 0.0, s_max = 0.0;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+   final_mass_u = mass_u;
    const double umax_loc = u.Max();
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
@@ -1165,7 +1171,7 @@ int main(int argc, char *argv[])
    }
    if (myid == 0)
    {
-      cout << setprecision(10)
+      cout << setprecision(14)
            << "Final mass u:  " << mass_u << endl
            << "Max value u:   " << umax << endl << setprecision(6)
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
