@@ -7,15 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_COMPILER_LAUNCHER ccache)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Sanitizer options ***********************************************************
+# CXX flags *******************************************************************
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address -O0)
     add_link_options(-fsanitize=address)
 endif()
 
+# remove -DNDEBUG from default RelWithDebInfo flags
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2" CACHE STRING "" FORCE)
+
 # Verbosity options ***********************************************************
 set(CMAKE_VERBOSE_MAKEFILE OFF CACHE BOOL "" FORCE)
-set(CUDA_VERBOSE_BUILD OFF CACHE BOOL "" FORCE)
+# set(CUDA_VERBOSE_BUILD OFF CACHE BOOL "" FORCE)
 
 # Include paths ***************************************************************
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
