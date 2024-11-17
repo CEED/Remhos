@@ -27,12 +27,12 @@ struct Test
 const Test runs[] =
 {
    {
-      "-m ../data/inline-quad.mesh ",
+      "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 1 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.0847944657512583
    },
    {
-      "-m ../data/cube01_hex.mesh ",
+      "-m ./data/cube01_hex.mesh ",
       "-p 10 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.11972857593296446
    }

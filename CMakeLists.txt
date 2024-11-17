@@ -14,16 +14,26 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 # Verbosity options ***********************************************************
-set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "" FORCE)
+set(CMAKE_VERBOSE_MAKEFILE OFF CACHE BOOL "" FORCE)
 set(CUDA_VERBOSE_BUILD OFF CACHE BOOL "" FORCE)
 
 # Include paths ***************************************************************
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../mfem)
-
 include_directories(/opt/homebrew/opt/openmpi/include
                     /opt/homebrew/opt/metis/include
                     /opt/homebrew/opt/hypre/include)
+
+
+# Copy mesh files *************************************************************
+file(GLOB SRC_MESH_FILES LIST_DIRECTORIES false data/*.mesh)
+set(BUILD_DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
+add_custom_command(OUTPUT data_is_copied
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_DATA_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SRC_MESH_FILES} ${BUILD_DATA_DIR}
+    COMMAND ${CMAKE_COMMAND} -E touch data_is_copied
+    COMMENT "Copying mesh files ...")
+add_custom_target(copy_mesh_files DEPENDS data_is_copied)
 
 # Library options *************************************************************
 # add_link_options(-L/opt/homebrew/lib -lfmt)
@@ -47,6 +57,7 @@ function(add_remhos_test name)
     endif()
     message(STATUS "Adding target: ${target}")
     add_executable(${target} ${file})
+    add_dependencies(${target} copy_mesh_files)
     target_link_libraries(${target} libRemhos -lmpi -lmfem -lhypre -lmetis -lfmt)
     target_link_directories(${target} PUBLIC /opt/homebrew/opt/openmpi/lib
                                           /opt/homebrew/opt/metis/lib
