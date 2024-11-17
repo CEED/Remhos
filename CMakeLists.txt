@@ -37,16 +37,29 @@ add_library(libRemhos STATIC  remhos.cpp remhos_fct.cpp
 # Testing options *************************************************************
 enable_testing()
 function(add_remhos_test name)
-    add_executable(test_${name} test_${name}.cpp)
-    target_link_libraries(test_${name} libRemhos -lmpi -lmfem -lhypre -lmetis -lfmt)
-    target_link_directories(test_${name} PUBLIC /opt/homebrew/opt/openmpi/lib
+    set(file test_${name}.cpp)
+    set(target test_${name})
+    list(LENGTH ARGN ARGN_COUNT)
+    if(ARGN_COUNT GREATER 0) 
+        list(GET ARGN 0 extra)
+        string(APPEND name "_" ${extra})
+        string(APPEND target "_" ${extra})
+    endif()
+    message(STATUS "Adding target: ${target}")
+    add_executable(${target} ${file})
+    target_link_libraries(${target} libRemhos -lmpi -lmfem -lhypre -lmetis -lfmt)
+    target_link_directories(${target} PUBLIC /opt/homebrew/opt/openmpi/lib
                                           /opt/homebrew/opt/metis/lib
                                           /opt/homebrew/opt/hypre/lib
                                           /opt/homebrew/opt/fmt/lib
                                           ${CMAKE_CURRENT_SOURCE_DIR}/../mfem)  
-    add_test(NAME test_${name}_1 COMMAND mpirun -n 1 test_${name})
-    add_test(NAME test_${name}_3 COMMAND mpirun -n 3 test_${name})
+    message(STATUS "Adding test: ${target}_n1")
+    add_test(NAME ${target}_n1  COMMAND mpirun -n 1 ${target} ${extra})
+    # add_test(NAME dperf_${name}_1 COMMAND dperf test_${name})
+    message(STATUS "Adding test: ${target}_n3")
+    add_test(NAME ${target}_n3 COMMAND mpirun -n 3 ${target})
 endfunction()
 
 
 add_remhos_test(101)
+# add_remhos_test(101 0)

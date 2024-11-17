@@ -1,10 +1,7 @@
 #include <iostream>
-#include <cassert>
 #include <memory>
 #include <sstream>
-#include <unordered_map>
-#include <functional>
-// #include "mfem.hpp"
+#include <unistd.h>
 
 #include <remhos.hpp>
 
@@ -26,7 +23,6 @@ struct Test
    std::string Command() const { return binary + mesh + options; }
 };
 
-
 ///////////////////////////////////////////////////////////////////////////////
 const Test runs[] =
 {
@@ -41,7 +37,9 @@ const Test runs[] =
       0.11972857593296446
    }
 };
+constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
 
+///////////////////////////////////////////////////////////////////////////////
 using args_ptr_t = std::vector<std::unique_ptr<char[]>>;
 using args_t = std::vector<char*>;
 
@@ -49,7 +47,6 @@ using args_t = std::vector<char*>;
 int RemhosTest(const Test & test)
 {
    static args_ptr_t args_ptr;
-
    args_t args;
 
    std::istringstream iss(test.Command());
@@ -76,10 +73,32 @@ int RemhosTest(const Test & test)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-int main() try
+int main(int argc, char* argv[]) try
 {
    dbgClearScreen();
    dbg();
+
+   int opt;
+   int test = -1;
+   auto show_usage = [](const int ret = EXIT_FAILURE)
+   {
+      printf("Usage: program [-a <arg>] [-b <arg>] [-h]\n");
+      printf("  -t <test>  Optional test number \n");
+      printf("  -h         Show this help message\n");
+      exit(ret);
+   };
+
+   while ((opt = getopt(argc, argv, "t:h")) != -1)
+   {
+      switch (opt)
+      {
+         case 't': test = std::atoi(optarg); break;
+         case 'h': show_usage(EXIT_SUCCESS);
+         default: show_usage(EXIT_FAILURE);
+      }
+   }
+
+   if (test >= 0 && test < N_TESTS) { return RemhosTest(runs[test]); }
 
    for (auto & run : runs)
    {
