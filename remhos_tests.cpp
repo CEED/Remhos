@@ -52,6 +52,12 @@ const Test runs[] =
       "-pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09711395400387984 // 4
    },
+   {
+      // Partial assembly
+      "-m ./data/inline-quad.mesh ",
+      "-pa -p 14 -rs 4 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09185717760402806 // 5
+   }
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
 

@@ -116,13 +116,11 @@ LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   const bool pa = M.GetAssemblyLevel() == AssemblyLevel::PARTIAL;
-
    MFEM_VERIFY(timer, "Timer not set.");
 
    Vector rhs(u.Size());
 
-   if (!pa)
+   if (M.GetAssemblyLevel() != AssemblyLevel::PARTIAL)
    {
       timer->sw_rhs.Start();
       K.SpMat().HostReadWriteI();
