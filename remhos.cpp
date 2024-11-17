@@ -492,6 +492,9 @@ int remhos(int argc, char *argv[], double &final_mass_u)
       dbg("M_HO, K_HO @ PARTIAL");
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+
+      k.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      m.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
    if (next_gen_full)
@@ -512,6 +515,8 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    Vector lumpedM;
    ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
+   // AssemblePA not implemented for this class
+   // if (pa) { ml.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
    ml.Assemble();
    ml.Finalize();
    ml.SpMat().GetDiag(lumpedM);
@@ -1284,6 +1289,13 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    if (ho_solver)  { ho_solver->timer  = &timer; }
    if (lo_solver)  { lo_solver->timer  = &timer; }
    if (fct_solver) { fct_solver->timer = &timer; }
+
+   constexpr auto PA = AssemblyLevel::PARTIAL;
+   dbg("Mbf: {}", Mbf.GetAssemblyLevel() == PA ? "✅" : "❌");
+   dbg("ml: {}", ml.GetAssemblyLevel() == PA ? "✅" : "❌");
+   dbg("Kbf: {}", Kbf.GetAssemblyLevel() == PA ? "✅" : "❌");
+   dbg("M_HO: {}", M_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
+   dbg("K_HO: {}", K_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
 }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const

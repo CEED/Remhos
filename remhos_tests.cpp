@@ -40,6 +40,11 @@ const Test runs[] =
    },
    {
       // #2, 102400
+      // RHS   kernel time: 5.4988707
+      // L2inv kernel time: 0.94180588
+      // LO    kernel time: 0.028575583
+      // FCT   kernel time: 0.0095909583
+      // Total kernel time: 5.5370372
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09237630484178257
@@ -67,6 +72,17 @@ const Test runs[] =
       "-m ./data/inline-quad.mesh ",
       "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09711395400387984
+   },
+   {
+      // #7, 102400
+      // RHS   kernel time: 0.077432125
+      // L2inv kernel time: 0.061598875
+      // LO    kernel time: 0.028855208
+      // FCT   kernel time: 0.0095237917
+      // Total kernel time: 0.11581113
+      "-m ./data/inline-quad.mesh ",
+      "-pa -p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09237630484178257
    },
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
