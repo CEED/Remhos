@@ -4,3 +4,4 @@ remhos
 *.o
 *.gf
 *.svg
+.DS_Store

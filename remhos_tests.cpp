@@ -28,14 +28,30 @@ const Test runs[] =
 {
    {
       "-m ./data/inline-quad.mesh ",
-      "-p 14 -rs 1 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.0847944657512583
+      "-p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984 // 0
+   },
+   {
+      "-m ./data/inline-quad.mesh ",
+      "-p 14 -rs 4 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.0930984399257905 // 1, 65536
+   },
+   {
+      "-m ./data/inline-quad.mesh ",
+      "-p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09237630484178257 // 2, 102400
    },
    {
       "-m ./data/cube01_hex.mesh ",
       "-p 10 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.11972857593296446
-   }
+      0.11972857593296446 // 3
+   },
+   {
+      // Partial assembly
+      "-m ./data/inline-quad.mesh ",
+      "-pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984 // 4
+   },
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
 

@@ -357,6 +357,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
          dt = fmin(dt, 0.25 * length_e / speed_e);
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
+      dbg("dt: {}", dt);
    }
 
    // Mesh velocity.
@@ -366,6 +367,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // a deformation that is obtained by a Lagrangian simulation.
    GridFunction v_gf(x.FESpace());
    VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
+   dbg("exec_mode: {}", exec_mode);
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
@@ -398,6 +400,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
                               mono_type != MonolithicSolverType::None;
+   dbg("forced_bounds: {}", forced_bounds);
    if (forced_bounds)
    {
       MFEM_VERIFY(btype == 2,
@@ -486,6 +489,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
 
    if (pa)
    {
+      dbg("M_HO, K_HO @ PARTIAL");
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
@@ -806,16 +810,16 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // Print the starting meshes and initial condition.
    ofstream meshHO("meshHO_init.mesh");
    meshHO.precision(precision);
-   pmesh.PrintAsOne(meshHO);
+   // pmesh.PrintAsOne(meshHO);
    if (subcell_mesh)
    {
       ofstream meshLO("meshLO_init.mesh");
       meshLO.precision(precision);
-      subcell_mesh->PrintAsOne(meshLO);
+      // subcell_mesh->PrintAsOne(meshLO);
    }
    ofstream sltn("sltn_init.gf");
    sltn.precision(precision);
-   u.SaveAsOne(sltn);
+   // u.SaveAsOne(sltn);
 
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.

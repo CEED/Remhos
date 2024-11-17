@@ -24,7 +24,6 @@ include_directories(/opt/homebrew/opt/openmpi/include
                     /opt/homebrew/opt/metis/include
                     /opt/homebrew/opt/hypre/include)
 
-
 # Copy mesh files *************************************************************
 file(GLOB SRC_MESH_FILES LIST_DIRECTORIES false data/*.mesh)
 set(BUILD_DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
@@ -35,14 +34,11 @@ add_custom_command(OUTPUT data_is_copied
     COMMENT "Copying mesh files ...")
 add_custom_target(copy_mesh_files DEPENDS data_is_copied)
 
-# Library options *************************************************************
-# add_link_options(-L/opt/homebrew/lib -lfmt)
-
 # Library source files ********************************************************
-add_library(libRemhos STATIC  remhos.cpp remhos_fct.cpp 
-                              remhos_ho.cpp remhos_lo.cpp 
-                              remhos_mono.cpp remhos_sync.cpp 
-                              remhos_tools.cpp)
+add_library(Remhos STATIC remhos.cpp remhos_fct.cpp 
+                          remhos_ho.cpp remhos_lo.cpp 
+                          remhos_mono.cpp remhos_sync.cpp 
+                          remhos_tools.cpp)
 
 # Testing options *************************************************************
 enable_testing()
@@ -58,7 +54,7 @@ function(add_remhos_test name)
     message(STATUS "Adding target: ${target}")
     add_executable(${target} ${file})
     add_dependencies(${target} copy_mesh_files)
-    target_link_libraries(${target} libRemhos -lmpi -lmfem -lhypre -lmetis -lfmt)
+    target_link_libraries(${target} Remhos -lmpi -lmfem -lhypre -lmetis -lfmt)
     target_link_directories(${target} PUBLIC /opt/homebrew/opt/openmpi/lib
                                           /opt/homebrew/opt/metis/lib
                                           /opt/homebrew/opt/hypre/lib
@@ -66,11 +62,8 @@ function(add_remhos_test name)
                                           ${CMAKE_CURRENT_SOURCE_DIR}/../mfem)  
     message(STATUS "Adding test: ${target}_n1")
     add_test(NAME ${target}_n1  COMMAND mpirun -n 1 ${target} ${extra})
-    # add_test(NAME dperf_${name}_1 COMMAND dperf test_${name})
     message(STATUS "Adding test: ${target}_n3")
     add_test(NAME ${target}_n3 COMMAND mpirun -n 3 ${target})
 endfunction()
 
-
 add_remhos_test(remhos)
-# add_remhos_test(101 0)
