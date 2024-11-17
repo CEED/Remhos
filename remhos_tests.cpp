@@ -27,37 +27,47 @@ struct Test
 const Test runs[] =
 {
    {
+      // #0
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984 // 0
+      0.09711395400387984
    },
    {
+      // #1, 65536
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 4 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.0930984399257905 // 1, 65536
+      0.0930984399257905
    },
    {
+      // #2, 102400
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09237630484178257 // 2, 102400
+      0.09237630484178257
    },
    {
+      // #3
       "-m ./data/cube01_hex.mesh ",
       "-p 10 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.11972857593296446 // 3
+      0.11972857593296446
    },
    {
-      // Partial assembly
+      // #4 Partial assembly
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984 // 4
+      0.09711395400387984
    },
    {
-      // Partial assembly
+      // #5 Partial assembly
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 4 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09185717760402806 // 5
-   }
+      0.09185717760402806
+   },
+   {
+      // #6 Partial assembly, debug device
+      "-m ./data/inline-quad.mesh ",
+      "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984
+   },
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
 
