@@ -91,13 +91,7 @@ const Test runs[] =
       0.8069675186775516
    },
    {
-      // #9 Partial assembly, debug device 🔥 has to be last
-      "-m ./data/inline-quad.mesh ",
-      "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
-   },
-   {
-      // #10, debug device 🔥 has to be last
+      // #9, 🔥 debug device 🔥 (last or !dup)
       "-m ./data/inline-quad.mesh ",
       "-d debug -pa -p 14 -rs 2 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09507192080133009
