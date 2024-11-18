@@ -68,13 +68,7 @@ const Test runs[] =
       0.09185717760402806
    },
    {
-      // #6 Partial assembly, debug device
-      "-m ./data/inline-quad.mesh ",
-      "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
-   },
-   {
-      // #7, 102400
+      // #6, 102400
       // RHS   kernel time: 0.077432125
       // L2inv kernel time: 0.061598875
       // LO    kernel time: 0.028855208
@@ -83,6 +77,30 @@ const Test runs[] =
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09237630484178257
+   },
+   {
+      // #7: 3D PA
+      "-m ./data/cube01_hex.mesh ",
+      "-pa -p 10 -rs 3 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 1 ",
+      0.11601536511552431
+   },
+   {
+      // #8
+      "-m ./data/star-q2.mesh ",
+      "-pa -p 14 -rs 1 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.8069675186775516
+   },
+   {
+      // #9 Partial assembly, debug device 🔥 has to be last
+      "-m ./data/inline-quad.mesh ",
+      "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984
+   },
+   {
+      // #10, debug device 🔥 has to be last
+      "-m ./data/inline-quad.mesh ",
+      "-d debug -pa -p 14 -rs 2 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09507192080133009
    },
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);

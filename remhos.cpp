@@ -29,6 +29,7 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
+#include "remhos.hpp"
 #include "mfem.hpp"
 #define DBG_COLOR ::debug::kMagenta
 #include "debug.hpp"
@@ -76,13 +77,14 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
+///////////////////////////////////////////////////////////////////////////////
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
-   Vector &lumpedM;
+   Vector &lumpedM, ones;
 
    Vector start_mesh_pos, start_submesh_pos;
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
@@ -143,6 +145,7 @@ public:
    virtual ~AdvectionOperator() { }
 };
 
+///////////////////////////////////////////////////////////////////////////////
 int remhos(int argc, char *argv[], double &final_mass_u)
 {
    dbg();
@@ -512,20 +515,30 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Compute the lumped mass matrix.
-   Vector lumpedM;
    ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
-   // AssemblePA not implemented for this class
-   // if (pa) { ml.SetAssemblyLevel(AssemblyLevel::PARTIAL); }
-   ml.Assemble();
-   ml.Finalize();
-   ml.SpMat().GetDiag(lumpedM);
+   // if (!pa)
+   {
+      ml.Assemble();
+      ml.Finalize();
+   }
 
    m.Assemble();
    m.Finalize();
+
    int skip_zeros = 0;
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
+
+   Vector lumpedM;
+   if (!pa) { ml.SpMat().GetDiag(lumpedM); }
+   else
+   {
+      lumpedM.SetSize(m.Height());
+      Vector ones(m.Height());
+      ones = 1.0;
+      m.Mult(ones, lumpedM);
+   }
 
    // Store topological dof data.
    DofInfo dofs(pfes, bounds_type);
@@ -1154,10 +1167,34 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    double mass_u_loc = 0.0, mass_us_loc = 0.0;
    if (exec_mode == 1)
    {
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostRead();
-      ml.SpMat().GetDiag(lumpedM);
+      dbg("Using lumped diagonal for mass conservation.");
+      if (!pa)
+      {
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostRead();
+         ml.SpMat().GetDiag(lumpedM);
+      }
+      else
+      {
+         ParBilinearForm m(&pfes);
+         m.AddDomainIntegrator(new MassIntegrator);
+         // m.BilinearForm::operator=(0.0);
+         m.Assemble();
+         Vector ones(m.Height());//, lumpedM2(m.Height());
+         ones = 1.0;
+         // lumpedM.HostRead();
+         // lumpedM.SetSize(m.Height());
+         m.Mult(ones, lumpedM);
+         /*for (int i=0; i < lumpedM.Size(); i++)
+         {
+            if (!AlmostEq(lumpedM[i], lumpedM2[i]))
+            {
+               cout << "Mismatch in lumped mass: " << lumpedM[i] << " vs. "
+                    << lumpedM2[i] << " at " << i << endl;
+            }
+         }*/
+      }
       mass_u_loc = lumpedM * u;
       if (product_sync) { mass_us_loc = lumpedM * us; }
    }
@@ -1278,6 +1315,7 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
+   ones(lumpedM.Size()),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
@@ -1290,12 +1328,13 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    if (lo_solver)  { lo_solver->timer  = &timer; }
    if (fct_solver) { fct_solver->timer = &timer; }
 
-   constexpr auto PA = AssemblyLevel::PARTIAL;
-   dbg("Mbf: {}", Mbf.GetAssemblyLevel() == PA ? "✅" : "❌");
-   dbg("ml: {}", ml.GetAssemblyLevel() == PA ? "✅" : "❌");
-   dbg("Kbf: {}", Kbf.GetAssemblyLevel() == PA ? "✅" : "❌");
-   dbg("M_HO: {}", M_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
-   dbg("K_HO: {}", K_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
+   // constexpr auto PA = AssemblyLevel::PARTIAL;
+   // dbg("Mbf: {}", Mbf.GetAssemblyLevel() == PA ? "✅" : "❌");
+   // dbg("ml: {}", ml.GetAssemblyLevel() == PA ? "✅" : "❌");
+   // dbg("Kbf: {}", Kbf.GetAssemblyLevel() == PA ? "✅" : "❌");
+   // dbg("M_HO: {}", M_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
+   // dbg("K_HO: {}", K_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
+   ones = 1.0;
 }
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
@@ -1318,10 +1357,15 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Mbf.Assemble();
       Kbf.BilinearForm::operator=(0.0);
       Kbf.Assemble(0);
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostReadWrite();
-      ml.SpMat().GetDiag(lumpedM);
+
+      if (Mbf.GetAssemblyLevel() != AssemblyLevel::PARTIAL)
+      {
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostReadWrite();
+         ml.SpMat().GetDiag(lumpedM);
+      }
+      else { Mbf.Mult(ones, lumpedM); }
 
       timer.sw_L2inv.Start();
       M_HO.BilinearForm::operator=(0.0);

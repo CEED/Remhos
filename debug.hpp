@@ -152,8 +152,7 @@ struct Debug
    {
       if (debug)
       {
-         std::cout << fmt::vformat(
-                      fmt, fmt::make_format_args(std::forward<Args>(args)...));
+         std::cout << fmt::format(fmt, std::forward<Args>(args)...);
       }
    }
 
