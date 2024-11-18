@@ -66,12 +66,6 @@ protected:
    /// Pointer to the associated LimitedTimeDependentOperator.
    LimitedTimeDependentOperator *f;  // f(.,t) : R^n --> R^n
 
-   void AddMasked(const Array<bool> &mask, real_t a, const Vector &va, real_t b,
-                  const Vector &vb, Vector &vc);
-
-   void UpdateMask(const Vector &x, const Vector &dx, real_t dt,
-                   Array<bool> &mask);
-
    void Init(TimeDependentOperator &f_) override
    { MFEM_ABORT("Limited time-dependent operator must be assigned!"); }
 public:
@@ -90,14 +84,35 @@ public:
    void Step(Vector &x, double &t, double &dt) override;
 };
 
-class RK2IDPSolver : public IDPODESolver
+class RKIDPSolver : public IDPODESolver
 {
-   Vector dx12, dx;
+   const int s;
+   const real_t *a, *b, *c;
+   real_t *d;
+   Vector *dxs;
    Array<bool> mask;
 
+   void ConstructD();
+
+   void AddMasked(const Array<bool> &mask, real_t b,
+                  const Vector &vb, Vector &va);
+
+   void UpdateMask(const Vector &x, const Vector &dx, real_t dt,
+                   Array<bool> &mask);
+
 public:
+   RKIDPSolver(int s_, const real_t a_[], const real_t b_[], const real_t c_[]);
+   ~RKIDPSolver();
+
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;
+};
+
+class RK2IDPSolver : public RKIDPSolver
+{
+   static const real_t a[], b[], c[];
+public:
+   RK2IDPSolver() : RKIDPSolver(2, a, b, c) { }
 };
 
 } // namespace mfem
