@@ -52,6 +52,10 @@ public:
    /// Perform the unlimited action of the operator
    virtual void MultUnlimited(const Vector &u, Vector &k) const = 0;
 
+   /// Compute mask of the state for the update
+   virtual void ComputeMask(const Vector &u, Array<bool> &mask) const
+   { MFEM_ABORT("Mask computation not implemented!"); }
+
    /// Limit the action vector @a k
    virtual void LimitMult(const Vector &u, Vector &k) const = 0;
 };
@@ -61,6 +65,12 @@ class IDPODESolver : public ODESolver
 protected:
    /// Pointer to the associated LimitedTimeDependentOperator.
    LimitedTimeDependentOperator *f;  // f(.,t) : R^n --> R^n
+
+   void AddMasked(const Array<bool> &mask, real_t a, const Vector &va, real_t b,
+                  const Vector &vb, Vector &vc);
+
+   void UpdateMask(const Vector &x, const Vector &dx, real_t dt,
+                   Array<bool> &mask);
 
    void Init(TimeDependentOperator &f_) override
    { MFEM_ABORT("Limited time-dependent operator must be assigned!"); }
@@ -83,6 +93,7 @@ public:
 class RK2IDPSolver : public IDPODESolver
 {
    Vector dx12, dx;
+   Array<bool> mask;
 
 public:
    void Init(LimitedTimeDependentOperator &f) override;
