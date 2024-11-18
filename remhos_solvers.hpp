@@ -129,6 +129,13 @@ public:
    RK4IDPSolver() : RKIDPSolver(4, a, b, c) { }
 };
 
+class RK6IDPSolver : public RKIDPSolver
+{
+   static const real_t a[], b[], c[];
+public:
+   RK6IDPSolver() : RKIDPSolver(6, a, b, c) { }
+};
+
 } // namespace mfem
 
 #endif // MFEM_REMHOS_SOLVERS

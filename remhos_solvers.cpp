@@ -72,9 +72,13 @@ void RKIDPSolver::ConstructD()
       }
       di[i] = a_n[i] / dc;
 
-      i_o = i;
-      c_o = c_n;
-      a_o = a_n;
+      const double c_next = (i < s-2)?(c[i+1]):(1.);
+      if (c_next > c_n)
+      {
+         i_o = i;
+         c_o = c_n;
+         a_o = a_n;
+      }
 
       if (i < s-2)
       {
@@ -174,10 +178,10 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    // Step through higher stages
 
    const real_t *d_i = d + 1;
+   real_t c_o = c[0];
 
    for (int i = 1; i < s; i++)
    {
-      const real_t c_o = c[i-1];
       const real_t c_n = (i<s-1)?(c[i]):(1.);
       const real_t dc = c_n - c_o;
       const real_t dct = dc * dt;
@@ -203,27 +207,47 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       f->LimitMult(x, dxs[i]);
 
       // Update the state
-      f->SetTime(t + c_n * dt);
-      x.Add(dct, dxs[i]);
+      const double c_next = (i < s-2)?(c[i+1]):(infinity());
+      if (c_next > c_n)// only when advancing after
+      {
+         f->SetTime(t + c_n * dt);
+         x.Add(dct, dxs[i]);
+         c_o = c_n;
+      }
       d_i += i+1;
    }
 
    t += dt;
 }
 
-//2nd order
+//2-stage, 2nd order
 const real_t RK2IDPSolver::a[] = {.5};
 const real_t RK2IDPSolver::b[] = {0., 1.};
 const real_t RK2IDPSolver::c[] = {.5};
 
-//3rd order
+//3-stage, 3rd order
 const real_t RK3IDPSolver::a[] = {1./3., 0., 2./3.};
 const real_t RK3IDPSolver::b[] = {.25, 0., .75};
 const real_t RK3IDPSolver::c[] = {1./3., 2./3.};
 
-//4th order for linear, 3rd for non-linear
-const real_t RK4IDPSolver::a[] = {.25, 0., .5, 0., .25, .5};
-const real_t RK4IDPSolver::b[] = {0., 2./3., -1./3., 2./3.};
-const real_t RK4IDPSolver::c[] = {.25, .5, .75};
+//4-stage, 4th order for linear, 3rd for non-linear
+//const real_t RK4IDPSolver::a[] = {.25, 0., .5, 0., .25, .5};
+//const real_t RK4IDPSolver::b[] = {0., 2./3., -1./3., 2./3.};
+//const real_t RK4IDPSolver::c[] = {.25, .5, .75};
+//4-stage, 4th order, non-equidistant
+//const real_t RK4IDPSolver::a[] = {.5, 0., .5, 0., 0., 1.};
+//const real_t RK4IDPSolver::b[] = {1./6., 2./6., 2./6., 1./6.};
+//const real_t RK4IDPSolver::c[] = {.5, .5, 1.};
+//4-stage, 4th order, equidistant (except the last)
+const real_t RK4IDPSolver::a[] = {1./3., -1./3., 1., 1., -1., 1.};
+const real_t RK4IDPSolver::b[] = {1./8., 3./8., 3./8., 1./8.};
+const real_t RK4IDPSolver::c[] = {1./3., 2./3., 1.};
+
+//6-stage, 5th order, equidistant (except the last)
+const real_t RK6IDPSolver::a[] = {.25, 1./8., 1./8., 0., -.5, 1., 3./16., 0., 0.,
+                                  9./16., -3./7., 2./7., 12./7., -12./7., 8./7.
+                                 };
+const real_t RK6IDPSolver::b[] = {7./90., 0., 32./90., 12./90., 32./90., 7./90.};
+const real_t RK6IDPSolver::c[] = {.25, .25, .5, .75, 1.};
 
 } // namespace mfem

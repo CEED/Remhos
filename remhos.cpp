@@ -311,9 +311,7 @@ int main(int argc, char *argv[])
       case 2: ode_solver = new RK2IDPSolver(); break;
       case 3: ode_solver = new RK3IDPSolver(); break;
       case 4: ode_solver = new RK4IDPSolver(); break;
-      /*case 6:
-         if (myid == 0) { MFEM_WARNING("RK6 may violate the bounds."); }
-         ode_solver = new RK6Solver; break;*/
+      case 6: ode_solver = new RK6IDPSolver(); break;//does not work properly!
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
