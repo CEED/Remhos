@@ -211,8 +211,19 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    t += dt;
 }
 
+//2nd order
 const real_t RK2IDPSolver::a[] = {.5};
 const real_t RK2IDPSolver::b[] = {0., 1.};
 const real_t RK2IDPSolver::c[] = {.5};
+
+//3rd order
+const real_t RK3IDPSolver::a[] = {1./3., 0., 2./3.};
+const real_t RK3IDPSolver::b[] = {.25, 0., .75};
+const real_t RK3IDPSolver::c[] = {1./3., 2./3.};
+
+//4th order for linear, 3rd for non-linear
+const real_t RK4IDPSolver::a[] = {.25, 0., .5, 0., .25, .5};
+const real_t RK4IDPSolver::b[] = {0., 2./3., -1./3., 2./3.};
+const real_t RK4IDPSolver::c[] = {.25, .5, .75};
 
 } // namespace mfem
