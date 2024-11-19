@@ -95,7 +95,7 @@ private:
    mutable ParGridFunction x_gf;
 
    TimeStepControl dt_control;
-   mutable real_t dt_est;
+   mutable real_t dt_est, dt_ratio;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -145,6 +145,8 @@ public:
    }
 
    real_t GetTimeStepEstimate() { return dt_est; }
+   void ResetTimeStepRatio() { dt_ratio = infinity(); }
+   real_t GetTimeStepRatio() { return dt_ratio; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {
@@ -935,6 +937,7 @@ int main(int argc, char *argv[])
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
+      adv.ResetTimeStepRatio();
 
       if (product_sync)
       {
@@ -958,8 +961,8 @@ int main(int argc, char *argv[])
 
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
-         double dt_est = adv.GetTimeStepEstimate();
-         if (dt_est < dt_real)
+         real_t dt_ratio = adv.GetTimeStepRatio();
+         if (dt_ratio < 1.)
          {
             // Repeat with the proper time step.
             if (myid == 0)
@@ -974,7 +977,7 @@ int main(int argc, char *argv[])
             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
          }
-         else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
+         else if (dt_ratio > 1.25) { dt *= 1.02; }
       }
 
       // S has been modified, update the alias
@@ -1583,6 +1586,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                  Kbf.ParFESpace()->GetComm());
 
    dt_est = fmin(dt_est, dt);
+   dt_ratio = fmin(dt_ratio, (GetDt() != 0.)?(dt / GetDt()):(0.));
 }
 
 // Velocity coefficient
