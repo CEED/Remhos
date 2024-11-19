@@ -27,14 +27,14 @@ class LOSolver
 {
 protected:
    ParFiniteElementSpace &pfes;
-   double dt = -1.0; // usually not known at creation, updated later.
+   real_t dt = -1.0; // usually not known at creation, updated later.
 
 public:
    LOSolver(ParFiniteElementSpace &space) : pfes(space) { }
 
    virtual ~LOSolver() { }
 
-   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
+   virtual void UpdateTimeStep(real_t dt_new) { dt = dt_new; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const = 0;
 };

@@ -95,7 +95,7 @@ private:
    mutable ParGridFunction x_gf;
 
    TimeStepControl dt_control;
-   mutable double dt_est;
+   mutable real_t dt_est;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -136,7 +136,7 @@ public:
       dt_control = tsc;
    }
 
-   void SetDt(double _dt) override
+   void SetDt(real_t _dt) override
    {
       LimitedTimeDependentOperator::SetDt(_dt);
       dt_est = dt;
@@ -144,7 +144,7 @@ public:
       if (fct_solver) { fct_solver->UpdateTimeStep(dt); }
    }
 
-   double GetTimeStepEstimate() { return dt_est; }
+   real_t GetTimeStepEstimate() { return dt_est; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {

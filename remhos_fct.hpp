@@ -32,7 +32,7 @@ class FCTSolver
 protected:
    ParFiniteElementSpace &pfes;
    SmoothnessIndicator *smth_indicator;
-   double dt;
+   real_t dt;
    const bool needs_LO_input_for_products;
 
    // Computes a compatible slope (piecewise constan = mass_us / mass_u).
@@ -51,13 +51,13 @@ protected:
 
 public:
    FCTSolver(ParFiniteElementSpace &space,
-             SmoothnessIndicator *si, double dt_, bool needs_LO_prod)
+             SmoothnessIndicator *si, real_t dt_, bool needs_LO_prod)
       : pfes(space), smth_indicator(si), dt(dt_),
         needs_LO_input_for_products(needs_LO_prod) { }
 
    virtual ~FCTSolver() { }
 
-   virtual void UpdateTimeStep(double dt_new) { dt = dt_new; }
+   virtual void UpdateTimeStep(real_t dt_new) { dt = dt_new; }
 
    bool NeedsLOProductInput() const { return needs_LO_input_for_products; }
 
@@ -110,7 +110,7 @@ protected:
 
 public:
    FluxBasedFCT(ParFiniteElementSpace &space,
-                SmoothnessIndicator *si, double delta_t,
+                SmoothnessIndicator *si, real_t delta_t,
                 const SparseMatrix &adv_mat, const Array<int> &adv_smap,
                 const SparseMatrix &mass_mat, int fct_iterations = 1)
       : FCTSolver(space, si, delta_t, true),
@@ -134,7 +134,7 @@ class ClipScaleSolver : public FCTSolver
 {
 public:
    ClipScaleSolver(ParFiniteElementSpace &space,
-                   SmoothnessIndicator *si, double dt)
+                   SmoothnessIndicator *si, real_t dt)
       : FCTSolver(space, si, dt, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
@@ -153,7 +153,7 @@ public:
 class ElementFCTProjection : public FCTSolver
 {
 public:
-   ElementFCTProjection(ParFiniteElementSpace &space, double dt)
+   ElementFCTProjection(ParFiniteElementSpace &space, real_t dt)
       : FCTSolver(space, NULL, dt, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,
@@ -178,7 +178,7 @@ protected:
 
 public:
    NonlinearPenaltySolver(ParFiniteElementSpace &space,
-                          SmoothnessIndicator *si, double dt_)
+                          SmoothnessIndicator *si, real_t dt_)
       : FCTSolver(space, si, dt_, false) { }
 
    virtual void CalcFCTSolution(const ParGridFunction &u, const Vector &m,

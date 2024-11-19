@@ -40,7 +40,7 @@ public:
 
    virtual ~LimitedTimeDependentOperator() { }
 
-   virtual void SetDt(double dt_) { dt = dt_; }
+   virtual void SetDt(real_t dt_) { dt = dt_; }
    virtual real_t GetDt() const { return dt; }
 
    void Mult(const Vector &u, Vector &k) const override
