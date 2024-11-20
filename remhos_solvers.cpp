@@ -165,20 +165,33 @@ void RKIDPSolver::Init(LimitedTimeDependentOperator &f_)
 
 void RKIDPSolver::Step(Vector &x, double &t, double &dt)
 {
+   real_t c_o = 0.;
+
    // Perform the first step
    f->SetTime(t);
    f->SetDt(c[0] * dt);
    f->MultUnlimited(x, dxs[0]);
    f->LimitMult(x, dxs[0]);
 
-   x.Add(c[0] * dt, dxs[0]);
-   f->ComputeMask(x, mask);
-   f->SetTime(c[0] * dt);
+   // Update state
+   const double c_next = (s > 2)?(c[1]):(1.);
+   if (c_next > c[0])// only when advancing after
+   {
+      x.Add(c[0] * dt, dxs[0]);
+      f->ComputeMask(x, mask);
+      f->SetTime(c[0] * dt);
+      c_o = c[0];
+   }
+   else
+   {
+      Vector x_new(x.Size());
+      add(x, c[0] * dt, dxs[0], x_new);
+      f->ComputeMask(x_new, mask);
+   }
 
    // Step through higher stages
 
    const real_t *d_i = d + 1;
-   real_t c_o = c[0];
 
    for (int i = 1; i < s; i++)
    {
@@ -207,8 +220,8 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       f->LimitMult(x, dxs[i]);
 
       // Update the state
-      const double c_next = (i < s-2)?(c[i+1]):(infinity());
-      if (c_next > c_n)// only when advancing after
+      const double c_next = (i < s-2)?(c[i+1]):(1.);
+      if (i == s-1 || c_next > c_n)// only when advancing after
       {
          f->SetTime(t + c_n * dt);
          x.Add(dct, dxs[i]);
