@@ -42,26 +42,27 @@ void RKIDPSolver::ConstructD()
    // Convert high-order to Forward Euler factors
    d = new real_t[s*(s+1)/2];
 
-   const real_t *a_n = a;
-   const real_t *a_o = a;
-   int i_o = -1;
-   real_t c_o = 0.;
+   const real_t *a_n = a; // new coeff line
+   const real_t *a_o = a; // old coeff line
+   int i_o = -1; // old stage
+   real_t c_o = 0.; // old time fraction
 
    for (int i = 0; i < s; i++)
    {
-      const real_t c_n = (i<s-1)?(c[i]):(1.);
-      const real_t dc = c_n - c_o;
+      const real_t c_n = (i<s-1)?(c[i]):(1.); // new time fraction
+      const real_t dc = c_n - c_o; // time fraction diff
       real_t *di = d + i*(i+1)/2;
 
       for (int j = 0; j < i; j++)
       {
-         const real_t a_oj = (j<=i_o)?(a_o[j]):(0.);
-         const real_t m = (a_n[j] - a_oj) / dc;
+         const real_t a_oj = (j<=i_o)?(a_o[j]):(0.); // old coeff
+         const real_t m = (a_n[j] - a_oj) / dc; // old HO update coeff
          if (m == 0.)
          {
             di[j] = 0.;
             continue;
          }
+         // Express j-th HO update by Forward Euler updates
          const real_t *dj = d + j*(j+1)/2;
          const real_t dij = m / dj[j];
          for (int k = 0; k < j; k++)
@@ -71,6 +72,8 @@ void RKIDPSolver::ConstructD()
          di[j] = dij;
       }
       di[i] = a_n[i] / dc;
+
+      // Update stage
 
       const double c_next = (i < s-2)?(c[i+1]):(1.);
       if (c_next > c_n)
@@ -135,6 +138,8 @@ void RKIDPSolver::UpdateMask(const Vector &x, const Vector &dx, real_t dt,
    {
       f->ComputeMask(x, mask_new);
    }
+   // All intermediate updates must be on active DOFs
+   // for a valid high-order update
    for (int i = 0; i < mask.Size(); i++)
    {
       mask[i] = mask[i] && mask_new[i];
@@ -184,6 +189,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    }
    else
    {
+      // Only initialize the mask
       Vector x_new(x.Size());
       add(x, c[0] * dt, dxs[0], x_new);
       f->ComputeMask(x_new, mask);
