@@ -16,6 +16,7 @@
 
 #include "remhos_gslib.hpp"
 #include "remhos_tools.hpp"
+#include "remhos_HiOp.hpp"
 
 using namespace std;
 
@@ -32,6 +33,16 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
    ParFiniteElementSpace &pfes_final = *u_final.ParFESpace();
    const int nsp = pfes_final.GetFE(0)->GetNodes().GetNPoints();
 
+         {
+         ParaViewDataCollection pvdc("initla_mesh", &pmesh_init);
+         pvdc.SetDataFormat(VTKFormat::BINARY32);
+         pvdc.SetCycle(0);
+         pvdc.SetTime(1.0);
+
+         pvdc.RegisterField("val", const_cast<ParGridFunction*>(&u_initial));
+         pvdc.Save();
+      }
+
    // Generate list of points where u_initial will be interpolated.
    Vector pos_dof_final;
    GetDOFPositions(pfes_final, pos_final, pos_dof_final);
@@ -46,10 +57,12 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
 
    // This assumes L2 ordering of the DOFs (as the ordering of the quad points).
    ParGridFunction u_interpolated(&pfes_final);
+   ParGridFunction u_interpolated_initial(&pfes_final);
    u_interpolated = interp_vals;
+   u_interpolated_initial = interp_vals;
 
    // Report masses.
-   const double mass_s = Mass(*pmesh_init.GetNodes(), u_initial),
+   double mass_s = Mass(*pmesh_init.GetNodes(), u_initial),
                 mass_t = Mass(pos_final, u_interpolated);
    if (pmesh_init.GetMyRank() == 0)
    {
@@ -62,28 +75,86 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
    // Compute min / max bounds.
    Vector u_final_min, u_final_max;
    CalcDOFBounds(u_initial, pfes_final, pos_final, u_final_min, u_final_max);
+         ParGridFunction gf_min(u_initial), gf_max(u_initial);
+      gf_min = u_final_min, gf_max = u_final_max;
+      
    if (vis_bounds)
    {
-      ParGridFunction gf_min(u_initial), gf_max(u_initial);
-      gf_min = u_final_min, gf_max = u_final_max;
-
       socketstream vis_min, vis_max;
       char vishost[] = "localhost";
       int  visport   = 19916;
       vis_min.precision(8);
       vis_max.precision(8);
 
+
       *x = pos_final;
       VisualizeField(vis_min, vishost, visport, gf_min, "u min",
                      0, 500, 300, 300);
       VisualizeField(vis_max, vishost, visport, gf_max, "u max",
                      300, 500, 300, 300);
+
+      {
+         ParaViewDataCollection pvdc("bounds", &pmesh_init);
+         pvdc.SetDataFormat(VTKFormat::BINARY32);
+         pvdc.SetCycle(0);
+         pvdc.SetTime(1.0);
+         pvdc.RegisterField("field_min", &gf_min);
+         pvdc.RegisterField("field_max", &gf_max);
+         pvdc.RegisterField("val", &u_interpolated);
+         pvdc.Save();
+      }
+
       *x = pos_init;
    }
 
-   // Do some optimization here to fix the masses, using the min/max bounds,
+   // Do some optimization here to fix the masses, using the min/max bounds,   
+   
+   if(true)
+   {
+      *x = pos_final;
+      OptimizationSolver* optsolver = NULL;
+      {
+#ifdef MFEM_USE_HIOP
+         HiopNlpOptimizer *tmp_opt_ptr = new HiopNlpOptimizer(MPI_COMM_WORLD);
+         optsolver = tmp_opt_ptr;
+#else
+         MFEM_ABORT("MFEM is not built with HiOp support!");
+#endif
+      }
+
+      const int max_iter = 100;
+      const double rtol = 1.e-7;
+      double atol = 1.e-7;
+      Vector y_out(u_interpolated.Size());
+      //Vector y_in(u_interpolated.Size()); y_in = 1.0;
+
+      // u_final_min = 0.0;
+      // u_final_max = 1.0;
+
+      RhemosHiOpProblem ot_prob( pfes_final,
+                                 u_interpolated_initial,
+                                 u_interpolated,
+                                 u_final_min,
+                                 u_final_max, 
+                                 mass_s);
+      optsolver->SetOptimizationProblem(ot_prob);
+
+      optsolver->SetMaxIter(max_iter);
+      optsolver->SetAbsTol(atol);
+      optsolver->SetRelTol(rtol);
+      optsolver->SetPrintLevel(3);
+      optsolver->Mult(u_interpolated, y_out);
+
+      u_interpolated = y_out;
+
+      delete optsolver;
+   }
+
    // staying as close as possible to u_interpolated.
    u_final = u_interpolated;
+
+   double mass_final = Mass(pos_final, u_interpolated);
+   std::cout << "Mass final after opt: " << mass_final << std::endl;
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,

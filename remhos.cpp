@@ -923,10 +923,20 @@ int main(int argc, char *argv[])
       interpolator.Remap(u, x_final, uu);
       if (visualization)
       {
+
+
          socketstream sock_uu;
          x = x_final;
          VisualizeField(sock_uu, "localhost", 19916, uu, "Interpolated u",
                         400, 0, 400, 400);
+
+                                    ParaViewDataCollection pvdc("remap_after_opt", &pmesh);
+            pvdc.SetDataFormat(VTKFormat::BINARY32);
+            pvdc.SetCycle(0);
+            pvdc.SetTime(1.0);
+            pvdc.RegisterField("field", &uu);
+            pvdc.Save();
+            
          x = x0;
       }
       return 0;
