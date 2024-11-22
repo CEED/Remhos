@@ -23,9 +23,15 @@ set(CMAKE_VERBOSE_MAKEFILE OFF CACHE BOOL "" FORCE)
 # Include paths ***************************************************************
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../mfem)
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+include_directories(/usr/include/hypre /usr/include)
+elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 include_directories(/opt/homebrew/opt/openmpi/include
                     /opt/homebrew/opt/metis/include
                     /opt/homebrew/opt/hypre/include)
+else()
+    message(FATAL_ERROR "Unsupported system")
+endif()
 
 # Copy mesh files *************************************************************
 file(GLOB SRC_MESH_FILES LIST_DIRECTORIES false data/*.mesh)
@@ -58,11 +64,15 @@ function(add_remhos_test name)
     add_executable(${target} ${file})
     add_dependencies(${target} copy_mesh_files)
     target_link_libraries(${target} Remhos -lmpi -lmfem -lhypre -lmetis -lfmt)
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    target_link_directories(${target} PUBLIC /usr/lib/x86_64-linux-gnu) 
+elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_directories(${target} PUBLIC /opt/homebrew/opt/openmpi/lib
                                           /opt/homebrew/opt/metis/lib
                                           /opt/homebrew/opt/hypre/lib
-                                          /opt/homebrew/opt/fmt/lib
-                                          ${CMAKE_CURRENT_SOURCE_DIR}/../mfem)  
+                                          /opt/homebrew/opt/fmt/lib) 
+endif()
+    target_link_directories(${target} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../mfem)
     message(STATUS "Adding test: ${target}_n1")
     add_test(NAME ${target}_n1  COMMAND mpirun -n 1 ${target} ${extra})
     message(STATUS "Adding test: ${target}_n3")

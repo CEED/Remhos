@@ -274,7 +274,7 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    const auto U = mfem::Reshape(u.Read(), ndofs, NE);
    auto DU = mfem::Reshape(du.Write(), ndofs, NE);
 
-   mfem::forall(NE, [&] MFEM_HOST_DEVICE (int k)
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
       const double u_LO_new = mass[k] / vol[k];
       for (int i = 0; i < ndofs; i++)
@@ -311,7 +311,7 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
    auto mass = el_mass.Write();
    auto vol = el_vol.Write();
 
-   mfem::forall(NE, [&] MFEM_HOST_DEVICE (int e)
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int e)
    {
       mass[e] = 0.0, vol[e]  = 0.0;
       for (int q = 0; q < nqp; q++)

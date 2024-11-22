@@ -5,3 +5,4 @@ remhos
 *.gf
 *.svg
 .DS_Store
+/build/

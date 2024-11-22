@@ -1,7 +1,7 @@
 #pragma once
 #include <cstring>
 // https://fmt.dev/11.0/api/
-#include </opt/homebrew/include/fmt/format.h>
+#include <fmt/format.h>
 
 #include <iomanip>
 #include <iostream>
