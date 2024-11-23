@@ -273,13 +273,14 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    const auto mass = el_mass.Read(), vol = el_vol.Read();
    const auto U = mfem::Reshape(u.Read(), ndofs, NE);
    auto DU = mfem::Reshape(du.Write(), ndofs, NE);
+   const auto δt = dt;
 
    mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
       const double u_LO_new = mass[k] / vol[k];
       for (int i = 0; i < ndofs; i++)
       {
-         DU(i,k) = (u_LO_new - U(i, k)) / dt;
+         DU(i,k) = (u_LO_new - U(i, k)) / δt;
       }
    });
 
@@ -317,7 +318,7 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
       for (int q = 0; q < nqp; q++)
       {
          const auto w_detJ = weights[q] * detJ(q, e);
-         mass[e] += w_detJ * u_q(q, e), vol[e]  += w_detJ;
+         mass[e] += w_detJ * u_q(q, e), vol[e] += w_detJ;
       }
    });
 

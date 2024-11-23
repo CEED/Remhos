@@ -33,9 +33,21 @@ const Test runs[] =
       0.09711395400387984
    },
    {
+      // #0
+      "-m ./data/inline-quad.mesh ",
+      "-d cuda -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984
+   },
+   {
       // #1, 65536
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 4 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.0930984399257905
+   },
+   {
+      // #1, 65536
+      "-m ./data/inline-quad.mesh ",
+      "-d cuda -p 14 -rs 4 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.0930984399257905
    },
    {
@@ -66,17 +78,6 @@ const Test runs[] =
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 4 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09185717760402806
-   },
-   {
-      // #6, 102400
-      // RHS   kernel time: 0.077432125
-      // L2inv kernel time: 0.061598875
-      // LO    kernel time: 0.028855208
-      // FCT   kernel time: 0.0095237917
-      // Total kernel time: 0.11581113
-      "-m ./data/inline-quad.mesh ",
-      "-pa -p 14 -rs 4 -o 4 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09237630484178257
    },
    {
       // #7: 3D PA
@@ -135,7 +136,7 @@ int RemhosTest(const Test & test)
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) try
 {
-   dbgClearScreen();
+   // dbgClearScreen();
    dbg();
 
    int opt;

@@ -6,3 +6,5 @@ remhos
 *.svg
 .DS_Store
 /build/
+/.cache/
+/.vscode/

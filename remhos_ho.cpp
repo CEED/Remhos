@@ -17,8 +17,6 @@
 #include "remhos_ho.hpp"
 #include "remhos_tools.hpp"
 
-#define DBG_COLOR ::debug::kLime
-#include "debug.hpp"
 
 using namespace std;
 

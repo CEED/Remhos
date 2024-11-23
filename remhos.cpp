@@ -31,8 +31,6 @@
 
 #include "remhos.hpp"
 #include "mfem.hpp"
-#define DBG_COLOR ::debug::kMagenta
-#include "debug.hpp"
 #include <fstream>
 #include <iostream>
 #include "remhos_ho.hpp"
@@ -148,7 +146,6 @@ public:
 ///////////////////////////////////////////////////////////////////////////////
 int remhos(int argc, char *argv[], double &final_mass_u)
 {
-   dbg();
    // Initialize MPI.
    static mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
@@ -172,6 +169,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    double dt = 0.005;
    int max_tsteps = -1;
    bool visualization = true;
+   bool save_meshes_and_solution = false;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -245,6 +243,9 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
+   args.AddOption(&save_meshes_and_solution, "-save", "--save-meshes-and-solution", 
+                  "-no-save", "--save-meshes-and-solution",
+                  "Print the final meshes and solution.");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
@@ -360,7 +361,6 @@ int remhos(int argc, char *argv[], double &final_mass_u)
          dt = fmin(dt, 0.25 * length_e / speed_e);
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
-      dbg("dt: {}", dt);
    }
 
    // Mesh velocity.
@@ -370,7 +370,6 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // a deformation that is obtained by a Lagrangian simulation.
    GridFunction v_gf(x.FESpace());
    VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
-   dbg("exec_mode: {}", exec_mode);
    if (exec_mode == 1)
    {
       ParGridFunction v(&mesh_pfes);
@@ -403,7 +402,6 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // Check for meaningful combinations of parameters.
    const bool forced_bounds = lo_type   != LOSolverType::None ||
                               mono_type != MonolithicSolverType::None;
-   dbg("forced_bounds: {}", forced_bounds);
    if (forced_bounds)
    {
       MFEM_VERIFY(btype == 2,
@@ -492,7 +490,6 @@ int remhos(int argc, char *argv[], double &final_mass_u)
 
    if (pa)
    {
-      dbg("M_HO, K_HO @ PARTIAL");
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
 
@@ -517,7 +514,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    // Compute the lumped mass matrix.
    ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
-   // if (!pa)
+   if (!pa)
    {
       ml.Assemble();
       ml.Finalize();
@@ -541,7 +538,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Store topological dof data.
-   DofInfo dofs(pfes, bounds_type);
+   DofInfo dofs_info(pfes, bounds_type);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -683,7 +680,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
    else { subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
+   Assembly asmbl(dofs_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
@@ -720,7 +717,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    if (smth_ind_type)
    {
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
+                                               pfes, u, dofs_info);
    }
 
    // Setup of the high-order solver (if any).
@@ -826,18 +823,20 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Print the starting meshes and initial condition.
-   // ofstream meshHO("meshHO_init.mesh");
-   // meshHO.precision(precision);
-   // pmesh.PrintAsOne(meshHO);
+   if (save_meshes_and_solution) {
+      ofstream meshHO("meshHO_init.mesh");
+      meshHO.precision(precision);
+      pmesh.PrintAsOne(meshHO);
    if (subcell_mesh)
    {
-      // ofstream meshLO("meshLO_init.mesh");
-      // meshLO.precision(precision);
-      // subcell_mesh->PrintAsOne(meshLO);
+      ofstream meshLO("meshLO_init.mesh");
+      meshLO.precision(precision);
+      subcell_mesh->PrintAsOne(meshLO);
    }
-   // ofstream sltn("sltn_init.gf");
-   // sltn.precision(precision);
-   // u.SaveAsOne(sltn);
+      ofstream sltn("sltn_init.gf");
+      sltn.precision(precision);
+      u.SaveAsOne(sltn);
+   }
 
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
@@ -918,7 +917,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
+                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs_info,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
@@ -1148,26 +1147,27 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Print the final meshes and solution.
+   if (save_meshes_and_solution)
    {
-      // ofstream meshHO("meshHO_final.mesh");
-      // meshHO.precision(precision);
-      // pmesh.PrintAsOne(meshHO);
+      ofstream meshHO("meshHO_final.mesh");
+      meshHO.precision(precision);
+      pmesh.PrintAsOne(meshHO);
       if (subcell_mesh)
       {
-         // ofstream meshLO("meshLO_final.mesh");
-         // meshLO.precision(precision);
-         // subcell_mesh->PrintAsOne(meshLO);
+         ofstream meshLO("meshLO_final.mesh");
+         meshLO.precision(precision);
+         subcell_mesh->PrintAsOne(meshLO);
       }
-      // ofstream sltn("sltn_final.gf");
-      // sltn.precision(precision);
-      // u.SaveAsOne(sltn);
+      ofstream sltn("sltn_final.gf");
+      sltn.precision(precision);
+      u.SaveAsOne(sltn);
    }
 
    // Check for mass conservation.
    double mass_u_loc = 0.0, mass_us_loc = 0.0;
    if (exec_mode == 1)
    {
-      dbg("Using lumped diagonal for mass conservation.");
+      // Using lumped diagonal for mass conservation.
       if (!pa)
       {
          ml.BilinearForm::operator=(0.0);
@@ -1179,21 +1179,10 @@ int remhos(int argc, char *argv[], double &final_mass_u)
       {
          ParBilinearForm m(&pfes);
          m.AddDomainIntegrator(new MassIntegrator);
-         // m.BilinearForm::operator=(0.0);
          m.Assemble();
-         Vector ones(m.Height());//, lumpedM2(m.Height());
+         Vector ones(m.Height());
          ones = 1.0;
-         // lumpedM.HostRead();
-         // lumpedM.SetSize(m.Height());
          m.Mult(ones, lumpedM);
-         /*for (int i=0; i < lumpedM.Size(); i++)
-         {
-            if (!AlmostEq(lumpedM[i], lumpedM2[i]))
-            {
-               cout << "Mismatch in lumped mass: " << lumpedM[i] << " vs. "
-                    << lumpedM2[i] << " at " << i << endl;
-            }
-         }*/
       }
       mass_u_loc = lumpedM * u;
       if (product_sync) { mass_us_loc = lumpedM * us; }
@@ -1302,6 +1291,13 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+int main(int argc, char *argv[]){
+   double final_mass_u = M_PI; // unused 
+   return remhos(argc, argv, final_mass_u);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
@@ -1328,12 +1324,6 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    if (lo_solver)  { lo_solver->timer  = &timer; }
    if (fct_solver) { fct_solver->timer = &timer; }
 
-   // constexpr auto PA = AssemblyLevel::PARTIAL;
-   // dbg("Mbf: {}", Mbf.GetAssemblyLevel() == PA ? "✅" : "❌");
-   // dbg("ml: {}", ml.GetAssemblyLevel() == PA ? "✅" : "❌");
-   // dbg("Kbf: {}", Kbf.GetAssemblyLevel() == PA ? "✅" : "❌");
-   // dbg("M_HO: {}", M_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
-   // dbg("K_HO: {}", K_HO.GetAssemblyLevel() == PA ? "✅" : "❌");
    ones = 1.0;
 }
 
@@ -1590,6 +1580,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    int n = x.Size();
    const double eps = 1e-12;
    double dt = numeric_limits<double>::infinity();
+   x_min.HostRead(), x_max.HostRead(), x.HostRead(), dx.HostRead();
 
    for (int i = 0; i < n; i++)
    {

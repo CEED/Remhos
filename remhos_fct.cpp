@@ -18,8 +18,9 @@
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 
-#define DBG_COLOR ::debug::kTomato
-#include "debug.hpp"
+// #define DBG_COLOR ::debug::kTomato
+// #include "debug.hpp"
+// #include "general/backends.hpp"
 
 using namespace std;
 
@@ -59,8 +60,8 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
       double s_avg = mass_us / mass_u;
 
       // Min and max of s using the full stencil of active dofs.
-      s_min_loc.SetDataAndSize(s_min.GetData() + k*ndofs, ndofs);
-      s_max_loc.SetDataAndSize(s_max.GetData() + k*ndofs, ndofs);
+      s_min_loc.SetDataAndSize(s_min.HostReadWrite() + k*ndofs, ndofs);
+      s_max_loc.SetDataAndSize(s_max.HostReadWrite() + k*ndofs, ndofs);
       double smin = numeric_limits<double>::infinity(),
              smax = -numeric_limits<double>::infinity();
       for (int j = 0; j < ndofs; j++)
@@ -491,7 +492,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
    const int NE = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
-   Vector f_clip(nd);
+   Vector f_clip(nd*NE); 
 
    // Smoothness indicator.
    ParGridFunction si_val;
@@ -502,27 +503,24 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       smth_indicator->ComputeSmoothnessIndicator(u, si_val);
    }
 
+   const auto δt = dt;
+
    const auto U = mfem::Reshape(u.Read(), NE*nd);
    const auto M = mfem::Reshape(m.Read(), NE*nd);
    const auto DU_LO = mfem::Reshape(du_lo.Read(), NE*nd);
    const auto DU_HO = mfem::Reshape(du_ho.Read(), NE*nd);
+   const auto U_MIN = mfem::Reshape(u_min.Read(), NE*nd);
+   const auto U_MAX = mfem::Reshape(u_max.Read(), NE*nd);
 
-   using u_mnx_t = decltype(mfem::Reshape(u_min.Read(), NE*nd));
-   u_mnx_t U_MIN = mfem::Reshape(u_min.Read(), NE*nd);
-   u_mnx_t U_MAX = mfem::Reshape(u_max.Read(), NE*nd);
-   if (Device::Allows(Backend::DEBUG_DEVICE)) // 🔥🔥 debug
-   {
-      U_MIN = mfem::Reshape(u_min.HostRead(), NE*nd);
-      U_MAX = mfem::Reshape(u_max.HostRead(), NE*nd);
-   }
-   auto F_CLIP = mfem::Reshape(f_clip.Write(), nd);
+   auto F_CLIP = mfem::Reshape(f_clip.Write(), NE, nd);
    auto DU = mfem::Reshape(du.Write(), NE*nd);
 
-   const double δt = dt;
+   const bool update_bounds = smth_indicator != nullptr;
+   if (update_bounds) MFEM_ABORT("UpdateBounds not ported to device")
 
    mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
-      const double eps = 1.0e-15;
+      const auto eps = 1.0e-15;
       double sumPos = 0.0, sumNeg = 0.0;
 
       // Clip.
@@ -530,25 +528,27 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       {
          const int dof_id = k*nd+j;
 
-         double u_new_lo   = U(dof_id) + δt * DU_LO(dof_id);
+         const auto u_new_lo = U(dof_id) + δt * DU_LO(dof_id);
 
-         double umin = U_MIN(dof_id);
-         double umax = U_MAX(dof_id);
+         const auto umin = U_MIN(dof_id);
+         const auto umax = U_MAX(dof_id);
 
-         if (smth_indicator)
-         {
-            double u_new_ho   = U(dof_id) + δt * DU_HO(dof_id);
+#ifndef MFEM_USE_CUDA
+         if (update_bounds)
+         {  
+            const auto u_new_ho   = U(dof_id) + δt * DU_HO(dof_id);
             smth_indicator->UpdateBounds(dof_id, u_new_ho, si_val, umin, umax);
          }
+#endif
 
-         double f_clip_min = M(dof_id) / δt * (umin - u_new_lo);
-         double f_clip_max = M(dof_id) / δt * (umax - u_new_lo);
+         const auto f_clip_min = M(dof_id) / δt * (umin - u_new_lo);
+         const auto f_clip_max = M(dof_id) / δt * (umax - u_new_lo);
 
-         F_CLIP[j] = M(dof_id) * (DU_HO(dof_id) - DU_LO(dof_id));
-         F_CLIP[j] = fmin(f_clip_max, fmax(f_clip_min, F_CLIP[j]));
+         F_CLIP(k,j) = M(dof_id) * (DU_HO(dof_id) - DU_LO(dof_id));
+         F_CLIP(k,j) = fmin(f_clip_max, fmax(f_clip_min, F_CLIP(k,j)));
 
-         sumNeg += fmin(F_CLIP[j], 0.0);
-         sumPos += fmax(F_CLIP[j], 0.0);
+         sumNeg += fmin(F_CLIP(k,j), 0.0);
+         sumPos += fmax(F_CLIP(k,j), 0.0);
       }
 
       double new_mass = sumNeg + sumPos;
@@ -558,28 +558,22 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
       {
          if (new_mass > eps)
          {
-            F_CLIP[j] = fmin(0.0, F_CLIP[j]) -
-                        fmax(0.0, F_CLIP[j]) * sumNeg / sumPos;
+            F_CLIP(k,j) = fmin(0.0, F_CLIP(k,j)) -
+                          fmax(0.0, F_CLIP(k,j)) * sumNeg / sumPos;
          }
          if (new_mass < -eps)
          {
-            F_CLIP[j] = fmax(0.0, F_CLIP[j]) -
-                        fmin(0.0, F_CLIP[j]) * sumPos / sumNeg;
+            F_CLIP(k,j) = fmax(0.0, F_CLIP(k,j)) -
+                          fmin(0.0, F_CLIP(k,j)) * sumPos / sumNeg;
          }
 
          // Set du to the discrete time derivative featuring the high order
          // anti-diffusive reconstruction that leads to an forward Euler
          // updated admissible solution.
          const int dof_id = k*nd+j;
-         DU(dof_id) = DU_LO(dof_id) + F_CLIP[j] / M(dof_id);
+         DU(dof_id) = DU_LO(dof_id) + F_CLIP(k,j) / M(dof_id);
       }
    });
-
-   // u.HostRead(), m.HostRead();
-   // du_lo.HostRead(), du_ho.HostRead();
-   // u_min.HostRead(), u_max.HostRead();
-   // du.HostRead();
-
    timer->sw_FCT.Stop();
 }
 
