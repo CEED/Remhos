@@ -81,7 +81,7 @@ CC     = gcc
 CFLAGS = -O3
 
 # Optional link flags
-LDFLAGS = -L/usr/lib/x86_64-linux-gnu -lfmt
+LDFLAGS =
 
 OPTIM_OPTS = -O3
 DEBUG_OPTS = -g -Wall -std=c++17
@@ -106,7 +106,7 @@ CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
 SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
-  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp # remhos_tests.cpp
+  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
 HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
@@ -124,15 +124,7 @@ HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
 
 remhos: override MFEM_DIR = $(MFEM_DIR1)
 remhos:	$(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
-	nvcc -O3 -std=c++17 --expt-extended-lambda -arch=sm_80 -ccbin mpicxx \
-		-I../mfem -I/usr/include/hypre -o remhos \
-		remhos.o remhos_tools.o remhos_lo.o remhos_ho.o remhos_fct.o remhos_mono.o remhos_sync.o \
-      -L../mfem -lmfem \
-      -L/home/camierjs/usr/local/hypre/lib -lHYPRE \
-		-L/usr/lib/x86_64-linux-gnu -lmetis -lmpi -lfmt \
-      -lcusparse -lcudart -lcublas -lcusolver
-# remhos_tests.o
-# $(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
+	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
 
 all: remhos
 
@@ -196,12 +188,3 @@ style:
 tests:
 	@ cd autotest; ./test.sh 2;
 	diff --report-identical-files autotest/out_test.dat autotest/out_baseline.dat;
-
-ld:
-	nvcc -O3 -std=c++17 --expt-extended-lambda -arch=sm_80 -ccbin mpicxx \
-		-I../mfem -I/usr/include/hypre -o remhos \
-		remhos_tests.o remhos.o remhos_tools.o remhos_lo.o remhos_ho.o remhos_fct.o remhos_mono.o remhos_sync.o \
-      -L../mfem -lmfem \
-      -L/home/camierjs/usr/local/hypre/lib -lHYPRE \
-		-L/usr/lib/x86_64-linux-gnu -lmetis -lmpi -lfmt \
-      -lcusparse -lcudart -lcublas -lcusolver
