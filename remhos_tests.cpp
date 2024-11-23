@@ -4,8 +4,8 @@
 #include <sstream>
 #include <unistd.h>
 
-#define DBG_COLOR ::debug::kCyan
-#include "debug.hpp"
+// #define DBG_COLOR ::debug::kCyan
+// #include "debug.hpp"
 
 int remhos(int, char *[], double &);
 
@@ -133,18 +133,17 @@ int RemhosTest(const Test & test)
    double final_mass_u{};
    remhos(args.size()-1, args.data(), final_mass_u);
 
-   dbg("final_mass_u: {} vs. {}", final_mass_u, test.result);
+   // dbg("final_mass_u: {} vs. {}", final_mass_u, test.result);
 
-   if (AlmostEq(final_mass_u, test.result)) { return dbg("✅"), EXIT_SUCCESS; }
+   if (AlmostEq(final_mass_u, test.result)) { return std::cout << "✅" << std::endl, EXIT_SUCCESS; }
 
-   return dbg("❌"), EXIT_FAILURE;
+   return  std::cout << "❌" << std::endl, EXIT_FAILURE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) try
 {
-   dbgClearScreen();
-   dbg();
+   // dbgClearScreen(), dbg();
 
    int opt;
    int test = -1;
