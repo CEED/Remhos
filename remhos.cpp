@@ -243,7 +243,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
-   args.AddOption(&save_meshes_and_solution, "-save", "--save-meshes-and-solution", 
+   args.AddOption(&save_meshes_and_solution, "-save", "--save-meshes-and-solution",
                   "-no-save", "--save-meshes-and-solution",
                   "Print the final meshes and solution.");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
@@ -823,16 +823,17 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Print the starting meshes and initial condition.
-   if (save_meshes_and_solution) {
+   if (save_meshes_and_solution)
+   {
       ofstream meshHO("meshHO_init.mesh");
       meshHO.precision(precision);
       pmesh.PrintAsOne(meshHO);
-   if (subcell_mesh)
-   {
-      ofstream meshLO("meshLO_init.mesh");
-      meshLO.precision(precision);
-      subcell_mesh->PrintAsOne(meshLO);
-   }
+      if (subcell_mesh)
+      {
+         ofstream meshLO("meshLO_init.mesh");
+         meshLO.precision(precision);
+         subcell_mesh->PrintAsOne(meshLO);
+      }
       ofstream sltn("sltn_init.gf");
       sltn.precision(precision);
       u.SaveAsOne(sltn);
@@ -1292,10 +1293,13 @@ int remhos(int argc, char *argv[], double &final_mass_u)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-int main(int argc, char *argv[]){
-   double final_mass_u = M_PI; // unused 
+#ifndef MFEM_USE_CMAKE_TESTS
+int main(int argc, char *argv[])
+{
+   double final_mass_u = M_PI; // unused
    return remhos(argc, argv, final_mass_u);
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,

@@ -26,9 +26,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../mfem)
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 include_directories(/usr/include/hypre /usr/include)
 elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-include_directories(/opt/homebrew/opt/openmpi/include
+include_directories(/opt/homebrew/opt/fmt/include
+                    /opt/homebrew/opt/openmpi/include
                     /opt/homebrew/opt/metis/include
                     /opt/homebrew/opt/hypre/include)
+add_compile_definitions(MFEM_USE_CMAKE_TESTS)
 else()
     message(FATAL_ERROR "Unsupported system")
 endif()

@@ -492,7 +492,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
    const int NE = pfes.GetMesh()->GetNE();
    const int nd = pfes.GetFE(0)->GetDof();
-   Vector f_clip(nd*NE); 
+   Vector f_clip(nd*NE);
 
    // Smoothness indicator.
    ParGridFunction si_val;
@@ -518,7 +518,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
    const bool update_bounds = smth_indicator != nullptr;
    if (update_bounds) MFEM_ABORT("UpdateBounds not ported to device")
 
-   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
+      mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
       const auto eps = 1.0e-15;
       double sumPos = 0.0, sumNeg = 0.0;
@@ -530,12 +530,12 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
          const auto u_new_lo = U(dof_id) + δt * DU_LO(dof_id);
 
-         const auto umin = U_MIN(dof_id);
-         const auto umax = U_MAX(dof_id);
+         auto umin = U_MIN(dof_id);
+         auto umax = U_MAX(dof_id);
 
 #ifndef MFEM_USE_CUDA
          if (update_bounds)
-         {  
+         {
             const auto u_new_ho   = U(dof_id) + δt * DU_HO(dof_id);
             smth_indicator->UpdateBounds(dof_id, u_new_ho, si_val, umin, umax);
          }
