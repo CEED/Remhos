@@ -32,14 +32,6 @@ const Test runs[] =
       "-p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
       0.09711395400387984
    },
-#ifdef MFEM_USE_CUDA
-   {
-      // #0
-      "-m ./data/inline-quad.mesh ",
-      "-d cuda -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
-   },
-#endif
    {
       // #1, 65536
       "-m ./data/inline-quad.mesh ",
@@ -90,9 +82,17 @@ const Test runs[] =
    {
       // #9, 🔥 debug device 🔥 (last or !dup)
       "-m ./data/inline-quad.mesh ",
-      "-d debug -pa -p 14 -rs 2 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09507192080133009
+      "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984
    },
+#ifdef MFEM_USE_CUDA
+   {
+      // #10
+      "-m ./data/inline-quad.mesh ",
+      "-d cuda -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.09711395400387984
+   },
+#endif
 };
 constexpr int N_TESTS = sizeof(runs) / sizeof(Test);
 

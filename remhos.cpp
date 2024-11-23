@@ -75,7 +75,6 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
-///////////////////////////////////////////////////////////////////////////////
 class AdvectionOperator : public TimeDependentOperator
 {
 private:
@@ -143,8 +142,17 @@ public:
    virtual ~AdvectionOperator() { }
 };
 
-///////////////////////////////////////////////////////////////////////////////
-int remhos(int argc, char *argv[], double &final_mass_u)
+#ifndef MFEM_USE_CMAKE_TESTS
+int remhos(int, char *[], double &);
+
+int main(int argc, char *argv[])
+{
+   double final_mass_u = M_PI; // unused
+   return remhos(argc, argv, final_mass_u);
+}
+#endif // MFEM_USE_CMAKE_TESTS
+
+MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 {
    // Initialize MPI.
    static mfem::MPI_Session mpi(argc, argv);
@@ -1207,7 +1215,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    }
    if (myid == 0)
    {
-      cout << setprecision(14)
+      cout << setprecision(10)
            << "Final mass u:  " << mass_u << endl
            << "Max value u:   " << umax << endl << setprecision(6)
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
@@ -1254,7 +1262,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
       }
    }
 
-   if (smth_indicator)
+   if (smth_indicator && save_meshes_and_solution)
    {
       // Print the values of the smoothness indicator.
       ParGridFunction si_val;
@@ -1262,7 +1270,7 @@ int remhos(int argc, char *argv[], double &final_mass_u)
       {
          ofstream smth("si_final.gf");
          smth.precision(precision);
-         // si_val.SaveAsOne(smth);
+         si_val.SaveAsOne(smth);
       }
    }
 
@@ -1292,16 +1300,6 @@ int remhos(int argc, char *argv[], double &final_mass_u)
    return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-#ifndef MFEM_USE_CMAKE_TESTS
-int main(int argc, char *argv[])
-{
-   double final_mass_u = M_PI; // unused
-   return remhos(argc, argv, final_mass_u);
-}
-#endif
-
-///////////////////////////////////////////////////////////////////////////////
 AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,

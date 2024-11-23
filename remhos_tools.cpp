@@ -344,7 +344,7 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
       }
    }
 
-assert(false); 
+   assert(false);
    GroupCommunicator &gcomm = x.ParFESpace()->GroupComm();
    Array<double> minvals(x_min.HostReadWrite(), x_min.Size()),
          maxvals(x_max.HostReadWrite(), x_max.Size());
@@ -1514,8 +1514,8 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
          sock << "solution\n";
       }
 
-      // pmesh.PrintAsOne(sock);
-      // gf.SaveAsOne(sock);
+      pmesh.PrintAsOne(sock);
+      gf.SaveAsOne(sock);
 
       if (myid == 0 && newly_opened)
       {
