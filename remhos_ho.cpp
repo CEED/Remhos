@@ -108,8 +108,7 @@ LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Kbf)
    : HOSolver(space), M(Mbf), K(Kbf), M_inv(space, BasisType::GaussLegendre)
 {
-   M_inv.SetAbsTol(1e-16);
-   M_inv.SetRelTol(0.0);
+   M_inv.SetAbsTol(1e-8), M_inv.SetRelTol(0.0);
 }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const

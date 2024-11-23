@@ -321,7 +321,6 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
          mass[e] += w_detJ * u_q(q, e), vol[e] += w_detJ;
       }
    });
-
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)

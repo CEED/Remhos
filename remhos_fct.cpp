@@ -520,7 +520,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
       mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
-      const auto eps = 1.0e-15;
+      constexpr auto eps = 1.0e-15;
       double sumPos = 0.0, sumNeg = 0.0;
 
       // Clip.
