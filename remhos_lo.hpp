@@ -89,10 +89,6 @@ class MassBasedAvg : public LOSolver
 protected:
    HOSolver &ho_solver;
 
-   void MassesAndVolumesAtPosition(const ParGridFunction &u,
-                                   const GridFunction &x,
-                                   Vector &el_mass, Vector &el_vol) const;
-
    // Temporary HO solution, used only in the next call to CalcLOSolution().
    mutable const Vector *du_HO = nullptr;
 
@@ -104,6 +100,10 @@ public:
   void SetHOSolution(Vector &du) { du_HO = &du; }
 
   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+  
+   void MassesAndVolumesAtPosition(const ParGridFunction &u,
+                                   const GridFunction &x,
+                                   Vector &el_mass, Vector &el_vol) const;
 };
 
 //PA based Residual Distribution

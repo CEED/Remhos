@@ -269,14 +269,20 @@ void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
    MassesAndVolumesAtPosition(u_HO_new, *pmesh->GetNodes(), el_mass, el_vol);
 
    const int ndofs = u.Size() / NE;
-   for (int k = 0; k < NE; k++)
+
+   const auto mass = el_mass.Read(), vol = el_vol.Read();
+   const auto U = mfem::Reshape(u.Read(), ndofs, NE);
+   auto DU = mfem::Reshape(du.Write(), ndofs, NE);
+   const auto δt = dt;
+
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
-      double u_LO_new = el_mass(k) / el_vol(k);
+      const double u_LO_new = mass[k] / vol[k];
       for (int i = 0; i < ndofs; i++)
       {
-         du(k*ndofs + i) = (u_LO_new - u(k*ndofs + i)) / dt;
+         DU(i,k) = (u_LO_new - U(i, k)) / δt;
       }
-   }
+   });
 
    timer->sw_LO.Stop();
 }
@@ -299,17 +305,23 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
    // As an L2 function, u has the correct EVector lexicographic ordering.
    qi_u->Values(u, u_qvals);
 
-   for (int k = 0; k < NE; k++)
+   const auto detJ = mfem::Reshape(geom.detJ.Read(), nqp, NE);
+   const auto u_q = mfem::Reshape(u_qvals.Read(), nqp, NE);
+   const auto weights = ir.GetWeights().Read();
+   assert(NE == el_mass.Size() && NE == el_vol.Size());
+   auto mass = el_mass.Write();
+   auto vol = el_vol.Write();
+
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int e)
    {
-      el_mass(k) = 0.0;
-      el_vol(k)  = 0.0;
+      mass[e] = 0.0, vol[e]  = 0.0;
       for (int q = 0; q < nqp; q++)
       {
-         const IntegrationPoint &ip = ir.IntPoint(q);
-         el_mass(k) += ip.weight * geom.detJ(k*nqp + q) * u_qvals(k*nqp + q);
-         el_vol(k)  += ip.weight * geom.detJ(k*nqp + q);
+         const auto w_detJ = weights[q] * detJ(q, e);
+         mass[e] += w_detJ * u_q(q, e), vol[e] += w_detJ;
       }
-   }
+   });
+
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)

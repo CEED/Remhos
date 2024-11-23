@@ -329,6 +329,9 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    const int *I = K.GetI(), *J = K.GetJ(), loc_size = K.Size();
    int end;
 
+   x_min.HostReadWrite();
+   x_max.HostReadWrite();
+
    for (int i = 0, k = 0; i < loc_size; i++)
    {
       x_min(i) = numeric_limits<double>::infinity();
@@ -341,9 +344,10 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
       }
    }
 
+   assert(false);
    GroupCommunicator &gcomm = x.ParFESpace()->GroupComm();
-   Array<double> minvals(x_min.GetData(), x_min.Size()),
-         maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.HostReadWrite(), x_min.Size()),
+         maxvals(x_max.HostReadWrite(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -361,7 +365,7 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
 
-   xi_min.SetSize(n);
+   xi_min.SetSize(n); xi_min.operator=(0.0);
    xi_max.SetSize(n);
    xe_min.SetSize(ne);
    xe_max.SetSize(ne);
@@ -387,8 +391,8 @@ void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
    const int NE = pmesh->GetNE();
    const int ndofs = dof_min.Size() / NE;
 
-   x_min.HostReadWrite();
-   x_max.HostReadWrite();
+   el_min.HostRead(), el_max.HostRead();
+   x_min.HostReadWrite(), x_max.HostReadWrite();
 
    x_min = el_min;
    x_max = el_max;
@@ -438,13 +442,16 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
    // Form min/max at each CG dof, considering element overlaps.
    x_min =   std::numeric_limits<double>::infinity();
    x_max = - std::numeric_limits<double>::infinity();
+
+   el_min.HostRead(), el_max.HostRead();
+   dof_min.HostReadWrite(), dof_max.HostReadWrite();
+   x_min.HostReadWrite(), x_max.HostReadWrite();
+
    for (int i = 0; i < NE; i++)
    {
       // Inactive elements don't affect the bounds.
       if (active_el && (*active_el)[i] == false) { continue; }
 
-      x_min.HostReadWrite();
-      x_max.HostReadWrite();
       pfes_bounds.GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
@@ -452,8 +459,8 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
          x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
-   Array<double> minvals(x_min.GetData(), x_min.Size());
-   Array<double> maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.HostReadWrite(), x_min.Size());
+   Array<double> maxvals(x_max.HostReadWrite(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
