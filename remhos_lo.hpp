@@ -93,14 +93,14 @@ protected:
    mutable const Vector *du_HO = nullptr;
 
 public:
-  MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos)
-     : LOSolver(space), ho_solver(hos) { }
+   MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos)
+      : LOSolver(space), ho_solver(hos) { }
 
-  // Temporary HO solution, used only in the next call to CalcLOSolution().
-  void SetHOSolution(Vector &du) { du_HO = &du; }
+   // Temporary HO solution, used only in the next call to CalcLOSolution().
+   void SetHOSolution(Vector &du) { du_HO = &du; }
 
-  virtual void CalcLOSolution(const Vector &u, Vector &du) const;
-  
+   virtual void CalcLOSolution(const Vector &u, Vector &du) const;
+
    void MassesAndVolumesAtPosition(const ParGridFunction &u,
                                    const GridFunction &x,
                                    Vector &el_mass, Vector &el_vol) const;

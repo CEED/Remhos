@@ -17,7 +17,6 @@
 #include "remhos_ho.hpp"
 #include "remhos_tools.hpp"
 
-
 using namespace std;
 
 namespace mfem
@@ -70,46 +69,12 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
    delete K_mat;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-static Vector bb_min, bb_max;
-
-///////////////////////////////////////////////////////////////////////////////
-double u0_function(const Vector &x)
-{
-   int dim = x.Size();
-
-   // map to the reference [-1,1] domain
-   Vector X(dim);
-   for (int i = 0; i < dim; i++)
-   {
-      double center = (bb_min[i] + bb_max[i]) * 0.5;
-      X(i) = 2 * (x(i) - center) / (bb_max[i] - bb_min[i]);
-   }
-
-   // 🔥 problem 4
-   {
-      double scale = 0.0225;
-      double coef = (0.5/sqrt(scale));
-      double slit = (X(0) <= -0.05) || (X(0) >= 0.05) || (X(1) >= 0.7);
-      double cone = coef * sqrt(pow(X(0), 2.) + pow(X(1) + 0.5, 2.));
-      double hump = coef * sqrt(pow(X(0) + 0.5, 2.) + pow(X(1), 2.));
-
-      return (slit && ((pow(X(0),2.) + pow(X(1)-.5,2.))<=4.*scale)) ? 1. : 0.
-             + (1. - cone) * (pow(X(0), 2.) + pow(X(1)+.5, 2.) <= 4.*scale)
-             + .25 * (1. + cos(M_PI*hump))
-             * ((pow(X(0)+.5, 2.) + pow(X(1), 2.)) <= 4.*scale);
-   }
-
-}
-
-///////////////////////////////////////////////////////////////////////////////
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
    : HOSolver(space), M(Mbf), K(Kbf), M_inv(space, BasisType::GaussLegendre)
 {
-   M_inv.SetAbsTol(1e-16);
-   M_inv.SetRelTol(0.0);
+   M_inv.SetAbsTol(1e-8), M_inv.SetRelTol(0.0);
 }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const

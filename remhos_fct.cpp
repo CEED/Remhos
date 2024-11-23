@@ -18,10 +18,6 @@
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 
-// #define DBG_COLOR ::debug::kTomato
-// #include "debug.hpp"
-// #include "general/backends.hpp"
-
 using namespace std;
 
 namespace mfem
@@ -520,7 +516,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
 
       mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
-      const auto eps = 1.0e-15;
+      constexpr auto eps = 1.0e-15;
       double sumPos = 0.0, sumNeg = 0.0;
 
       // Clip.

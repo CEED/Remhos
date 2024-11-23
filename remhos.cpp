@@ -29,7 +29,6 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
-#include "remhos.hpp"
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
@@ -155,7 +154,7 @@ int main(int argc, char *argv[])
 MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 {
    // Initialize MPI.
-   static mfem::MPI_Session mpi(argc, argv);
+   mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
    const char *mesh_file = "data/periodic-square.mesh";
@@ -271,7 +270,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       if (myid == 0) { args.PrintUsage(cout); }
       return 1;
    }
-   // if (myid == 0) { args.PrintOptions(cout); }
+   if (myid == 0) { args.PrintOptions(cout); }
 
    // Enable hardware devices such as GPUs, and programming models such as
    // CUDA, OCCA, RAJA and OpenMP based on command line options.
@@ -530,7 +529,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 
    m.Assemble();
    m.Finalize();
-
    int skip_zeros = 0;
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
@@ -546,7 +544,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    // Store topological dof data.
-   DofInfo dofs_info(pfes, bounds_type);
+   DofInfo dofs(pfes, bounds_type);
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -688,7 +686,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
    else { subcell_mesh = &pmesh; }
 
-   Assembly asmbl(dofs_info, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
+   Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
@@ -725,7 +723,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    if (smth_ind_type)
    {
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs_info);
+                                               pfes, u, dofs);
    }
 
    // Setup of the high-order solver (if any).
@@ -926,7 +924,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
-                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs_info,
+                         x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
    double t = 0.0;
@@ -1142,10 +1140,10 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    int steps = ti_total;
    switch (ode_solver_type)
    {
-      case 2: steps *= 2; break;
-      case 3: steps *= 3; break;
-      case 4: steps *= 4; break;
-      case 6: steps *= 6; break;
+   case 2: steps *= 2; break;
+   case 3: steps *= 3; break;
+   case 4: steps *= 4; break;
+   case 6: steps *= 6; break;
    }
    adv.PrintTimingData(steps);
 

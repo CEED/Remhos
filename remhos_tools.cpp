@@ -344,7 +344,6 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
       }
    }
 
-   assert(false);
    GroupCommunicator &gcomm = x.ParFESpace()->GroupComm();
    Array<double> minvals(x_min.HostReadWrite(), x_min.Size()),
          maxvals(x_max.HostReadWrite(), x_max.Size());
@@ -365,7 +364,7 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
 
-   xi_min.SetSize(n); xi_min.operator=(0.0);
+   xi_min.SetSize(n);
    xi_max.SetSize(n);
    xe_min.SetSize(ne);
    xe_max.SetSize(ne);
