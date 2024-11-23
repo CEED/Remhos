@@ -18,10 +18,6 @@
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 
-// #define DBG_COLOR ::debug::kTomato
-// #include "debug.hpp"
-// #include "general/backends.hpp"
-
 using namespace std;
 
 namespace mfem
