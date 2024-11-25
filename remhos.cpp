@@ -1436,10 +1436,12 @@ void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
       }
 
       if (!dofs_active)
+      {
          for (int j = 0; j < ndof_el; j++)
          {
             bool_dofs[j+ndof_el*k] = false;
          }
+      }
    }
 
    // Apply the u mask to all product fields
@@ -1447,10 +1449,12 @@ void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
    const int ndim = block_offsets.Size() - 1;
    mask.SetSize(ndofs * ndim);
    for (int i = 0; i < ndofs; i++)
+   {
       for (int d = 0; d < ndim; d++)
       {
          mask[i+ndofs*d] = bool_dofs[i];
       }
+   }
 }
 
 void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
@@ -1462,7 +1466,6 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
    BlockVector block_Y(Y, block_offsets);
    const Vector &u = block_X.GetBlock(0);
    Vector &d_u = block_Y.GetBlock(0);
-
 
    if (fct_solver)
    {

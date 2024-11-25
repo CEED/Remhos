@@ -57,6 +57,8 @@ public:
    { MFEM_ABORT("Mask computation not implemented!"); }
 
    /// Limit the action vector @a k
+   /// Assumes that MultUnlimited(u, k) has been called, which has computed the
+   /// unlimited solution in @a k.
    virtual void LimitMult(const Vector &u, Vector &k) const = 0;
 };
 
@@ -94,6 +96,7 @@ class RKIDPSolver : public IDPODESolver
 
    void ConstructD();
 
+   /// Adds only DOFs that have mask = true.
    void AddMasked(const Array<bool> &mask, real_t b,
                   const Vector &vb, Vector &va);
 
