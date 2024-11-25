@@ -184,7 +184,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    {
       x.Add(c[0] * dt, dxs[0]);
       f->ComputeMask(x, mask);
-      f->SetTime(c[0] * dt);
+      f->SetTime(t + c[0] * dt);
       c_o = c[0];
    }
    else
