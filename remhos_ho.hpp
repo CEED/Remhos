@@ -57,13 +57,14 @@ class LocalInverseHOSolver : public HOSolver
 {
 protected:
    ParBilinearForm &M, &K;
-   mutable DGMassInverse M_inv;
+   mutable DGMassInverse *M_inv = nullptr;
 
 public:
    LocalInverseHOSolver(ParFiniteElementSpace &space,
                         ParBilinearForm &Mbf, ParBilinearForm &Kbf);
 
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+   void CalcHOSolution(const Vector &u, Vector &du) const override;
+   ~LocalInverseHOSolver() { delete M_inv; }
 };
 
 class Assembly;

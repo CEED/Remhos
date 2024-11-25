@@ -72,9 +72,13 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf), M_inv(space, BasisType::GaussLegendre)
+   : HOSolver(space), M(Mbf), K(Kbf)
 {
-   M_inv.SetAbsTol(1e-8), M_inv.SetRelTol(0.0);
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      M_inv = new DGMassInverse(space, BasisType::GaussLegendre);
+      M_inv->SetAbsTol(1e-8), M_inv->SetRelTol(0.0);
+   }
 }
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
@@ -119,7 +123,7 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       timer->sw_rhs.Stop();
 
       timer->sw_L2inv.Start();
-      M_inv.Update(), M_inv.Mult(rhs, du);
+      M_inv->Update(), M_inv->Mult(rhs, du);
       timer->sw_L2inv.Stop();
    }
 
