@@ -33,15 +33,15 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
    ParFiniteElementSpace &pfes_final = *u_final.ParFESpace();
    const int nsp = pfes_final.GetFE(0)->GetNodes().GetNPoints();
 
-         {
-         ParaViewDataCollection pvdc("initla_mesh", &pmesh_init);
-         pvdc.SetDataFormat(VTKFormat::BINARY32);
-         pvdc.SetCycle(0);
-         pvdc.SetTime(1.0);
+   {
+      ParaViewDataCollection pvdc("initla_mesh", &pmesh_init);
+      pvdc.SetDataFormat(VTKFormat::BINARY32);
+      pvdc.SetCycle(0);
+      pvdc.SetTime(1.0);
 
-         pvdc.RegisterField("val", const_cast<ParGridFunction*>(&u_initial));
-         pvdc.Save();
-      }
+      pvdc.RegisterField("val", const_cast<ParGridFunction*>(&u_initial));
+      pvdc.Save();
+   }
 
    // Generate list of points where u_initial will be interpolated.
    Vector pos_dof_final;
@@ -63,13 +63,13 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
 
    // Report masses.
    double mass_s = Mass(*pmesh_init.GetNodes(), u_initial),
-                mass_t = Mass(pos_final, u_interpolated);
+          mass_t = Mass(pos_final, u_interpolated);
    if (pmesh_init.GetMyRank() == 0)
    {
       std::cout << "Mass initial: " << mass_s << std::endl
-                << "Mass final  : " << mass_t << std::endl
-                << "Mass diff  : " << fabs(mass_s - mass_t) << endl
-                << "Mass diff %: " << fabs(mass_s - mass_t)/mass_s*100 << endl;
+                << "Mass interp : " << mass_t << std::endl
+                << "Mass diff   : " << fabs(mass_s - mass_t) << endl
+                << "Mass diff % : " << fabs(mass_s - mass_t)/mass_s*100 << endl;
    }
 
    // Compute min / max bounds.
@@ -153,8 +153,14 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
    // staying as close as possible to u_interpolated.
    u_final = u_interpolated;
 
-   double mass_final = Mass(pos_final, u_interpolated);
-   std::cout << "Mass final after opt: " << mass_final << std::endl;
+   double mass_f = Mass(pos_final, u_final);
+   if (pmesh_init.GetMyRank() == 0)
+   {
+      std::cout << "Mass initial: " << mass_s << std::endl
+                << "Mass final  : " << mass_f << std::endl
+                << "Mass diff  : " << fabs(mass_s - mass_f) << endl
+                << "Mass diff %: " << fabs(mass_s - mass_f)/mass_s*100 << endl;
+   }
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
