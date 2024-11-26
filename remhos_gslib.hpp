@@ -28,6 +28,7 @@ private:
    // For now there is only one Mesh. Its nodes are at the initial positions.
    // This class will not change the node positions of this Mesh.
    ParMesh &pmesh_init;
+   ParMesh pmesh_final;
    // Don't touch this (direct access to the mesh positions). Used only for vis.
    Vector *x;
    // Initial mesh node positions.
@@ -51,7 +52,8 @@ private:
 
 public:
    InterpolationRemap(ParMesh &m)
-       : pmesh_init(m), x(pmesh_init.GetNodes()), pos_init(*x) { }
+       : pmesh_init(m), pmesh_final(pmesh_init, true),
+         x(pmesh_init.GetNodes()), pos_init(*x) { }
 
    void Remap(const ParGridFunction &u_initial,
               const ParGridFunction &pos_final, ParGridFunction &u_final);
