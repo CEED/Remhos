@@ -17,6 +17,8 @@
 #include "remhos_gslib.hpp"
 #include "remhos_tools.hpp"
 
+#include "examples/remap_opt.hpp"
+
 using namespace std;
 
 namespace mfem
@@ -62,6 +64,13 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
    // Compute min / max bounds.
    Vector u_final_min, u_final_max;
    CalcDOFBounds(u_initial, pfes_final, pos_final, u_final_min, u_final_max);
+
+   MDSolver* md=new MDSolver(pfes_final,mass_s,u_interpolated,u_final_min,u_final_max);
+
+   md->Optimize(1000,1000,1000);
+   md->SetFinal(u_final);
+   delete md;
+
    if (vis_bounds)
    {
       ParGridFunction gf_min(u_initial), gf_max(u_initial);
@@ -81,9 +90,12 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
       *x = pos_init;
    }
 
+
+
+
    // Do some optimization here to fix the masses, using the min/max bounds,
    // staying as close as possible to u_interpolated.
-   u_final = u_interpolated;
+   //u_final = u_interpolated;
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
