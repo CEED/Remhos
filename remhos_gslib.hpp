@@ -48,7 +48,7 @@ private:
    void CalcDOFBounds(const ParGridFunction &g_init,
                       const ParFiniteElementSpace &pfes_final,
                       const Vector &pos_final,
-                      Vector &g_min, Vector &g_max);
+                      Vector &g_min, Vector &g_max, bool elementwise=false);
 
 public:
    InterpolationRemap(ParMesh &m)

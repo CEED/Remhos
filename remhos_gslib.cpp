@@ -66,13 +66,13 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
 
    // Compute min / max bounds.
    Vector u_final_min, u_final_max;
-   CalcDOFBounds(u_initial, pfes_final, pos_final, u_final_min, u_final_max);
+   bool elementwise = true;
+   CalcDOFBounds(u_initial, pfes_final, pos_final, u_final_min, u_final_max, elementwise);
 
-   MDSolver* md=new MDSolver(pfes_tmp,mass_s,u_interpolated,u_final_min,u_final_max);
+   MDSolver md(pfes_tmp,mass_s,u_interpolated,u_final_min,u_final_max);
 
-   md->Optimize(1000,1000,1000);
-   md->SetFinal(u_final);
-   delete md;
+   md.Optimize(1000,1000,1000);
+   md.SetFinal(u_final);
 
    if (vis_bounds)
    {
@@ -165,7 +165,7 @@ double InterpolationRemap::Mass(const Vector &pos, const ParGridFunction &g)
 void InterpolationRemap::CalcDOFBounds(const ParGridFunction &g_init,
                                        const ParFiniteElementSpace &pfes_fin,
                                        const Vector &pos_final,
-                                       Vector &g_min, Vector &g_max)
+                                       Vector &g_min, Vector &g_max, bool elementwise)
 {
    const int size_res = pfes_fin.GetVSize();
    g_min.SetSize(size_res);
@@ -190,6 +190,24 @@ void InterpolationRemap::CalcDOFBounds(const ParGridFunction &g_init,
    finder.Setup(pmesh_init);
    finder.Interpolate(pos_nodes_final, g_el_min, g_min);
    finder.Interpolate(pos_nodes_final, g_el_max, g_max);
+
+   // convert dof-wise bound to element-wise bound
+   if (elementwise)
+   {
+      Array<int> dofs;
+      Vector g_vals;
+      for (int e = 0; e < pmesh_init.GetNE(); e++)
+      {
+         pfes_fin.GetElementDofs(e, dofs);
+         g_min.GetSubVector(dofs, g_vals);
+         g_vals = g_vals.Min();
+         g_min.SetSubVector(dofs, g_vals);
+         g_max.GetSubVector(dofs, g_vals);
+         g_vals = g_vals.Max();
+         g_max.SetSubVector(dofs, g_vals);
+      }
+   }
+
 }
 
 } // namespace mfem
