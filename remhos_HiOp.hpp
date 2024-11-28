@@ -31,6 +31,7 @@ private:
    Vector d_lo, d_hi, massvec;
 
    double targetMass;
+   double H1semiNormweight_;
 
 public:
    RhemosHiOpProblem(ParFiniteElementSpace &space,
@@ -38,11 +39,15 @@ public:
                      const Vector &design_Var,
                      const Vector &xmin, 
                      const Vector &xmax, 
-                     double initalmass)
+                     double initalmass,
+                     int numConstraints_,
+                     double H1semiNormweight)
       : OptimizationProblem(design_Var.Size(), NULL, NULL),
         x_initial(u_initial), fespace(space), designVar(design_Var),
-        d_lo(1), d_hi(1), massvec(1), targetMass(initalmass)
+        d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_), targetMass(initalmass), H1semiNormweight_(H1semiNormweight)
    {
+
+      numConstraints = numConstraints_;
       SetEqualityConstraint(massvec);
       // SetInequalityConstraint(d_lo, d_hi);
 
@@ -59,10 +64,19 @@ public:
       GridFunctionCoefficient x_diff_coeff(&x_diff);
       ProductCoefficient x_diff_coeffsquared(x_diff_coeff, x_diff_coeff);
       ProductCoefficient half_x_diff_coeffsquared(0.5, x_diff_coeffsquared);
-      auto *lfi = new DomainLFIntegrator(half_x_diff_coeffsquared);
 
+	   	GradientGridFunctionCoefficient GradientCoeff_new(&x_interpolated);
+      	GradientGridFunctionCoefficient GradientCoeff_old(&x_initial);
+      VectorSumCoefficient new_minus_old_coeff(GradientCoeff_new, GradientCoeff_old, 1.0, -1.0);
 
-      dQdeta.AddDomainIntegrator(lfi);
+      InnerProductCoefficient innerProductCoeff(new_minus_old_coeff,new_minus_old_coeff);
+
+      ProductCoefficient H1SemiNormCoeff(H1semiNormweight_, innerProductCoeff);
+
+      auto *lfi_1 = new DomainLFIntegrator(half_x_diff_coeffsquared);
+      auto *lfi_2 = new DomainLFIntegrator(H1SemiNormCoeff);
+      dQdeta.AddDomainIntegrator(lfi_1);
+      dQdeta.AddDomainIntegrator(lfi_2);
       dQdeta.Assemble();
 
       ::mfem::ParGridFunction oneGridFunction(&fespace);
@@ -81,33 +95,69 @@ public:
 
       ParLinearForm dQdeta(&fespace);
       GridFunctionCoefficient x_diff_coeff(&x_diff);
-      auto *lfi = new DomainLFIntegrator(x_diff_coeff);
 
-      dQdeta.AddDomainIntegrator(lfi);
+	   	GradientGridFunctionCoefficient GradientCoeff_new(&x_interpolated);
+      	GradientGridFunctionCoefficient GradientCoeff_old(&x_initial);
+      VectorSumCoefficient new_minus_old_coeff(GradientCoeff_new, GradientCoeff_old, 1.0, -1.0);
+
+       	ScalarVectorProductCoefficient a_timesB(H1semiNormweight_*2.0, new_minus_old_coeff );
+
+
+      auto *lfi_1 = new DomainLFIntegrator(x_diff_coeff);
+      auto *lfi_2 = new DomainLFGradIntegrator(a_timesB);
+
+      dQdeta.AddDomainIntegrator(lfi_1);
+      dQdeta.AddDomainIntegrator(lfi_2);
       dQdeta.Assemble();
       dQdeta.ParallelAssemble(grad);
    }
 
-   virtual void CalcConstraintGrad(const Vector &x, Vector &grad) const
+   virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &grad) const
    {
-      ParLinearForm dConstdeta(&fespace); dConstdeta = 0.0;
-      ConstantCoefficient dConst_coeff(1.0);
-      auto *constrlfi = new DomainLFIntegrator(dConst_coeff);
+      if( constNumber == 0)
+      {
+         ParLinearForm dConstdeta(&fespace); dConstdeta = 0.0;
+         ConstantCoefficient dConst_coeff(1.0);
+         auto *constrlfi = new DomainLFIntegrator(dConst_coeff);
 
-      dConstdeta.AddDomainIntegrator(constrlfi);
-      dConstdeta.Assemble();
-      dConstdeta.ParallelAssemble(grad);
+         dConstdeta.AddDomainIntegrator(constrlfi);
+         dConstdeta.Assemble();
+         dConstdeta.ParallelAssemble(grad);
+      }
+      else if( constNumber == 1)
+      {
+         ParGridFunction x_interpolated(&fespace); x_interpolated.SetFromTrueDofs(x);   
+
+         ParLinearForm dConstdeta(&fespace); dConstdeta = 0.0;
+         GridFunctionCoefficient dGF_coeff(&x_interpolated);
+         auto *constrlfi = new DomainLFIntegrator(dGF_coeff);
+
+         dConstdeta.AddDomainIntegrator(constrlfi);
+         dConstdeta.Assemble();
+         dConstdeta.ParallelAssemble(grad);
+
+         grad *= 2.0;
+      }
    }
 
-   virtual void CalcConstraint(const Vector &x, Vector &constVal) const
+   virtual void CalcConstraint(const int constNumber, const Vector &x, Vector &constVal) const
    {
-      ParGridFunction x_interpolated(&fespace); x_interpolated.SetFromTrueDofs(x);
-    
-      Vector * pos = fespace.GetParMesh()->GetNodes();
+      if( constNumber == 0)
+      {
+         ParGridFunction x_interpolated(&fespace); x_interpolated.SetFromTrueDofs(x);    
+         Vector * pos = fespace.GetParMesh()->GetNodes();
 
-      double mass_s = calculateMass(*pos, x_interpolated);
+         double mass_s = calculateMass(*pos, x_interpolated);
+         constVal[0] = mass_s - targetMass;
+      }
+      else if( constNumber == 1)
+      {
+         ParGridFunction x_interpolated(&fespace); x_interpolated.SetFromTrueDofs(x);    
+         Vector * pos = fespace.GetParMesh()->GetNodes();
 
-      constVal[0] = mass_s - targetMass;
+         double mass_s = calculateMass(*pos, x_interpolated);
+         constVal[0] = std::pow(mass_s, 2.0) - std::pow(targetMass, 2.0);         
+      }
    }
 
 private:

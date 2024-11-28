@@ -126,17 +126,21 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
       const double rtol = 1.e-7;
       double atol = 1.e-7;
       Vector y_out(u_interpolated.Size());
-      //Vector y_in(u_interpolated.Size()); y_in = 1.0;
+      //Vector y_in(u_interpolated.Size()); y_in = 1.0;s
 
       // u_final_min = 0.0;
       // u_final_max = 1.0;
+      int numContraints = 1;
+      int H1SeminormWeight = 0.0;
 
       RhemosHiOpProblem ot_prob( pfes_final,
                                  u_interpolated_initial,
                                  u_interpolated,
                                  u_final_min,
                                  u_final_max, 
-                                 mass_s);
+                                 mass_s,
+                                 numContraints,
+                                 H1SeminormWeight);
       optsolver->SetOptimizationProblem(ot_prob);
 
       optsolver->SetMaxIter(max_iter);
