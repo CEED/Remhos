@@ -157,7 +157,9 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   const char *mesh_file = "data/periodic-square.mesh";
+   const char *mesh_file = "default";
+   int dim = 3;
+   int elem_per_mpi = 1;
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
@@ -189,6 +191,9 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
+   args.AddOption(&dim, "-dim", "--dimension", "Dimension of the problem.");
+   args.AddOption(&elem_per_mpi, "-epm", "--elem-per-mpi",
+                  "Number of element per mpi task.");
    args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
    args.AddOption(&rs_levels, "-rs", "--refine-serial",
@@ -282,12 +287,38 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
 
-   // Read the serial mesh from the given mesh file on all processors.
-   // Refine the mesh in serial to increase the resolution.
-   Mesh *mesh = new Mesh(Mesh::LoadFromFile(mesh_file, 1, 1));
-   const int dim = mesh->Dimension();
-   for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
+   Mesh *mesh = nullptr;
+   int *mpi_partitioning = nullptr;
+   if (strncmp(mesh_file, "default", 7) != 0)
+   {
+      // Read the serial mesh from the given mesh file on all processors.
+      // Refine the mesh in serial to increase the resolution.
+      mesh = new Mesh(Mesh::LoadFromFile(mesh_file, 1, 1));
+      for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
+   }
+   else
+   {
+      mesh = CartesianMesh(dim, Mpi::WorldSize(), elem_per_mpi, myid == 0,
+                           rp_levels, &mpi_partitioning);
+   }
+   dim = mesh->Dimension();
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+
+   // Parallel partitioning of the mesh.
+   // Refine the mesh further in parallel to increase the resolution.
+   ParMesh pmesh(MPI_COMM_WORLD, *mesh, mpi_partitioning);
+   delete mesh;
+   delete mpi_partitioning;
+   for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+   MPI_Comm comm = pmesh.GetComm();
+   const int NE  = pmesh.GetNE();
+
+   if (strncmp(mesh_file, "default", 7) == 0)
+   {
+      MFEM_VERIFY(pmesh.GetGlobalNE() == Mpi::WorldSize() * elem_per_mpi,
+                  "Mesh generation error.");
+      MFEM_VERIFY(NE == elem_per_mpi, "Mesh generation error.");
+   }
 
    // Only standard assembly in 1D (some mfem functions just abort in 1D).
    if ((pa || next_gen_full) && dim == 1)
@@ -296,14 +327,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       pa = false;
       next_gen_full = false;
    }
-
-   // Parallel partitioning of the mesh.
-   // Refine the mesh further in parallel to increase the resolution.
-   ParMesh pmesh(MPI_COMM_WORLD, *mesh);
-   delete mesh;
-   for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
-   MPI_Comm comm = pmesh.GetComm();
-   const int NE  = pmesh.GetNE();
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.

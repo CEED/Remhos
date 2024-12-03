@@ -23,6 +23,9 @@
 namespace mfem
 {
 
+Mesh *CartesianMesh(int dim, int mpi_cnt, int elem_per_mpi, bool print,
+                    int &par_ref, int **partitioning);
+
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 
