@@ -44,9 +44,11 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
+                          NonlinearPenalty, FCTProject
+                         };
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased
+                        };
 enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
@@ -78,7 +80,7 @@ private:
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
-   Vector &lumpedM;
+   Vector &lumpedM, ones;
 
    Vector start_mesh_pos, start_submesh_pos;
    GridFunction &mesh_pos, *submesh_pos, &mesh_vel, &submesh_vel;
@@ -88,6 +90,8 @@ private:
    double dt;
    TimeStepControl dt_control;
    mutable double dt_est;
+   mutable TimingData timer;
+
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -132,16 +136,30 @@ public:
       start_submesh_pos = sm_pos;
    }
 
+   void PrintTimingData(int steps) const;
+
    virtual ~AdvectionOperator() { }
 };
 
+#ifndef MFEM_USE_CMAKE_TESTS
+int remhos(int, char *[], double &);
+
 int main(int argc, char *argv[])
+{
+   double final_mass_u = M_PI; // unused
+   return remhos(argc, argv, final_mass_u);
+}
+#endif // MFEM_USE_CMAKE_TESTS
+
+MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 {
    // Initialize MPI.
    mfem::MPI_Session mpi(argc, argv);
    const int myid = mpi.WorldRank();
 
-   const char *mesh_file = "data/periodic-square.mesh";
+   const char *mesh_file = "default";
+   int dim = 3;
+   int elem_per_mpi = 1;
    int rs_levels = 2;
    int rp_levels = 0;
    int order = 3;
@@ -158,7 +176,9 @@ int main(int argc, char *argv[])
    double t_final = 4.0;
    TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
+   int max_tsteps = -1;
    bool visualization = true;
+   bool save_meshes_and_solution = false;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -171,6 +191,9 @@ int main(int argc, char *argv[])
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
+   args.AddOption(&dim, "-dim", "--dimension", "Dimension of the problem.");
+   args.AddOption(&elem_per_mpi, "-epm", "--elem-per-mpi",
+                  "Number of element per mpi task.");
    args.AddOption(&problem_num, "-p", "--problem",
                   "Problem setup to use. See options in velocity_function().");
    args.AddOption(&rs_levels, "-rs", "--refine-serial",
@@ -227,9 +250,14 @@ int main(int argc, char *argv[])
                   "                   1 - Bounds violation of the LO sltn.");
    args.AddOption(&dt, "-dt", "--time-step",
                   "Initial time step size (dt might change based on -dtc).");
+   args.AddOption(&max_tsteps, "-ms", "--max-steps",
+                  "Maximum number of steps (negative means no restriction).");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
+   args.AddOption(&save_meshes_and_solution, "-save", "--save-meshes-and-solution",
+                  "-no-save", "--save-meshes-and-solution",
+                  "Print the final meshes and solution.");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
@@ -259,12 +287,38 @@ int main(int argc, char *argv[])
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
 
-   // Read the serial mesh from the given mesh file on all processors.
-   // Refine the mesh in serial to increase the resolution.
-   Mesh *mesh = new Mesh(Mesh::LoadFromFile(mesh_file, 1, 1));
-   const int dim = mesh->Dimension();
-   for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
+   Mesh *mesh = nullptr;
+   int *mpi_partitioning = nullptr;
+   if (strncmp(mesh_file, "default", 7) != 0)
+   {
+      // Read the serial mesh from the given mesh file on all processors.
+      // Refine the mesh in serial to increase the resolution.
+      mesh = new Mesh(Mesh::LoadFromFile(mesh_file, 1, 1));
+      for (int lev = 0; lev < rs_levels; lev++) { mesh->UniformRefinement(); }
+   }
+   else
+   {
+      mesh = CartesianMesh(dim, Mpi::WorldSize(), elem_per_mpi, myid == 0,
+                           rp_levels, &mpi_partitioning);
+   }
+   dim = mesh->Dimension();
    mesh->GetBoundingBox(bb_min, bb_max, max(order, 1));
+
+   // Parallel partitioning of the mesh.
+   // Refine the mesh further in parallel to increase the resolution.
+   ParMesh pmesh(MPI_COMM_WORLD, *mesh, mpi_partitioning);
+   delete mesh;
+   delete mpi_partitioning;
+   for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
+   MPI_Comm comm = pmesh.GetComm();
+   const int NE  = pmesh.GetNE();
+
+   if (strncmp(mesh_file, "default", 7) == 0)
+   {
+      MFEM_VERIFY(pmesh.GetGlobalNE() == Mpi::WorldSize() * elem_per_mpi,
+                  "Mesh generation error.");
+      MFEM_VERIFY(NE == elem_per_mpi, "Mesh generation error.");
+   }
 
    // Only standard assembly in 1D (some mfem functions just abort in 1D).
    if ((pa || next_gen_full) && dim == 1)
@@ -273,14 +327,6 @@ int main(int argc, char *argv[])
       pa = false;
       next_gen_full = false;
    }
-
-   // Parallel partitioning of the mesh.
-   // Refine the mesh further in parallel to increase the resolution.
-   ParMesh pmesh(MPI_COMM_WORLD, *mesh);
-   delete mesh;
-   for (int lev = 0; lev < rp_levels; lev++) { pmesh.UniformRefinement(); }
-   MPI_Comm comm = pmesh.GetComm();
-   const int NE  = pmesh.GetNE();
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
@@ -476,6 +522,9 @@ int main(int argc, char *argv[])
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
       K_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+
+      k.SetAssemblyLevel(AssemblyLevel::PARTIAL);
+      m.SetAssemblyLevel(AssemblyLevel::PARTIAL);
    }
 
    if (next_gen_full)
@@ -493,18 +542,29 @@ int main(int argc, char *argv[])
    }
 
    // Compute the lumped mass matrix.
-   Vector lumpedM;
    ParBilinearForm ml(&pfes);
    ml.AddDomainIntegrator(new LumpedIntegrator(new MassIntegrator));
-   ml.Assemble();
-   ml.Finalize();
-   ml.SpMat().GetDiag(lumpedM);
+   if (!pa)
+   {
+      ml.Assemble();
+      ml.Finalize();
+   }
 
    m.Assemble();
    m.Finalize();
    int skip_zeros = 0;
    k.Assemble(skip_zeros);
    k.Finalize(skip_zeros);
+
+   Vector lumpedM;
+   if (!pa) { ml.SpMat().GetDiag(lumpedM); }
+   else
+   {
+      lumpedM.SetSize(m.Height());
+      Vector ones(m.Height());
+      ones = 1.0;
+      m.Mult(ones, lumpedM);
+   }
 
    // Store topological dof data.
    DofInfo dofs(pfes, bounds_type);
@@ -770,8 +830,7 @@ int main(int argc, char *argv[])
    {
       MFEM_VERIFY(ho_solver != nullptr,
                   "Mass-Based LO solver requires a choice of a HO solver.");
-      lo_solver = new MassBasedAvg(pfes, *ho_solver,
-                                   (exec_mode == 1) ? &v_gf : nullptr);
+      lo_solver = new MassBasedAvg(pfes, *ho_solver);
    }
 
    // Setup of the monolithic solver (if any).
@@ -793,18 +852,21 @@ int main(int argc, char *argv[])
    }
 
    // Print the starting meshes and initial condition.
-   ofstream meshHO("meshHO_init.mesh");
-   meshHO.precision(precision);
-   pmesh.PrintAsOne(meshHO);
-   if (subcell_mesh)
+   if (save_meshes_and_solution)
    {
-      ofstream meshLO("meshLO_init.mesh");
-      meshLO.precision(precision);
-      subcell_mesh->PrintAsOne(meshLO);
+      ofstream meshHO("meshHO_init.mesh");
+      meshHO.precision(precision);
+      pmesh.PrintAsOne(meshHO);
+      if (subcell_mesh)
+      {
+         ofstream meshLO("meshLO_init.mesh");
+         meshLO.precision(precision);
+         subcell_mesh->PrintAsOne(meshLO);
+      }
+      ofstream sltn("sltn_init.gf");
+      sltn.precision(precision);
+      u.SaveAsOne(sltn);
    }
-   ofstream sltn("sltn_init.gf");
-   sltn.precision(precision);
-   u.SaveAsOne(sltn);
 
    // Create data collection for solution output: either VisItDataCollection for
    // ASCII data files, or SidreDataCollection for binary data files.
@@ -1062,6 +1124,8 @@ int main(int argc, char *argv[])
          else { res = u; }
       }
 
+      if (ti_total == max_tsteps) { done = true; }
+
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
@@ -1096,6 +1160,16 @@ int main(int argc, char *argv[])
       }
    }
 
+   int steps = ti_total;
+   switch (ode_solver_type)
+   {
+   case 2: steps *= 2; break;
+   case 3: steps *= 3; break;
+   case 4: steps *= 4; break;
+   case 6: steps *= 6; break;
+   }
+   adv.PrintTimingData(steps);
+
    if (dt_control != TimeStepControl::FixedTimeStep && myid == 0)
    {
       cout << "Total time steps: " << ti_total
@@ -1103,6 +1177,7 @@ int main(int argc, char *argv[])
    }
 
    // Print the final meshes and solution.
+   if (save_meshes_and_solution)
    {
       ofstream meshHO("meshHO_final.mesh");
       meshHO.precision(precision);
@@ -1122,10 +1197,23 @@ int main(int argc, char *argv[])
    double mass_u_loc = 0.0, mass_us_loc = 0.0;
    if (exec_mode == 1)
    {
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostRead();
-      ml.SpMat().GetDiag(lumpedM);
+      // Using lumped diagonal for mass conservation.
+      if (!pa)
+      {
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostRead();
+         ml.SpMat().GetDiag(lumpedM);
+      }
+      else
+      {
+         ParBilinearForm m(&pfes);
+         m.AddDomainIntegrator(new MassIntegrator);
+         m.Assemble();
+         Vector ones(m.Height());
+         ones = 1.0;
+         m.Mult(ones, lumpedM);
+      }
       mass_u_loc = lumpedM * u;
       if (product_sync) { mass_us_loc = lumpedM * us; }
    }
@@ -1136,6 +1224,7 @@ int main(int argc, char *argv[])
    }
    double mass_u, mass_us = 0.0, s_max = 0.0;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+   final_mass_u = mass_u;
    const double umax_loc = u.Max();
    MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
@@ -1194,7 +1283,7 @@ int main(int argc, char *argv[])
       }
    }
 
-   if (smth_indicator)
+   if (smth_indicator && save_meshes_and_solution)
    {
       // Print the values of the smoothness indicator.
       ParGridFunction si_val;
@@ -1245,12 +1334,21 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
+   ones(lumpedM.Size()),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
    mesh_pos(pos), submesh_pos(sub_pos),
    mesh_vel(vel), submesh_vel(sub_vel),
    x_gf(Kbf.ParFESpace()),
+   timer(M_HO.Size()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
-   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
+   ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos)
+{
+   if (ho_solver)  { ho_solver->timer  = &timer; }
+   if (lo_solver)  { lo_solver->timer  = &timer; }
+   if (fct_solver) { fct_solver->timer = &timer; }
+
+   ones = 1.0;
+}
 
 void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 {
@@ -1272,15 +1370,25 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       Mbf.Assemble();
       Kbf.BilinearForm::operator=(0.0);
       Kbf.Assemble(0);
-      ml.BilinearForm::operator=(0.0);
-      ml.Assemble();
-      lumpedM.HostReadWrite();
-      ml.SpMat().GetDiag(lumpedM);
 
+      if (Mbf.GetAssemblyLevel() != AssemblyLevel::PARTIAL)
+      {
+         ml.BilinearForm::operator=(0.0);
+         ml.Assemble();
+         lumpedM.HostReadWrite();
+         ml.SpMat().GetDiag(lumpedM);
+      }
+      else { Mbf.Mult(ones, lumpedM); }
+
+      timer.sw_L2inv.Start();
       M_HO.BilinearForm::operator=(0.0);
       M_HO.Assemble();
+      timer.sw_L2inv.Stop();
+
+      timer.sw_rhs.Start();
       K_HO.BilinearForm::operator=(0.0);
       K_HO.Assemble(0);
+      timer.sw_rhs.Stop();
 
       if (lom.pk)
       {
@@ -1339,11 +1447,20 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      lo_solver->CalcLOSolution(u, du_LO);
+      // High-order solution.
       ho_solver->CalcHOSolution(u, du_HO);
 
+      auto mba = dynamic_cast<MassBasedAvg *>(lo_solver);
+      if (mba) { mba->SetHOSolution(du_HO); }
+
+      // Low-order solution.
+      lo_solver->CalcLOSolution(u, du_LO);
+
+      // Computation of bounds and FCT blending.
+      timer.sw_FCT.Start();
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+      timer.sw_FCT.Stop();
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
 
@@ -1442,6 +1559,39 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    }
 }
 
+void AdvectionOperator::PrintTimingData(int steps) const
+{
+   const MPI_Comm com = M_HO.ParFESpace()->GetComm();
+   const int myid = M_HO.ParFESpace()->GetMyRank();
+
+   double my_rt[5], T[5];
+   my_rt[0] = timer.sw_rhs.RealTime();
+   my_rt[1] = timer.sw_L2inv.RealTime();
+   my_rt[2] = timer.sw_LO.RealTime();
+   my_rt[3] = timer.sw_FCT.RealTime();
+   my_rt[4] = my_rt[0] + my_rt[2] + my_rt[3];
+   MPI_Reduce(my_rt, T, 5, MPI_DOUBLE, MPI_MAX, 0, com);
+
+   const HYPRE_BigInt dofs_steps = M_HO.ParFESpace()->GlobalVSize() * steps;
+
+   if (myid == 0)
+   {
+      std::cout << "---" << std::endl;
+      std::cout << "RHS   kernel time: " << T[0] << std::endl
+                << "L2inv kernel time: " << T[1] << std::endl
+                << "LO    kernel time: " << T[2] << std::endl
+                << "FCT   kernel time: " << T[3] << std::endl
+                << "Total kernel time: " << T[4] << std::endl;
+      std::cout << "---" << std::endl;
+      std::cout << "FOM RHS: " << 1e-6 * dofs_steps / T[0] << std::endl
+                << "FOM INV: " << 1e-6 * dofs_steps / T[1] << std::endl
+                << "FOM LO:  " << 1e-6 * dofs_steps / T[2] << std::endl
+                << "FOM FCT: " << 1e-6 * dofs_steps / T[3] << std::endl
+                << "FOM:     " << 1e-6 * dofs_steps / T[4] << std::endl;
+      std::cout << "(megadofs x time steps / second)\n---" << std::endl;
+   }
+}
+
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                                                const Vector &dx,
                                                const Vector &x_min,
@@ -1453,6 +1603,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    int n = x.Size();
    const double eps = 1e-12;
    double dt = numeric_limits<double>::infinity();
+   x_min.HostRead(), x_max.HostRead(), x.HostRead(), dx.HostRead();
 
    for (int i = 0; i < n; i++)
    {

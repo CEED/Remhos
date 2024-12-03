@@ -22,6 +22,8 @@
 namespace mfem
 {
 
+struct TimingData;
+
 // High-Order Solver.
 // Conserve mass / provide high-order convergence / may violate the bounds.
 class HOSolver
@@ -35,6 +37,8 @@ public:
    virtual ~HOSolver() { }
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
+
+   TimingData *timer = nullptr;
 };
 
 class CGHOSolver : public HOSolver
@@ -53,12 +57,14 @@ class LocalInverseHOSolver : public HOSolver
 {
 protected:
    ParBilinearForm &M, &K;
+   mutable DGMassInverse *M_inv = nullptr;
 
 public:
    LocalInverseHOSolver(ParFiniteElementSpace &space,
                         ParBilinearForm &Mbf, ParBilinearForm &Kbf);
 
-   virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+   void CalcHOSolution(const Vector &u, Vector &du) const override;
+   ~LocalInverseHOSolver() { delete M_inv; }
 };
 
 class Assembly;

@@ -1,0 +1,10 @@
+remhos
+*.dat
+*.mesh
+*.o
+*.gf
+*.svg
+.DS_Store
+/build/
+/.cache/
+/.vscode/
