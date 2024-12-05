@@ -212,13 +212,19 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       // Update mask with the HO update
       UpdateMask(x, dxs[i], dct, mask);
 
-      // Convert the HO update to Forward Euler
+      // Form the unlimited update for the stage.
+      // Note that it converts eq. (2.16) in JLG's paper into an update using
+      // the previous limited updates.
       if (d_i[i] != 1.)
       {
+         // for mask = 0, we get dxs (nothing happens).
+         //               the loop below won't change it -> Forward Euler.
+         // for mask = 1, we scale dxs by d_i[i].
          AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]);
       }
       for (int j = 0; j < i; j++)
       {
+         // Use all previous limited updates.
          AddMasked(mask, d_i[j], dxs[j], dxs[i]);
       }
 

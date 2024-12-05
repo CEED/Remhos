@@ -69,7 +69,12 @@ protected:
    LimitedTimeDependentOperator *f;  // f(.,t) : R^n --> R^n
 
    void Init(TimeDependentOperator &f_) override
-   { MFEM_ABORT("Limited time-dependent operator must be assigned!"); }
+   {
+      auto lo = dynamic_cast<LimitedTimeDependentOperator *>(&f_);
+      if (lo) { Init(*lo); }
+      else    { MFEM_ABORT("LimitedTimeDependentOperator must be assigned!"); }
+   }
+
 public:
    IDPODESolver() : ODESolver(), f(NULL) { }
    virtual ~IDPODESolver() { }
@@ -94,6 +99,9 @@ class RKIDPSolver : public IDPODESolver
    Vector *dxs;
    Array<bool> mask;
 
+   // This function constructs coefficients that transform eq. (2.16) from
+   // JLG's paper to an update that only uses the previous limited updates.
+   // This function does not depend on the Operator f in any way.
    void ConstructD();
 
    /// Adds only DOFs that have mask = true.

@@ -47,16 +47,20 @@
 using namespace std;
 using namespace mfem;
 
-enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject
-                         };
-enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased
-                        };
-enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
+enum class HOSolverType
+{ None, Neumann, CG, LocalInverse };
 
-enum class TimeStepControl {FixedTimeStep, LOBoundsError};
+enum class LOSolverType
+{ None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell, MassBased };
+
+enum class FCTSolverType
+{ None, FluxBased, ClipScale, NonlinearPenalty, FCTProject };
+
+enum class MonolithicSolverType
+{ None, ResDistMono, ResDistMonoSubcell };
+
+enum class TimeStepControl
+{ FixedTimeStep, LOBoundsError };
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -306,18 +310,25 @@ int main(int argc, char *argv[])
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
-   IDPODESolver *ode_solver = NULL;
+   IDPODESolver *idp_ode_solver = nullptr;
+   ODESolver *ode_solver = nullptr;
    switch (ode_solver_type)
    {
-      case 1: ode_solver = new ForwardEulerIDPSolver(); break;
-      case 2: ode_solver = new RK2IDPSolver(); break;
-      case 3: ode_solver = new RK3IDPSolver(); break;
-      case 4: ode_solver = new RK4IDPSolver(); break;
-      case 6: ode_solver = new RK6IDPSolver(); break;
+      case 1: ode_solver = new ForwardEulerSolver(); break;
+      case 2: ode_solver = new RK2Solver(1.0); break;
+      case 3: ode_solver = new RK3SSPSolver(); break;
+      case 4: ode_solver = new RK4Solver(); break;
+      case 6: ode_solver = new RK6Solver(); break;
+      case 11: idp_ode_solver = new ForwardEulerIDPSolver(); break;
+      case 12: idp_ode_solver = new RK2IDPSolver(); break;
+      case 13: idp_ode_solver = new RK3IDPSolver(); break;
+      case 14: idp_ode_solver = new RK4IDPSolver(); break;
+      case 16: idp_ode_solver = new RK6IDPSolver(); break;
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
    }
+   if (ode_solver_type > 10) { ode_solver = idp_ode_solver; }
 
    // Check if the input mesh is periodic.
    const bool periodic = pmesh.GetNodes() != NULL &&
@@ -1452,6 +1463,8 @@ void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
    {
       for (int d = 0; d < ndim; d++)
       {
+         // Note that this puts a mask on the first field as well, meaning
+         // that propagation in new elements will be through Forward Euler.
          mask[i+ndofs*d] = bool_dofs[i];
       }
    }
