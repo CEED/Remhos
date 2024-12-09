@@ -1132,6 +1132,14 @@ int main(int argc, char *argv[])
            << " (" << ti_total-ti << " repeated)." << endl;
    }
 
+   // Move to the final mesh position
+   if (exec_mode == 1)
+   {
+      add(x0, t_final, v_gf, x);
+      // Reset precomputed geometric data.
+      pmesh.DeleteGeometricFactors();
+   }
+
    // Print the final meshes and solution.
    {
       ofstream meshHO("meshHO_final.mesh");
