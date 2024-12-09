@@ -166,6 +166,10 @@ void RKIDPSolver::Init(LimitedTimeDependentOperator &f_)
    {
       dxs[i].SetSize(f->Height());
    }
+   if (f->RequiresLOSolution())
+   {
+      dx_lo.SetSize(f->Height());
+   }
 }
 
 void RKIDPSolver::Step(Vector &x, double &t, double &dt)
@@ -176,7 +180,15 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    f->SetTime(t);
    f->SetDt(c[0] * dt);
    f->MultUnlimited(x, dxs[0]);
-   f->LimitMult(x, dxs[0]);
+   if (f->RequiresLOSolution())
+   {
+      f->MultUnlimitedLO(x, dx_lo);
+      f->LimitMult(x, dx_lo, dxs[0]);
+   }
+   else
+   {
+      f->LimitMult(x, dxs[0]);
+   }
 
    // Update state
    const double c_next = (s > 2)?(c[1]):(1.);
@@ -208,6 +220,10 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       // Explicit HO step
       f->SetDt(dct);
       f->MultUnlimited(x, dxs[i]);
+      if (f->RequiresLOSolution())
+      {
+         f->MultUnlimitedLO(x, dx_lo);
+      }
 
       // Update mask with the HO update
       UpdateMask(x, dxs[i], dct, mask);
@@ -221,15 +237,30 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          //               the loop below won't change it -> Forward Euler.
          // for mask = 1, we scale dxs by d_i[i].
          AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]);
+
+         // Combine LO soluion with the previous limited updates to obtain
+         // a bounds-preserving HO time-integrated reference solution.
+         if (f->RequiresLOSolution())
+         {
+            AddMasked(mask, d_i[i]-1., dx_lo, dx_lo);
+         }
       }
       for (int j = 0; j < i; j++)
       {
          // Use all previous limited updates.
          AddMasked(mask, d_i[j], dxs[j], dxs[i]);
       }
+      if (f->RequiresLOSolution())
+      {
+         for (int j = 0; j < i; j++)
+         {
+            // Use all previous limited updates.
+            AddMasked(mask, d_i[j], dxs[j], dx_lo);
+         }
+      }
 
       // Limit the step
-      f->LimitMult(x, dxs[i]);
+      f->LimitMult(x, dx_lo, dxs[i]);
 
       // Update the state
       const double c_next = (i < s-2)?(c[i+1]):(1.);
