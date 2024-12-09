@@ -48,8 +48,9 @@ enum class FCTSolverType {None, FluxBased, ClipScale,
                           NonlinearPenalty, FCTProject};
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
-enum class MonolithicSolverType {None, ResDistMono,
-                                 ResDistMonoSubcell, Interpolation};
+
+enum class MonolithicSolverType
+{ None, ResDistMono, ResDistMonoSubcell, InterpolationGF, InterpolationQF};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -916,7 +917,7 @@ int main(int argc, char *argv[])
       t_final = 1.0;
    }
 
-   if (mono_type == MonolithicSolverType::Interpolation)
+   if (mono_type == MonolithicSolverType::InterpolationGF)
    {
       InterpolationRemap interpolator(pmesh);
       ParGridFunction uu(&pfes);
@@ -929,6 +930,39 @@ int main(int argc, char *argv[])
                         400, 0, 400, 400);
          x = x0;
       }
+      return 0;
+   }
+
+   if (mono_type == MonolithicSolverType::InterpolationQF)
+   {
+      const IntegrationRule &ir =
+          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+      QuadratureSpace qspace(pmesh, ir);
+      QuadratureFunction u_qf(qspace);
+      u_qf.ProjectGridFunction(u);
+
+      osockstream sol_sock(19916, "localhost");
+      sol_sock << "parallel " << pmesh.GetNRanks() << " " << myid << "\n";
+      sol_sock << "quadrature\n" << pmesh << u_qf << std::flush;
+      sol_sock << "window_title 'Initial QuadFunc'\n";
+      sol_sock << "window_geometry 400 0 400 400\n";
+      sol_sock << "keys rmj\n";
+      sol_sock.send();
+
+      QuadratureFunction uu_qf(qspace);
+      InterpolationRemap interpolator(pmesh);
+      interpolator.Remap(u_qf, x_final, uu_qf);
+
+      x = x_final;
+      osockstream sol_sock_res(19916, "localhost");
+      sol_sock_res << "parallel " << pmesh.GetNRanks() << " " << myid << "\n";
+      sol_sock_res << "quadrature\n" << pmesh << uu_qf << std::flush;
+      sol_sock_res << "window_title 'Remapped QuadFunc'\n";
+      sol_sock_res << "window_geometry 1200 0 400 400\n";
+      sol_sock_res << "keys rmj\n";
+      sol_sock_res.send();
+      x = x0;
+
       return 0;
    }
 

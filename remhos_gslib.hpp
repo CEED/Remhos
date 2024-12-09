@@ -35,19 +35,30 @@ private:
 
    // Positions of the DOFs of pfes, for the given mesh positions.
    void GetDOFPositions(const ParFiniteElementSpace &pfes,
-                              const Vector &pos_mesh,
-                              Vector &pos_dofs);
+                        const Vector &pos_mesh, Vector &pos_dofs);
+   // Positions of the quads of qspace, for the given mesh positions.
+   void GetQuadPositions(const QuadratureSpace &qspace,
+                         const Vector &pos_mesh,
+                         Vector &pos_quads);
 
    // Mass of g for the given mesh positions.
    double Mass(const Vector &pos, const ParGridFunction &g);
+   // Mass of q for the given mesh positions.
+   double Mass(const Vector &pos, const QuadratureFunction &q);
 
-   // Computes bounds for the DOFs of pfes_final, at the mesh positions given
+   // Computes bounds for the DOFs of pfes, at the mesh positions given
    // by pos_final. The bounds are determined by the values of g_init, which
    // is defined with respect on the initial mesh.
    void CalcDOFBounds(const ParGridFunction &g_init,
-                      const ParFiniteElementSpace &pfes_final,
+                      const ParFiniteElementSpace &pfes,
                       const Vector &pos_final,
                       Vector &g_min, Vector &g_max);
+   // Computes bounds for quadrature values, at the mesh positions given
+   // by pos_final. The bounds are determined by the values of qf_init, which
+   // is defined with respect on the initial mesh.
+   void CalcQuadBounds(const QuadratureFunction &qf_init,
+                       const Vector &pos_final,
+                       Vector &g_min, Vector &g_max);
 
 public:
    InterpolationRemap(ParMesh &m)
@@ -55,6 +66,9 @@ public:
 
    void Remap(const ParGridFunction &u_initial,
               const ParGridFunction &pos_final, ParGridFunction &u_final);
+
+   void Remap(const QuadratureFunction &u_initial,
+              const ParGridFunction &pos_final, QuadratureFunction &u_final);
 
    bool vis_bounds = true;
 };
