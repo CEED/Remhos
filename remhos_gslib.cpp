@@ -131,7 +131,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_initial,
       // u_final_min = 0.0;
       // u_final_max = 1.0;
       int numContraints = 1;
-      int H1SeminormWeight = 0.0;
+      double H1SeminormWeight = 0.0;
 
       RhemosHiOpProblem ot_prob( pfes_final,
                                  u_interpolated_initial,
