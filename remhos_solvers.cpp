@@ -127,39 +127,13 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
 {
    real_t c_o = 0.;
 
-   // Perform the first step
    f->SetTime(t);
-   f->SetDt(c[0] * dt);
-   f->MultUnlimited(x, dxs[0]);
-   if (f->RequiresLOSolution())
-   {
-      f->MultUnlimitedLO(x, dx_lo);
-      f->LimitMult(x, dx_lo, dxs[0]);
-   }
-   else
-   {
-      f->LimitMult(x, dxs[0]);
-   }
 
-   // Update state
-   const double c_next = (s > 2)?(c[1]):(1.);
-   if (c_next > c[0])// only when advancing after
-   {
-      x.Add(c[0] * dt, dxs[0]);
-      f->SetTime(t + c[0] * dt);
-      c_o = c[0];
-   }
-   else
-   {
-      Vector x_new(x.Size());
-      add(x, c[0] * dt, dxs[0], x_new);
-   }
+   // Step through the stages
 
-   // Step through higher stages
+   const real_t *d_i = d;
 
-   const real_t *d_i = d + 1;
-
-   for (int i = 1; i < s; i++)
+   for (int i = 0; i < s; i++)
    {
       const real_t c_n = (i<s-1)?(c[i]):(1.);
       const real_t dc = c_n - c_o;
