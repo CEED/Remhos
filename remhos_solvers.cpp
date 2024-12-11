@@ -97,58 +97,6 @@ void RKIDPSolver::ConstructD()
    }
 }
 
-void RKIDPSolver::AddMasked(const Array<bool> &mask, real_t b, const Vector &vb,
-                            Vector &va)
-{
-   MFEM_ASSERT(va.Size() == vb.Size(),
-               "incompatible Vectors!");
-
-#if !defined(MFEM_USE_LEGACY_OPENMP)
-   const bool use_dev = va.UseDevice() || va.UseDevice();
-   const int N = va.Size();
-   // Note: get read access first, in case c is the same as a/b.
-   auto ad = va.ReadWrite(use_dev);
-   auto bd = vb.Read(use_dev);
-   auto maskd = mask.Read(use_dev);
-   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
-   {
-      ad[i] += (maskd[i])?(b * bd[i]):(0.);
-   });
-#else
-   real_t *ap = va.GetData();
-   const real_t *bp = vb.GetData();
-   const bool   *maskp = mask.GetData();
-   const int      s = va.Size();
-   #pragma omp parallel for
-   for (int i = 0; i < s; i++)
-   {
-      ap[i] += (maskp[i])?(b * bp[i]):(0.);
-   }
-#endif
-}
-
-void RKIDPSolver::UpdateMask(const Vector &x, const Vector &dx, real_t dt,
-                             Array<bool> &mask)
-{
-   Array<bool> mask_new(mask.Size());
-   if (dt != 0.)
-   {
-      Vector x_new(x.Size());
-      add(x, dt, dx, x_new);
-      f->ComputeMask(x_new, mask_new);
-   }
-   else
-   {
-      f->ComputeMask(x, mask_new);
-   }
-   // All intermediate updates must be on active DOFs
-   // for a valid high-order update
-   for (int i = 0; i < mask.Size(); i++)
-   {
-      mask[i] = mask[i] && mask_new[i];
-   }
-}
-
 RKIDPSolver::RKIDPSolver(int s_, const real_t a_[], const real_t b_[],
                          const real_t c_[])
    : s(s_), a(a_), b(b_), c(c_)
@@ -198,16 +146,13 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    if (c_next > c[0])// only when advancing after
    {
       x.Add(c[0] * dt, dxs[0]);
-      f->ComputeMask(x, mask);
       f->SetTime(t + c[0] * dt);
       c_o = c[0];
    }
    else
    {
-      // Only initialize the mask
       Vector x_new(x.Size());
       add(x, c[0] * dt, dxs[0], x_new);
-      f->ComputeMask(x_new, mask);
    }
 
    // Step through higher stages
@@ -228,9 +173,6 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          f->MultUnlimitedLO(x, dx_lo);
       }
 
-      // Update mask with the HO update
-      UpdateMask(x, dxs[i], dct, mask);
-
       // Form the unlimited update for the stage.
       // Note that it converts eq. (2.16) in JLG's paper into an update using
       // the previous limited updates.
@@ -239,12 +181,12 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          // for mask = 0, we get dxs (nothing happens).
          //               the loop below won't change it -> Forward Euler.
          // for mask = 1, we scale dxs by d_i[i].
-         AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]);
+         dxs[i] *= d_i[i];
       }
       for (int j = 0; j < i; j++)
       {
          // Use all previous limited updates.
-         AddMasked(mask, d_i[j], dxs[j], dxs[i]);
+         dxs[i].Add(d_i[j], dxs[j]);
       }
 
 #ifdef REMHOS_HO_RK_LO_SOLUTION
@@ -254,12 +196,12 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       {
          if (d_i[i] != 1.)
          {
-            AddMasked(mask, d_i[i]-1., dx_lo, dx_lo);
+            dx_lo *= d_i[i];
          }
          for (int j = 0; j < i; j++)
          {
             // Use all previous limited updates.
-            AddMasked(mask, d_i[j], dxs[j], dx_lo);
+            dx_lo.Add(d_i[j], dxs[j]);
          }
       }
 #endif // REMHOS_HO_RK_LO_SOLUTION
