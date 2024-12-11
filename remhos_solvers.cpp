@@ -17,6 +17,9 @@
 #include "remhos_solvers.hpp"
 #include "general/forall.hpp"
 
+/// Switches on high-order time integration of the low-order solution
+#define REMHOS_HO_RK_LO_SOLUTION
+
 namespace mfem
 {
 
@@ -237,27 +240,29 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          //               the loop below won't change it -> Forward Euler.
          // for mask = 1, we scale dxs by d_i[i].
          AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]);
-
-         // Combine LO soluion with the previous limited updates to obtain
-         // a bounds-preserving HO time-integrated reference solution.
-         if (f->RequiresLOSolution())
-         {
-            AddMasked(mask, d_i[i]-1., dx_lo, dx_lo);
-         }
       }
       for (int j = 0; j < i; j++)
       {
          // Use all previous limited updates.
          AddMasked(mask, d_i[j], dxs[j], dxs[i]);
       }
+
+#ifdef REMHOS_HO_RK_LO_SOLUTION
+      // Combine LO soluion with the previous limited updates to obtain
+      // a bounds-preserving HO time-integrated reference solution.
       if (f->RequiresLOSolution())
       {
+         if (d_i[i] != 1.)
+         {
+            AddMasked(mask, d_i[i]-1., dx_lo, dx_lo);
+         }
          for (int j = 0; j < i; j++)
          {
             // Use all previous limited updates.
             AddMasked(mask, d_i[j], dxs[j], dx_lo);
          }
       }
+#endif // REMHOS_HO_RK_LO_SOLUTION
 
       // Limit the step
       f->LimitMult(x, dx_lo, dxs[i]);
