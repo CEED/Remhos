@@ -43,14 +43,30 @@ public:
    virtual void SetDt(real_t dt_) { dt = dt_; }
    virtual real_t GetDt() const { return dt; }
 
+   /// Checks if the low-order solution is needed
+   virtual bool RequiresLOSolution() const { return false; }
+
    void Mult(const Vector &u, Vector &k) const override
    {
       MultUnlimited(u, k);
-      LimitMult(u, k);
+      if (RequiresLOSolution())
+      {
+         Vector k_lo(Height());
+         MultUnlimitedLO(u, k_lo);
+         LimitMult(u, k_lo, k);
+      }
+      else
+      {
+         LimitMult(u, k);
+      }
    }
 
    /// Perform the unlimited action of the operator
    virtual void MultUnlimited(const Vector &u, Vector &k) const = 0;
+
+   /// Perform the unlimited low-order action of the operator
+   virtual void MultUnlimitedLO(const Vector &u, Vector &k) const
+   { k = 0.; }
 
    /// Compute mask of the state for the update
    virtual void ComputeMask(const Vector &u, Array<bool> &mask) const
@@ -60,6 +76,13 @@ public:
    /// Assumes that MultUnlimited(u, k) has been called, which has computed the
    /// unlimited solution in @a k.
    virtual void LimitMult(const Vector &u, Vector &k) const = 0;
+
+   /// Limit the action vector @a k with LO solution @a k_lo
+   /// Assumes that MultUnlimited(u, k) and MultUnlimited(u, k_lo) have been
+   /// called, which has computed the unlimited solution in @a k and the LO
+   /// solution in @a k_lo.
+   virtual void LimitMult(const Vector &u, const Vector &k_lo, Vector &k) const
+   { LimitMult(u, k); }
 };
 
 class IDPODESolver : public ODESolver
@@ -97,6 +120,7 @@ class RKIDPSolver : public IDPODESolver
    const real_t *a, *b, *c;
    real_t *d;
    Vector *dxs;
+   Vector dx_lo;
    Array<bool> mask;
 
    // This function constructs coefficients that transform eq. (2.16) from

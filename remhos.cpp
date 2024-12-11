@@ -124,11 +124,15 @@ public:
                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                      MonolithicSolver *mos);
 
+   bool RequiresLOSolution() const override { return (fct_solver != nullptr); }
+
    void MultUnlimited(const Vector &x, Vector &y) const override;
+   void MultUnlimitedLO(const Vector &x, Vector &y) const override;
 
    void ComputeMask(const Vector &x, Array<bool> &mask) const override;
 
-   void LimitMult(const Vector &x, Vector &y) const override;
+   void LimitMult(const Vector &x, Vector &y) const override { }
+   void LimitMult(const Vector &x, const Vector &y_lo, Vector &y) const override;
 
    void SetTimeStepControl(TimeStepControl tsc)
    {
@@ -322,8 +326,14 @@ int main(int argc, char *argv[])
       case 11: idp_ode_solver = new ForwardEulerIDPSolver(); break;
       case 12: idp_ode_solver = new RK2IDPSolver(); break;
       case 13: idp_ode_solver = new RK3IDPSolver(); break;
-      case 14: idp_ode_solver = new RK4IDPSolver(); break;
-      case 16: idp_ode_solver = new RK6IDPSolver(); break;
+      case 14:
+         if (myid == 0) { MFEM_WARNING("RK4 may violate the bounds."); }
+         idp_ode_solver = new RK4IDPSolver();
+         break;
+      case 16:
+         if (myid == 0) { MFEM_WARNING("RK6 may violate the bounds."); }
+         idp_ode_solver = new RK6IDPSolver();
+         break;
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
@@ -1370,11 +1380,12 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
    if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
    else if (fct_solver)
    {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+      MFEM_VERIFY(ho_solver, "FCT requires HO solver.");
 
       ho_solver->CalcHOSolution(u, d_u);
 
-      // Limiting is deferred to LimitMult()
+      // Low-order solution is deferred to MultUnlimitedLO()
+      // while limiting is performed in LimitMult()
    }
    else if (lo_solver)
    {
@@ -1407,15 +1418,65 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
       if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
       else if (fct_solver)
       {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+         MFEM_VERIFY(ho_solver, "FCT requires HO solver.");
 
          ho_solver->CalcHOSolution(us, d_us);
 
-         // Limiting is deferred to LimitMult()
+         // Low-order solution is deferred to MultUnlimitedLO()
+         // while limiting is performed in LimitMult()
       }
       else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
       else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
       else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
+   }
+}
+
+void AdvectionOperator::MultUnlimitedLO(const Vector &X, Vector &Y) const
+{
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Write();
+
+   const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   BlockVector block_Y(Y, block_offsets);
+   const Vector &u = block_X.GetBlock(0);
+   Vector &d_u = block_Y.GetBlock(0);
+
+   if (fct_solver)
+   {
+      MFEM_VERIFY(lo_solver, "FCT requires LO solver.");
+
+      lo_solver->CalcLOSolution(u, d_u);
+
+      // Limiting is deferred to LimitMult()
+   }
+
+   d_u.SyncAliasMemory(Y);
+
+   // Remap the product field, if there is a product field.
+   if (block_offsets.Size() > 2)
+   {
+      MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
+
+      const Vector &us = block_X.GetBlock(1);
+      Vector &d_us = block_Y.GetBlock(1);
+
+      if (fct_solver)
+      {
+         MFEM_VERIFY(lo_solver, "FCT requires LO solver.");
+
+         if (fct_solver->NeedsLOProductInput())
+         {
+            lo_solver->CalcLOSolution(us, d_us);
+         }
+         else
+         {
+            d_us = 0.;// dummy
+         }
+
+         // Limiting is deferred to LimitMult()
+      }
 
       d_us.SyncAliasMemory(Y);
    }
@@ -1478,26 +1539,25 @@ void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
    }
 }
 
-void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
+void AdvectionOperator::LimitMult(const Vector &X, const Vector &Y_lo,
+                                  Vector &Y) const
 {
    // Needed because X and Y are allocated on the host by the ODESolver.
-   X.Read(); Y.Read();
+   X.Read(); Y_lo.Read(); Y.Read();
 
    const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   const BlockVector block_Y_lo(const_cast<Vector&>(Y_lo), block_offsets);
    BlockVector block_Y(Y, block_offsets);
    const Vector &u = block_X.GetBlock(0);
+   const Vector &du_LO = block_Y_lo.GetBlock(0);
    Vector &d_u = block_Y.GetBlock(0);
 
    if (fct_solver)
    {
-      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
       x_gf = u;
       x_gf.ExchangeFaceNbrData();
 
-      Vector du_HO(d_u), du_LO(u.Size());
-
-      lo_solver->CalcLOSolution(u, du_LO);
+      Vector du_HO(d_u);
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
@@ -1520,21 +1580,15 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
                   "Automatic time step is not implemented for product remap.");
 
       const Vector &us = block_X.GetBlock(1);
+      const Vector &d_us_LO = block_Y_lo.GetBlock(1);
       Vector &d_us = block_Y.GetBlock(1);
 
       if (fct_solver)
       {
-         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
-
          x_gf = us;
          x_gf.ExchangeFaceNbrData();
 
-         Vector d_us_HO(d_us), d_us_LO;
-         if (fct_solver->NeedsLOProductInput())
-         {
-            d_us_LO.SetSize(us.Size());
-            lo_solver->CalcLOSolution(us, d_us_LO);
-         }
+         Vector d_us_HO(d_us);
 
          const int size = Kbf.ParFESpace()->GetVSize();
          const int NE   = Kbf.ParFESpace()->GetNE();
