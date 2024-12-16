@@ -50,7 +50,8 @@ enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
                          ResDist, ResDistSubcell, MassBased};
 
 enum class MonolithicSolverType
-{ None, ResDistMono, ResDistMonoSubcell, InterpolationGF, InterpolationQF};
+{ None, ResDistMono, ResDistMonoSubcell,
+  InterpolationGF, InterpolationQF, InterpolationIndRhoE };
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -68,6 +69,7 @@ void velocity_function(const Vector &x, Vector &v);
 // Initial condition
 double u0_function(const Vector &x);
 double s0_function(const Vector &x);
+double q0_function(const Vector &x);
 
 // Inflow boundary condition
 double inflow_function(const Vector &x);
@@ -922,14 +924,11 @@ int main(int argc, char *argv[])
       InterpolationRemap interpolator(pmesh);
       ParGridFunction uu(&pfes);
       interpolator.Remap(u, x_final, uu);
-      if (visualization)
-      {
-         socketstream sock_uu;
-         x = x_final;
-         VisualizeField(sock_uu, "localhost", 19916, uu, "Interpolated u",
-                        400, 0, 400, 400);
-         x = x0;
-      }
+
+      socketstream sock_uu;
+      x = x_final;
+      VisualizeField(sock_uu, "localhost", 19916, uu, "Interpolated u",
+                     400, 0, 400, 400);
       return 0;
    }
 
@@ -939,7 +938,7 @@ int main(int argc, char *argv[])
           IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
       QuadratureFunction u_qf(qspace);
-      u_qf.ProjectGridFunction(u);
+      InitializeQuadratureFunction(u0, x0, u_qf);
 
       osockstream sol_sock(19916, "localhost");
       sol_sock << "parallel " << pmesh.GetNRanks() << " " << myid << "\n";
@@ -961,7 +960,63 @@ int main(int argc, char *argv[])
       sol_sock_res << "window_geometry 1200 0 400 400\n";
       sol_sock_res << "keys rmj\n";
       sol_sock_res.send();
-      x = x0;
+
+      return 0;
+   }
+
+   if (mono_type == MonolithicSolverType::InterpolationIndRhoE)
+   {
+      const IntegrationRule &ir =
+          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+      QuadratureSpace qspace(pmesh, ir);
+
+      // Setup the BlockVector (ordered ind-rho-e).
+      const int size_qf = qspace.GetSize(),
+                size_gf = pfes.GetNDofs();
+      Array<int> offset(4);
+      offset[0] = 0;
+      offset[1] = offset[0] + size_qf;
+      offset[2] = offset[1] + size_qf;
+      offset[3] = offset[2] + size_gf;
+      BlockVector ind_rho_e_0(offset, Device::GetMemoryType());
+
+      QuadratureFunction ind_0(&qspace, ind_rho_e_0.GetBlock(0).GetData()),
+                         rho_0(&qspace, ind_rho_e_0.GetBlock(1).GetData());
+      ParGridFunction e_0(&pfes, ind_rho_e_0.GetBlock(2).GetData());
+
+      // Initialize only in the support of ind_0.
+      Array<bool> ind_0_bool_el, ind_0_bool_dofs;
+      ComputeBoolIndicators(pmesh.GetNE(), u, ind_0_bool_el, ind_0_bool_dofs);
+      BoolFunctionCoefficient rho_0_coeff(s0_function, ind_0_bool_el),
+                              e_0_coeff(q0_function, ind_0_bool_el);
+      InitializeQuadratureFunction(u0, x0, ind_0);
+      InitializeQuadratureFunction(rho_0_coeff, x0, rho_0);
+      e_0.ProjectCoefficient(e_0_coeff);
+
+      // Visualize initial values.
+      VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 500);
+      VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 500);
+      socketstream sock;
+      VisualizeField(sock, "localhost", 19916, e_0, "e_0 GF",
+                     800, 500, 400, 400);
+
+      // Remap.
+      BlockVector ind_rho_e(offset);
+      InterpolationRemap interpolator(pmesh);
+      interpolator.SetQuadratureSpace(qspace);
+      interpolator.SetEnergyFESpace(pfes);
+      interpolator.RemapIndRhoE(ind_rho_e_0, x_final, ind_rho_e);
+
+      QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
+                         rho(&qspace, ind_rho_e.GetBlock(1).GetData());
+      ParGridFunction e(&pfes, ind_rho_e.GetBlock(2).GetData());
+
+      // Visualize final values.
+      x = x_final;
+      VisQuadratureFunction(pmesh, ind, "ind QF", 0, 500);
+      VisQuadratureFunction(pmesh, rho, "rho QF", 400, 500);
+      socketstream sock_f;
+      VisualizeField(sock_f, "localhost", 19916, e, "e GF", 800, 500, 400, 400);
 
       return 0;
    }
@@ -1889,6 +1944,12 @@ double s0_function(const Vector &x)
 {
    // Simple nonlinear function.
    return 2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1));
+}
+
+double q0_function(const Vector &x)
+{
+   // Simple nonlinear function.
+   return 2.0 + cos(2*M_PI * x(0)) * cos(2*M_PI * x(1));
 }
 
 double inflow_function(const Vector &x)
