@@ -966,6 +966,8 @@ int main(int argc, char *argv[])
 
    if (mono_type == MonolithicSolverType::InterpolationIndRhoE)
    {
+      MFEM_VERIFY(dim == 2, "Not setup in 3D yet.");
+
       const IntegrationRule &ir =
           IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
