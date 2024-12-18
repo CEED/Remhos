@@ -97,6 +97,7 @@ class RKIDPSolver : public IDPODESolver
    const real_t *a, *b, *c;
    real_t *d;
    Vector *dxs;
+   bool use_masks = false;
    Array<bool> mask;
 
    // This function constructs coefficients that transform eq. (2.16) from
@@ -114,6 +115,8 @@ class RKIDPSolver : public IDPODESolver
 public:
    RKIDPSolver(int s_, const real_t a_[], const real_t b_[], const real_t c_[]);
    ~RKIDPSolver();
+
+   void UseMask(bool mask_on) { use_masks = mask_on; }
 
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;

@@ -330,7 +330,12 @@ int main(int argc, char *argv[])
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
    }
-   if (ode_solver_type > 10) { ode_solver = idp_ode_solver; }
+   if (ode_solver_type > 10)
+   {
+      auto rk_idp = dynamic_cast<RKIDPSolver *>(idp_ode_solver);
+      if (rk_idp) { rk_idp->UseMask(true); }
+      ode_solver = idp_ode_solver;
+   }
 
    // Check if the input mesh is periodic.
    const bool periodic = pmesh.GetNodes() != NULL &&
@@ -929,6 +934,9 @@ int main(int argc, char *argv[])
 
    double u_min, u_max;
    GetMinMax(u, u_min, u_max);
+   double s_min = numeric_limits<double>::infinity(),
+          s_max = -numeric_limits<double>::infinity();
+   if (product_sync) { ComputeMinMaxS(NE, us, u, s_min, s_max); }
 
    if (exec_mode == 1)
    {
@@ -940,8 +948,6 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual = 0.0;
-   double s_min = numeric_limits<double>::infinity(),
-          s_max = -numeric_limits<double>::infinity();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;

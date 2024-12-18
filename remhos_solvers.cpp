@@ -183,7 +183,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    if (c_next > c[0])// only when advancing after
    {
       x.Add(c[0] * dt, dxs[0]);
-      f->ComputeMask(x, mask);
+      if (use_masks) { f->ComputeMask(x, mask); }
       f->SetTime(t + c[0] * dt);
       c_o = c[0];
    }
@@ -192,9 +192,8 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       // Only initialize the mask
       Vector x_new(x.Size());
       add(x, c[0] * dt, dxs[0], x_new);
-      f->ComputeMask(x_new, mask);
+      if (use_masks) { f->ComputeMask(x_new, mask); }
    }
-   //mask = 1;
 
    // Step through higher stages
 
@@ -211,8 +210,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       f->MultUnlimited(x, dxs[i]);
 
       // Update mask with the HO update
-      UpdateMask(x, dxs[i], dct, mask);
-      //mask = 1;
+      if (use_masks) { UpdateMask(x, dxs[i], dct, mask); }
 
       // Form the unlimited update for the stage.
       // Note that it converts eq. (2.16) in JLG's paper into an update using
@@ -222,12 +220,14 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          // for mask = 0, we get dxs (nothing happens).
          //               the loop below won't change it -> Forward Euler.
          // for mask = 1, we scale dxs by d_i[i].
-         AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]);
+         if (use_masks) { AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]); }
+         else           { dxs[i] *= d_i[i]; }
       }
       for (int j = 0; j < i; j++)
       {
          // Use all previous limited updates.
-         AddMasked(mask, d_i[j], dxs[j], dxs[i]);
+         if (use_masks) { AddMasked(mask, d_i[j], dxs[j], dxs[i]); }
+         else           { dxs[i].Add(d_i[j], dxs[j]); }
       }
 
       // Limit the step
