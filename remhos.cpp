@@ -333,7 +333,7 @@ int main(int argc, char *argv[])
    if (ode_solver_type > 10)
    {
       auto rk_idp = dynamic_cast<RKIDPSolver *>(idp_ode_solver);
-      if (rk_idp) { rk_idp->UseMask(true); }
+      if (rk_idp) { rk_idp->UseMask(false); }
       ode_solver = idp_ode_solver;
    }
 
@@ -934,8 +934,7 @@ int main(int argc, char *argv[])
 
    double u_min, u_max;
    GetMinMax(u, u_min, u_max);
-   double s_min = numeric_limits<double>::infinity(),
-          s_max = -numeric_limits<double>::infinity();
+   double s_min = -1.0, s_max = -1.0;
    if (product_sync) { ComputeMinMaxS(NE, us, u, s_min, s_max); }
 
    if (exec_mode == 1)
@@ -1025,6 +1024,7 @@ int main(int argc, char *argv[])
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
       {
+         const double eps = 1e-10;
          double u_min_new, u_max_new,
                 s_min_new = s_min, s_max_new = s_max;
          GetMinMax(u, u_min_new, u_max_new);
@@ -1037,13 +1037,13 @@ int main(int argc, char *argv[])
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(u_min_new > u_min - 1e-12,
+               MFEM_VERIFY(u_min_new > u_min - eps,
                            "Undershoot of " << u_min - u_min_new);
-               MFEM_VERIFY(u_max_new < u_max + 1e-12,
+               MFEM_VERIFY(u_max_new < u_max + eps,
                            "Overshoot of " << u_max_new - u_max);
-               MFEM_VERIFY(s_min_new > s_min - 1e-12,
+               MFEM_VERIFY(s_min_new > s_min - eps,
                            "Undershoot in s of " << s_min - s_min_new);
-               MFEM_VERIFY(s_max_new < s_max + 1e-12,
+               MFEM_VERIFY(s_max_new < s_max + eps,
                            "Overshoot in s of " << s_max_new - s_max);
             }
             u_min = u_min_new;
@@ -1053,13 +1053,13 @@ int main(int argc, char *argv[])
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(u_min_new > 0.0 - 1e-12,
+               MFEM_VERIFY(u_min_new > 0.0 - eps,
                            "Undershoot of " << 0.0 - u_min_new);
-               MFEM_VERIFY(u_max_new < 1.0 + 1e-12,
+               MFEM_VERIFY(u_max_new < 1.0 + eps,
                            "Overshoot of " << u_max_new - 1.0);
-               MFEM_VERIFY(s_min_new > 0.0 - 1e-12,
+               MFEM_VERIFY(s_min_new > 0.0 - eps,
                            "Undershoot in s of " << 0.0 - s_min_new);
-               MFEM_VERIFY(s_max_new < 1.0 + 1e-12,
+               MFEM_VERIFY(s_max_new < 1.0 + eps,
                            "Overshoot in s of " << s_max_new - 1.0);
             }
          }

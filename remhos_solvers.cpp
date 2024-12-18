@@ -212,10 +212,11 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       // Update mask with the HO update
       if (use_masks) { UpdateMask(x, dxs[i], dct, mask); }
 
+      //
       // Form the unlimited update for the stage.
       // Note that it converts eq. (2.16) in JLG's paper into an update using
       // the previous limited updates.
-      if (d_i[i] != 1.)
+      //
       {
          // for mask = 0, we get dxs (nothing happens).
          //               the loop below won't change it -> Forward Euler.
@@ -223,14 +224,14 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
          if (use_masks) { AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]); }
          else           { dxs[i] *= d_i[i]; }
       }
+      // Use all previous limited updates.
       for (int j = 0; j < i; j++)
       {
-         // Use all previous limited updates.
          if (use_masks) { AddMasked(mask, d_i[j], dxs[j], dxs[i]); }
          else           { dxs[i].Add(d_i[j], dxs[j]); }
       }
 
-      // Limit the step
+      // Limit the step (always a Forward Euler step).
       f->LimitMult(x, dxs[i]);
 
       // Update the state
