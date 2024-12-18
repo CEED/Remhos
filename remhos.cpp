@@ -158,6 +158,8 @@ public:
       start_submesh_pos = sm_pos;
    }
 
+   bool verify_bounds = false;
+
    virtual ~AdvectionOperator() { }
 };
 
@@ -917,13 +919,16 @@ int main(int argc, char *argv[])
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
+   adv.verify_bounds = verify_bounds;
+   fct_solver->verify_bounds = verify_bounds;
+
    double t = 0.0;
    adv.SetTime(t);
    adv.SetTimeStepControl(dt_control);
    ode_solver->Init(adv);
 
-   double umin, umax;
-   GetMinMax(u, umin, umax);
+   double u_min, u_max;
+   GetMinMax(u, u_min, u_max);
 
    if (exec_mode == 1)
    {
@@ -935,8 +940,8 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual = 0.0;
-   double s_min_glob = numeric_limits<double>::infinity(),
-          s_max_glob = -numeric_limits<double>::infinity();
+   double s_min = numeric_limits<double>::infinity(),
+          s_max = -numeric_limits<double>::infinity();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -950,20 +955,21 @@ int main(int argc, char *argv[])
       adv.SetDt(dt_real);
       adv.ResetTimeStepRatio();
 
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
       if (product_sync)
       {
-         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         double s_min_debug, s_max_debug;
+         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_debug, s_max_debug);
          if (myid == 0)
          {
             std::cout << "   --- Full time step" << std::endl;
             std::cout << "   in:  ";
             std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
+            std::cout << "min_s: " << s_min_debug
+                      << "; max_s: " << s_max_debug << std::endl;
          }
-#endif
       }
+#endif
 
       Sold = S;
       ode_solver->Step(S, t, dt_real);
@@ -993,38 +999,19 @@ int main(int argc, char *argv[])
 
       // S has been modified, update the alias
       u.SyncMemory(S);
+
       if (product_sync)
       {
          us.SyncMemory(S);
-
-         // It is known that RK time integrators with more than 1 stage may
-         // cause violation of the lower bounds for us.
-         // The lower bound is corrected, causing small conservation error.
-         // Correction can also be done with localized bounds for s, but for
-         // now we have implemented only the minimum global bound.
-         u.HostRead();
-         us.HostReadWrite();
-#if 0
-         const int s = u.Size();
-         Array<bool> active_elem, active_dofs;
-         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         for (int i = 0; i < s; i++)
-         {
-            if (active_dofs[i] == false) { continue; }
-
-            double us_min = u(i) * s_min_glob;
-            if (us(i) < us_min) { us(i) = us_min; }
-         }
-#endif
-
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
+         double s_min_debug, s_max_debug;
+         ComputeMinMaxS(NE, us, u, s_min_debug, s_max_debug);
          if (myid == 0)
          {
             std::cout << "   out: ";
             std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
+            std::cout << "min_s: " << s_min_debug
+                      << "; max_s: " << s_max_debug << std::endl;
          }
 #endif
       }
@@ -1032,28 +1019,42 @@ int main(int argc, char *argv[])
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
       {
-         double umin_new, umax_new;
-         GetMinMax(u, umin_new, umax_new);
+         double u_min_new, u_max_new,
+                s_min_new = s_min, s_max_new = s_max;
+         GetMinMax(u, u_min_new, u_max_new);
+         if (product_sync)
+         {
+            ComputeMinMaxS(NE, us, u, s_min_new, s_max_new);
+         }
+
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(umin_new > umin - 1e-12,
-                           "Undershoot of " << umin - umin_new);
-               MFEM_VERIFY(umax_new < umax + 1e-12,
-                           "Overshoot of " << umax_new - umax);
+               MFEM_VERIFY(u_min_new > u_min - 1e-12,
+                           "Undershoot of " << u_min - u_min_new);
+               MFEM_VERIFY(u_max_new < u_max + 1e-12,
+                           "Overshoot of " << u_max_new - u_max);
+               MFEM_VERIFY(s_min_new > s_min - 1e-12,
+                           "Undershoot in s of " << s_min - s_min_new);
+               MFEM_VERIFY(s_max_new < s_max + 1e-12,
+                           "Overshoot in s of " << s_max_new - s_max);
             }
-            umin = umin_new;
-            umax = umax_new;
+            u_min = u_min_new;
+            u_max = u_max_new;
          }
          else
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(umin_new > 0.0 - 1e-12,
-                           "Undershoot of " << 0.0 - umin_new);
-               MFEM_VERIFY(umax_new < 1.0 + 1e-12,
-                           "Overshoot of " << umax_new - 1.0);
+               MFEM_VERIFY(u_min_new > 0.0 - 1e-12,
+                           "Undershoot of " << 0.0 - u_min_new);
+               MFEM_VERIFY(u_max_new < 1.0 + 1e-12,
+                           "Overshoot of " << u_max_new - 1.0);
+               MFEM_VERIFY(s_min_new > 0.0 - 1e-12,
+                           "Undershoot in s of " << 0.0 - s_min_new);
+               MFEM_VERIFY(s_max_new < 1.0 + 1e-12,
+                           "Overshoot in s of " << s_max_new - 1.0);
             }
          }
       }
@@ -1172,10 +1173,10 @@ int main(int argc, char *argv[])
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
-   double mass_u, mass_us = 0.0, s_max = 0.0;
+   double mass_u, mass_us = 0.0;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+   MPI_Allreduce(&umax_loc, &u_max, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
    {
       ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
@@ -1187,7 +1188,7 @@ int main(int argc, char *argv[])
    {
       cout << setprecision(10)
            << "Final mass u:  " << mass_u << endl
-           << "Max value u:   " << umax << endl << setprecision(6)
+           << "Max value u:   " << u_max << endl << setprecision(6)
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
       if (product_sync)
       {
@@ -1291,6 +1292,45 @@ AdvectionOperator::AdvectionOperator(const Array<int> &offsets,
    x_gf(Kbf.ParFESpace()),
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
+
+void check_violation(const Vector &u_new,
+    const Vector &u_min, const Vector &u_max,
+    string info, double tol, const Array<bool> *active_dofs)
+{
+   const int size = u_new.Size();
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs && (*active_dofs)[i] == false) { continue; }
+
+      if (u_new(i) + tol < u_min(i) || u_new(i) > u_max(i) + tol)
+      {
+         cout << info << " bounds violation: " << i << " "
+              << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+         cout << u_max(i) - u_new(i) << " " << u_new(i) - u_min(i) << endl;
+         MFEM_ABORT("Aborted due to bounds violation.");
+      }
+   }
+}
+
+void check_violation(const Vector &u, double dt, const Vector &du_new,
+    const Vector &u_min, const Vector &u_max,
+    string info, double tol, const Array<bool> *active_dofs)
+{
+   const int size = u.Size();
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs && (*active_dofs)[i] == false) { continue; }
+
+      const double u_new = u(i) + dt * du_new(i);
+      if (u_new + tol < u_min(i) || u_new > u_max(i) + tol)
+      {
+         cout << info << " bounds violation: " << i << " "
+              << u_min(i) << " " << u_new << " " << u_max(i) << endl;
+         cout << u_max(i) - u_new << " " << u_new - u_min(i) << endl;
+         MFEM_ABORT("Aborted due to bounds violation.");
+      }
+   }
+}
 
 void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
 {
@@ -1497,12 +1537,27 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
 
       Vector du_HO(d_u), du_LO(u.Size());
 
+      auto mba = dynamic_cast<MassBasedAvg *>(lo_solver);
+      if (mba) { mba->SetHOSolution(du_HO); }
       lo_solver->CalcLOSolution(u, du_LO);
 
       dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
       dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      if (verify_bounds)
+      {
+         check_violation(u, dt, du_LO, dofs.xi_min, dofs.xi_max,
+                         "LimitMult LO u", 1e-12, nullptr);
+      }
+
       fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
                                   dofs.xi_min, dofs.xi_max, d_u);
+
+      if (verify_bounds)
+      {
+         check_violation(u, dt, d_u, dofs.xi_min, dofs.xi_max,
+                         "LimitMult FCT solution u", 1e-12, nullptr);
+      }
 
       if (dt_control == TimeStepControl::LOBoundsError)
       {
@@ -1530,6 +1585,7 @@ void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
          x_gf.ExchangeFaceNbrData();
 
          Vector d_us_HO(d_us), d_us_LO;
+
          if (fct_solver->NeedsLOProductInput())
          {
             d_us_LO.SetSize(us.Size());

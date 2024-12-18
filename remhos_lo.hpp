@@ -86,6 +86,9 @@ protected:
    HOSolver &ho_solver;
    const GridFunction *mesh_v;
 
+   // Temporary HO solution, used only in the next call to CalcLOSolution().
+   mutable const Vector *du_HO = nullptr;
+
    void MassesAndVolumesAtPosition(const ParGridFunction &u,
                                    const GridFunction &x,
                                    Vector &el_mass, Vector &el_vol) const;
@@ -94,6 +97,9 @@ public:
    MassBasedAvg(ParFiniteElementSpace &space, HOSolver &hos,
                 const GridFunction *mesh_vel)
       : LOSolver(space), ho_solver(hos), mesh_v(mesh_vel) { }
+
+   // Temporary HO solution, used only in the next call to CalcLOSolution().
+   void SetHOSolution(Vector &du) { du_HO = &du; }
 
    virtual void CalcLOSolution(const Vector &u, Vector &du) const;
 };

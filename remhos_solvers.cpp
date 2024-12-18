@@ -194,6 +194,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
       add(x, c[0] * dt, dxs[0], x_new);
       f->ComputeMask(x_new, mask);
    }
+   //mask = 1;
 
    // Step through higher stages
 
@@ -211,6 +212,7 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
 
       // Update mask with the HO update
       UpdateMask(x, dxs[i], dct, mask);
+      //mask = 1;
 
       // Form the unlimited update for the stage.
       // Note that it converts eq. (2.16) in JLG's paper into an update using
