@@ -78,7 +78,7 @@ $run_line | grep -e 'mass us' -e 'loss us'>> $file
 echo -e '\n'"--- Product remap 2D IDP3 (FCTProject)" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 5 -fct 4 -ps -s 13"
 echo -e $run_line >> $file
-$run_line | grep -e 'mass us' -e 'loss us'>> $file
+$run_line | grep -e 'mass u' -e 'mass us'>> $file
 
 echo -e '\n'"--- BLAST sharpening test - Pacman remap auto-dt" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
@@ -88,7 +88,7 @@ $run_line | grep -e 'mass u' -e 'loss u'>> $file
 echo -e '\n'"--- BLAST sharpening test - Transport balls-jacks auto-dt" >> $file
 run_line=$command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.01 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
 echo -e $run_line >> $file
-$run_line | grep -e 'mass u' -e 'loss u'>> $file
+$run_line | grep -e 'mass u' -e 'value u'>> $file
 
 echo -e '\n'"--- Steady monolithic 2 2D" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2"
