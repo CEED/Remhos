@@ -925,7 +925,7 @@ int main(int argc, char *argv[])
                          ho_solver, lo_solver, fct_solver, mono_solver);
 
    adv.verify_bounds = verify_bounds;
-   fct_solver->verify_bounds = verify_bounds;
+   if (fct_solver) { fct_solver->verify_bounds = verify_bounds; }
 
    double t = 0.0;
    adv.SetTime(t);

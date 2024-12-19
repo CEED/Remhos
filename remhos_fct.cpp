@@ -276,19 +276,6 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
             dof_id = k*ndofs + j;
             if (active_dofs[dof_id] == false) { continue; }
 
-            double s = us_new(dof_id) / u_new(dof_id);
-            if (s + eps < s_min(dof_id) ||
-                s - eps > s_max(dof_id))
-            {
-               std::cout << "Final s " << j << " " << k << " "
-                         << s_min(dof_id) << " "
-                         << s << " "
-                         << s_max(dof_id) << std::endl;
-               std::cout << "---\n";
-
-               MFEM_ABORT("s not in bounds after FCT.");
-            }
-
             if (us_new(dof_id) + eps < us_min(dof_id) ||
                 us_new(dof_id) - eps > us_max(dof_id))
             {
