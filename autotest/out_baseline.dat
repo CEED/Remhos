@@ -196,8 +196,8 @@ Mass loss us:  2.31348e-07
 
 --- Product remap 2D IDP3 (FCTProject)
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 5 -fct 4 -ps -s 13
+Final mass u:  0.08980386855
 Final mass us: 0.179607829
-Mass loss us:  4.35885e-08
 
 --- BLAST sharpening test - Pacman remap auto-dt
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
@@ -207,7 +207,7 @@ Mass loss u:   6.61247e-07
 --- BLAST sharpening test - Transport balls-jacks auto-dt
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.01 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
 Final mass u:  0.1623263888
-Mass loss u:   1.38778e-15
+Max value u:   0.2863317261
 
 --- Steady monolithic 2 2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2
