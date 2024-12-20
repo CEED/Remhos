@@ -116,6 +116,9 @@ void ZeroOutEmptyDofs(const Array<bool> &ind_elem,
 void ComputeMinMaxS(int NE, const Vector &us, const Vector &u,
                     double &s_min_glob, double &s_max_glob)
 {
+   u.HostRead();
+   us.HostRead();
+
    const int size = u.Size();
    Vector s(size);
    Array<bool> bool_el, bool_dofs;

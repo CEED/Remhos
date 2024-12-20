@@ -247,25 +247,24 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 {
    // Compute the new HO solution.
-   Vector du_HO(u.Size());
    ParGridFunction u_HO_new(&pfes);
-   ho_solver.CalcHOSolution(u, du_HO);
-   add(1.0, u, dt, du_HO, u_HO_new);
-
-   // Mesh positions for the new HO solution.
-   ParMesh *pmesh = pfes.GetParMesh();
-   GridFunction x_new(pmesh->GetNodes()->FESpace());
-   // Copy the current nodes into x.
-   pmesh->GetNodes(x_new);
-   if (mesh_v)
+   if (du_HO)
    {
-      // Remap mode - get the positions of the mesh at time [t + dt].
-      x_new.Add(dt, *mesh_v);
+      add(1.0, u, dt, *du_HO, u_HO_new);
+      du_HO = nullptr;
+   }
+   else
+   {
+      Vector du_HO(u.Size());
+      ho_solver.CalcHOSolution(u, du_HO);
+      add(1.0, u, dt, du_HO, u_HO_new);
    }
 
+   // Mesh positions.
+   ParMesh *pmesh = pfes.GetParMesh();
    const int NE = pfes.GetNE();
    Vector el_mass(NE), el_vol(NE);
-   MassesAndVolumesAtPosition(u_HO_new, x_new, el_mass, el_vol);
+   MassesAndVolumesAtPosition(u_HO_new, *pmesh->GetNodes(), el_mass, el_vol);
 
    const int ndofs = u.Size() / NE;
    for (int k = 0; k < NE; k++)

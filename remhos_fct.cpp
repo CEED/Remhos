@@ -81,23 +81,24 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
          if (s_avg > smax &&
              mass_us - eps < smax * mass_u) { s_avg = smax; }
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-         // Check if s_avg = mass_us / mass_u is within the bounds of the full
-         // stencil of active dofs.
-         if (mass_us + eps < smin * mass_u ||
-             mass_us - eps > smax * mass_u ||
-             s_avg + eps < smin ||
-             s_avg - eps > smax)
+         if (verify_bounds)
          {
-            std::cout << "---\ns_avg element bounds: "
-                      << smin << " " << s_avg << " " << smax << std::endl;
-            std::cout << "Element " << k << std::endl;
-            std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
-            PrintCellValues(k, NE, u_new, "u_loc: ");
+            // Check if s_avg = mass_us / mass_u is within the bounds of the
+            // full stencil of active dofs.
+            if (mass_us + eps < smin * mass_u ||
+                mass_us - eps > smax * mass_u ||
+                s_avg + eps < smin ||
+                s_avg - eps > smax)
+            {
+               std::cout << "---\ns_avg element bounds: "
+                         << smin << " " << s_avg << " " << smax << std::endl;
+               std::cout << "Element " << k << std::endl;
+               std::cout << "Masses " << mass_us << " " << mass_u << std::endl;
+               PrintCellValues(k, NE, u_new, "u_loc: ");
 
-            MFEM_ABORT("s_avg is not in the full stencil bounds!");
+               MFEM_ABORT("s_avg is not in the full stencil bounds!");
+            }
          }
-#endif
 
          // When s_avg is not in the local bounds for some dof (it should be
          // within the full stencil of active dofs), reset the bounds to s_avg.
@@ -114,32 +115,6 @@ void FCTSolver::CalcCompatibleLOProduct(const ParGridFunction &us,
          dof_id = k*ndofs + j;
          d_us_LO_new(dof_id) = (u_new(dof_id) * s_avg - us(dof_id)) / dt;
       }
-
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-      // Check the LO product solution.
-      double us_min, us_max;
-      for (int j = 0; j < ndofs; j++)
-      {
-         dof_id = k*ndofs + j;
-         if (active_dofs[dof_id] == false) { continue; }
-
-         us_min = s_min_loc(j) * u_new(dof_id);
-         us_max = s_max_loc(j) * u_new(dof_id);
-
-         if (s_avg * u_new(dof_id) + eps < us_min ||
-             s_avg * u_new(dof_id) - eps > us_max)
-         {
-            std::cout << "---\ns_avg * u: " << k << " "
-                      << us_min << " "
-                      << s_avg * u_new(dof_id) << " "
-                      << us_max << endl
-                      << u_new(dof_id) << " " << s_avg << endl
-                      << s_min_loc(j) << " " << s_max_loc(j) << "\n---\n";
-
-            MFEM_ABORT("s_avg * u not in bounds");
-         }
-      }
-#endif
    }
 }
 
@@ -286,43 +261,35 @@ void FluxBasedFCT::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
       dus_lo_fct = d_us;
    }
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-   // Check the bounds of the final solution.
-   const double eps = 1e-12;
-   Vector us_new(d_us.Size());
-   add(1.0, us, dt, d_us, us_new);
-   for (int k = 0; k < NE; k++)
+   if (verify_bounds)
    {
-      if (active_el[k] == false) { continue; }
-
-      for (int j = 0; j < ndofs; j++)
+      // Check the bounds of the final solution.
+      const double eps = 1e-12;
+      Vector us_new(d_us.Size());
+      add(1.0, us, dt, d_us, us_new);
+      for (int k = 0; k < NE; k++)
       {
-         dof_id = k*ndofs + j;
-         if (active_dofs[dof_id] == false) { continue; }
+         if (active_el[k] == false) { continue; }
 
-         double s = us_new(dof_id) / u_new(dof_id);
-         if (s + eps < s_min(dof_id) ||
-             s - eps > s_max(dof_id))
+         for (int j = 0; j < ndofs; j++)
          {
-            std::cout << "Final s " << j << " " << k << " "
-                      << s_min(dof_id) << " "
-                      << s << " "
-                      << s_max(dof_id) << std::endl;
-            std::cout << "---\n";
-         }
+            dof_id = k*ndofs + j;
+            if (active_dofs[dof_id] == false) { continue; }
 
-         if (us_new(dof_id) + eps < us_min(dof_id) ||
-             us_new(dof_id) - eps > us_max(dof_id))
-         {
-            std::cout << "Final us " << j << " " << k << " "
-                      << us_min(dof_id) << " "
-                      << us_new(dof_id) << " "
-                      << us_max(dof_id) << std::endl;
-            std::cout << "---\n";
+            if (us_new(dof_id) + eps < us_min(dof_id) ||
+                us_new(dof_id) - eps > us_max(dof_id))
+            {
+               std::cout << "Final us " << j << " " << k << " "
+                         << us_min(dof_id) << " "
+                         << us_new(dof_id) << " "
+                         << us_max(dof_id) << std::endl;
+               std::cout << "---\n";
+
+               MFEM_ABORT("us not in bounds after FCT.");
+            }
          }
       }
    }
-#endif
 }
 
 void FluxBasedFCT::ComputeFluxMatrix(const ParGridFunction &u,
@@ -583,46 +550,49 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
    CalcFCTSolution(us, m, d_us_HO, dus_lo_fct, us_min, us_max, d_us);
    ZeroOutEmptyDofs(active_el, active_dofs, d_us);
 
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
-   // Check the bounds of the final solution.
-   const int NE = pfes.GetNE();
-   const int ndofs = u_new.Size() / NE;
-   int dof_id;
-   const double eps = 1e-12;
-   Vector us_new(d_us.Size());
-   add(1.0, us, dt, d_us, us_new);
-   for (int k = 0; k < NE; k++)
+   if (verify_bounds)
    {
-      if (active_el[k] == false) { continue; }
-
-      for (int j = 0; j < ndofs; j++)
+      // Check the bounds of the final solution.
+      const int NE = pfes.GetNE();
+      const int ndofs = u_new.Size() / NE;
+      int dof_id;
+      const double eps = 1e-12;
+      Vector us_new(d_us.Size());
+      add(1.0, us, dt, d_us, us_new);
+      for (int k = 0; k < NE; k++)
       {
-         dof_id = k*ndofs + j;
-         if (active_dofs[dof_id] == false) { continue; }
+         if (active_el[k] == false) { continue; }
 
-         double s = us_new(dof_id) / u_new(dof_id);
-         if (s + eps < s_min(dof_id) ||
-             s - eps > s_max(dof_id))
+         for (int j = 0; j < ndofs; j++)
          {
-            std::cout << "Final s " << j << " " << k << " "
-                      << s_min(dof_id) << " "
-                      << s << " "
-                      << s_max(dof_id) << std::endl;
-            std::cout << "---\n";
-         }
+            dof_id = k*ndofs + j;
+            if (active_dofs[dof_id] == false) { continue; }
 
-         if (us_new(dof_id) + eps < us_min(dof_id) ||
-             us_new(dof_id) - eps > us_max(dof_id))
-         {
-            std::cout << "Final us " << j << " " << k << " "
-                      << us_min(dof_id) << " "
-                      << us_new(dof_id) << " "
-                      << us_max(dof_id) << std::endl;
-            std::cout << "---\n";
+            /* // this doesn't check round-offs in the division.
+            double s = us_new(dof_id) / u_new(dof_id);
+            if (s + eps < s_min(dof_id) ||
+                s - eps > s_max(dof_id))
+            {
+               std::cout << "Final s " << j << " " << k << " "
+                         << s_min(dof_id) << " "
+                         << s << " "
+                         << s_max(dof_id) << std::endl;
+               std::cout << "---\n";
+            }*/
+
+            if (us_new(dof_id) + eps < us_min(dof_id) ||
+                us_new(dof_id) - eps > us_max(dof_id))
+            {
+               std::cout << "Final us " << j << " " << k << " "
+                         << us_min(dof_id) << " "
+                         << us_new(dof_id) << " "
+                         << us_max(dof_id) << std::endl;
+               std::cout << "---\n";
+               MFEM_ABORT("Bounds violation FCT us.");
+            }
          }
       }
    }
-#endif
 }
 
 void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
@@ -745,12 +715,13 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
    } // element loop
 }
 
-void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
-                                     const Vector &d_us_HO, const Vector &d_us_LO,
-                                     Vector &s_min, Vector &s_max,
-                                     const Vector &u_new,
-                                     const Array<bool> &active_el,
-                                     const Array<bool> &active_dofs, Vector &d_us)
+void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us,
+                                          const Vector &m,
+                                          const Vector &d_us_HO, const Vector &d_us_LO,
+                                          Vector &s_min, Vector &s_max,
+                                          const Vector &u_new,
+                                          const Array<bool> &active_el,
+                                          const Array<bool> &active_dofs, Vector &d_us)
 {
    us.HostRead();
    s_min.HostReadWrite();

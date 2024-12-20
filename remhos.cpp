@@ -38,18 +38,25 @@
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
+#include "remhos_solvers.hpp"
 
 using namespace std;
 using namespace mfem;
 
-enum class HOSolverType {None, Neumann, CG, LocalInverse};
-enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
-enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
-enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
+enum class HOSolverType
+{ None, Neumann, CG, LocalInverse };
 
-enum class TimeStepControl {FixedTimeStep, LOBoundsError};
+enum class LOSolverType
+{ None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell, MassBased };
+
+enum class FCTSolverType
+{ None, FluxBased, ClipScale, NonlinearPenalty, FCTProject };
+
+enum class MonolithicSolverType
+{ None, ResDistMono, ResDistMonoSubcell };
+
+enum class TimeStepControl
+{ FixedTimeStep, LOBoundsError };
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -72,9 +79,11 @@ double inflow_function(const Vector &x);
 // Mesh bounding box
 Vector bb_min, bb_max;
 
-class AdvectionOperator : public TimeDependentOperator
+class AdvectionOperator : public LimitedTimeDependentOperator
 {
 private:
+   const Array<int> &block_offsets;
+
    BilinearForm &Mbf, &ml;
    ParBilinearForm &Kbf;
    ParBilinearForm &M_HO, &K_HO;
@@ -85,9 +94,8 @@ private:
 
    mutable ParGridFunction x_gf;
 
-   double dt;
    TimeStepControl dt_control;
-   mutable double dt_est;
+   mutable real_t dt_est, dt_ratio;
    Assembly &asmbl;
 
    LowOrderMethod &lom;
@@ -102,8 +110,8 @@ private:
                                const Vector &x_min, const Vector &x_max) const;
 
 public:
-   AdvectionOperator(int size, BilinearForm &Mbf_, BilinearForm &_ml,
-                     Vector &_lumpedM,
+   AdvectionOperator(const Array<int> &offsets, BilinearForm &Mbf_,
+                     BilinearForm &_ml, Vector &_lumpedM,
                      ParBilinearForm &Kbf_,
                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
                      GridFunction &pos, GridFunction *sub_pos,
@@ -112,7 +120,11 @@ public:
                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                      MonolithicSolver *mos);
 
-   virtual void Mult(const Vector &x, Vector &y) const;
+   void MultUnlimited(const Vector &x, Vector &y) const override;
+
+   void ComputeMask(const Vector &x, Array<bool> &mask) const override;
+
+   void LimitMult(const Vector &x, Vector &y) const override;
 
    void SetTimeStepControl(TimeStepControl tsc)
    {
@@ -123,14 +135,26 @@ public:
       }
       dt_control = tsc;
    }
-   void SetDt(double _dt) { dt = _dt; dt_est = dt; }
-   double GetTimeStepEstimate() { return dt_est; }
+
+   void SetDt(real_t _dt) override
+   {
+      LimitedTimeDependentOperator::SetDt(_dt);
+      dt_est = dt;
+      if (lo_solver)  { lo_solver->UpdateTimeStep(dt); }
+      if (fct_solver) { fct_solver->UpdateTimeStep(dt); }
+   }
+
+   real_t GetTimeStepEstimate() { return dt_est; }
+   void ResetTimeStepRatio() { dt_ratio = infinity(); }
+   real_t GetTimeStepRatio() { return dt_ratio; }
 
    void SetRemapStartPos(const Vector &m_pos, const Vector &sm_pos)
    {
       start_mesh_pos    = m_pos;
       start_submesh_pos = sm_pos;
    }
+
+   bool verify_bounds = false;
 
    virtual ~AdvectionOperator() { }
 };
@@ -284,21 +308,29 @@ int main(int argc, char *argv[])
 
    // Define the ODE solver used for time integration. Several explicit
    // Runge-Kutta methods are available.
-   ODESolver *ode_solver = NULL;
+   IDPODESolver *idp_ode_solver = nullptr;
+   ODESolver *ode_solver = nullptr;
    switch (ode_solver_type)
    {
-      case 1: ode_solver = new ForwardEulerSolver; break;
+      case 1: ode_solver = new ForwardEulerSolver(); break;
       case 2: ode_solver = new RK2Solver(1.0); break;
-      case 3: ode_solver = new RK3SSPSolver; break;
-      case 4:
-         if (myid == 0) { MFEM_WARNING("RK4 may violate the bounds."); }
-         ode_solver = new RK4Solver; break;
-      case 6:
-         if (myid == 0) { MFEM_WARNING("RK6 may violate the bounds."); }
-         ode_solver = new RK6Solver; break;
+      case 3: ode_solver = new RK3SSPSolver(); break;
+      case 4: ode_solver = new RK4Solver(); break;
+      case 6: ode_solver = new RK6Solver(); break;
+      case 11: idp_ode_solver = new ForwardEulerIDPSolver(); break;
+      case 12: idp_ode_solver = new RK2IDPSolver(); break;
+      case 13: idp_ode_solver = new RK3IDPSolver(); break;
+      case 14: idp_ode_solver = new RK4IDPSolver(); break;
+      case 16: idp_ode_solver = new RK6IDPSolver(); break;
       default:
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
+   }
+   if (ode_solver_type > 10)
+   {
+      auto rk_idp = dynamic_cast<RKIDPSolver *>(idp_ode_solver);
+      if (rk_idp) { rk_idp->UseMask(false); }
+      ode_solver = idp_ode_solver;
    }
 
    // Check if the input mesh is periodic.
@@ -884,17 +916,22 @@ int main(int argc, char *argv[])
       fct_solver = new ElementFCTProjection(pfes, dt);
    }
 
-   AdvectionOperator adv(S.Size(), m, ml, lumpedM, k, M_HO, K_HO,
+   AdvectionOperator adv(offset, m, ml, lumpedM, k, M_HO, K_HO,
                          x, xsub, v_gf, v_sub_gf, asmbl, lom, dofs,
                          ho_solver, lo_solver, fct_solver, mono_solver);
+
+   adv.verify_bounds = verify_bounds;
+   if (fct_solver) { fct_solver->verify_bounds = verify_bounds; }
 
    double t = 0.0;
    adv.SetTime(t);
    adv.SetTimeStepControl(dt_control);
    ode_solver->Init(adv);
 
-   double umin, umax;
-   GetMinMax(u, umin, umax);
+   double u_min, u_max;
+   GetMinMax(u, u_min, u_max);
+   double s_min = -1.0, s_max = -1.0;
+   if (product_sync) { ComputeMinMaxS(NE, us, u, s_min, s_max); }
 
    if (exec_mode == 1)
    {
@@ -906,8 +943,6 @@ int main(int argc, char *argv[])
 
    ParGridFunction res = u;
    double residual = 0.0;
-   double s_min_glob = numeric_limits<double>::infinity(),
-          s_max_glob = -numeric_limits<double>::infinity();
 
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
@@ -919,23 +954,23 @@ int main(int argc, char *argv[])
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
-      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
-      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      adv.ResetTimeStepRatio();
 
+#ifdef REMHOS_FCT_PRODUCT_DEBUG
       if (product_sync)
       {
-         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_glob, s_max_glob);
-#ifdef REMHOS_FCT_PRODUCT_DEBUG
+         double s_min_debug, s_max_debug;
+         ComputeMinMaxS(pmesh.GetNE(), us, u, s_min_debug, s_max_debug);
          if (myid == 0)
          {
             std::cout << "   --- Full time step" << std::endl;
             std::cout << "   in:  ";
             std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
+            std::cout << "min_s: " << s_min_debug
+                      << "; max_s: " << s_max_debug << std::endl;
          }
-#endif
       }
+#endif
 
       Sold = S;
       ode_solver->Step(S, t, dt_real);
@@ -944,8 +979,8 @@ int main(int argc, char *argv[])
 
       if (dt_control != TimeStepControl::FixedTimeStep)
       {
-         double dt_est = adv.GetTimeStepEstimate();
-         if (dt_est < dt_real)
+         real_t dt_ratio = adv.GetTimeStepRatio();
+         if (dt_ratio < 1.)
          {
             // Repeat with the proper time step.
             if (myid == 0)
@@ -960,41 +995,24 @@ int main(int argc, char *argv[])
             if (dt < 1e-12) { MFEM_ABORT("The time step crashed!"); }
             continue;
          }
-         else if (dt_est > 1.25 * dt_real) { dt *= 1.02; }
+         else if (dt_ratio > 1.25) { dt *= 1.02; }
       }
 
       // S has been modified, update the alias
       u.SyncMemory(S);
+
       if (product_sync)
       {
          us.SyncMemory(S);
-
-         // It is known that RK time integrators with more than 1 stage may
-         // cause violation of the lower bounds for us.
-         // The lower bound is corrected, causing small conservation error.
-         // Correction can also be done with localized bounds for s, but for
-         // now we have implemented only the minimum global bound.
-         u.HostRead();
-         us.HostReadWrite();
-         const int s = u.Size();
-         Array<bool> active_elem, active_dofs;
-         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
-         for (int i = 0; i < s; i++)
-         {
-            if (active_dofs[i] == false) { continue; }
-
-            double us_min = u(i) * s_min_glob;
-            if (us(i) < us_min) { us(i) = us_min; }
-         }
-
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-         ComputeMinMaxS(NE, us, u, s_min_glob, s_max_glob);
+         double s_min_debug, s_max_debug;
+         ComputeMinMaxS(NE, us, u, s_min_debug, s_max_debug);
          if (myid == 0)
          {
             std::cout << "   out: ";
             std::cout << std::scientific << std::setprecision(5);
-            std::cout << "min_s: " << s_min_glob
-                      << "; max_s: " << s_max_glob << std::endl;
+            std::cout << "min_s: " << s_min_debug
+                      << "; max_s: " << s_max_debug << std::endl;
          }
 #endif
       }
@@ -1002,28 +1020,43 @@ int main(int argc, char *argv[])
       // Monotonicity check for debug purposes mainly.
       if (verify_bounds && forced_bounds && smth_indicator == NULL)
       {
-         double umin_new, umax_new;
-         GetMinMax(u, umin_new, umax_new);
+         const double eps = 1e-10;
+         double u_min_new, u_max_new,
+                s_min_new = s_min, s_max_new = s_max;
+         GetMinMax(u, u_min_new, u_max_new);
+         if (product_sync)
+         {
+            ComputeMinMaxS(NE, us, u, s_min_new, s_max_new);
+         }
+
          if (problem_num % 10 != 6 && problem_num % 10 != 7)
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(umin_new > umin - 1e-12,
-                           "Undershoot of " << umin - umin_new);
-               MFEM_VERIFY(umax_new < umax + 1e-12,
-                           "Overshoot of " << umax_new - umax);
+               MFEM_VERIFY(u_min_new > u_min - eps,
+                           "Undershoot of " << u_min - u_min_new);
+               MFEM_VERIFY(u_max_new < u_max + eps,
+                           "Overshoot of " << u_max_new - u_max);
+               MFEM_VERIFY(s_min_new > s_min - eps,
+                           "Undershoot in s of " << s_min - s_min_new);
+               MFEM_VERIFY(s_max_new < s_max + eps,
+                           "Overshoot in s of " << s_max_new - s_max);
             }
-            umin = umin_new;
-            umax = umax_new;
+            u_min = u_min_new;
+            u_max = u_max_new;
          }
          else
          {
             if (myid == 0)
             {
-               MFEM_VERIFY(umin_new > 0.0 - 1e-12,
-                           "Undershoot of " << 0.0 - umin_new);
-               MFEM_VERIFY(umax_new < 1.0 + 1e-12,
-                           "Overshoot of " << umax_new - 1.0);
+               MFEM_VERIFY(u_min_new > 0.0 - eps,
+                           "Undershoot of " << 0.0 - u_min_new);
+               MFEM_VERIFY(u_max_new < 1.0 + eps,
+                           "Overshoot of " << u_max_new - 1.0);
+               MFEM_VERIFY(s_min_new > 0.0 - eps,
+                           "Undershoot in s of " << 0.0 - s_min_new);
+               MFEM_VERIFY(s_max_new < 1.0 + eps,
+                           "Overshoot in s of " << s_max_new - 1.0);
             }
          }
       }
@@ -1102,6 +1135,14 @@ int main(int argc, char *argv[])
            << " (" << ti_total-ti << " repeated)." << endl;
    }
 
+   // Move to the final mesh position
+   if (exec_mode == 1)
+   {
+      add(x0, t_final, v_gf, x);
+      // Reset precomputed geometric data.
+      pmesh.DeleteGeometricFactors();
+   }
+
    // Print the final meshes and solution.
    {
       ofstream meshHO("meshHO_final.mesh");
@@ -1134,10 +1175,10 @@ int main(int argc, char *argv[])
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
-   double mass_u, mass_us = 0.0, s_max = 0.0;
+   double mass_u, mass_us = 0.0;
    MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
    const double umax_loc = u.Max();
-   MPI_Allreduce(&umax_loc, &umax, 1, MPI_DOUBLE, MPI_MAX, comm);
+   MPI_Allreduce(&umax_loc, &u_max, 1, MPI_DOUBLE, MPI_MAX, comm);
    if (product_sync)
    {
       ComputeRatio(pmesh.GetNE(), us, u, s, u_bool_el, u_bool_dofs);
@@ -1149,7 +1190,7 @@ int main(int argc, char *argv[])
    {
       cout << setprecision(10)
            << "Final mass u:  " << mass_u << endl
-           << "Max value u:   " << umax << endl << setprecision(6)
+           << "Max value u:   " << u_max << endl << setprecision(6)
            << "Mass loss u:   " << abs(mass0_u - mass_u) << endl;
       if (product_sync)
       {
@@ -1232,7 +1273,8 @@ int main(int argc, char *argv[])
    return 0;
 }
 
-AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
+AdvectionOperator::AdvectionOperator(const Array<int> &offsets,
+                                     BilinearForm &Mbf_,
                                      BilinearForm &_ml, Vector &_lumpedM,
                                      ParBilinearForm &Kbf_,
                                      ParBilinearForm &M_HO_, ParBilinearForm &K_HO_,
@@ -1242,7 +1284,8 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
                                      LowOrderMethod &_lom, DofInfo &_dofs,
                                      HOSolver *hos, LOSolver *los, FCTSolver *fct,
                                      MonolithicSolver *mos) :
-   TimeDependentOperator(size), Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
+   LimitedTimeDependentOperator(offsets.Last()), block_offsets(offsets),
+   Mbf(Mbf_), ml(_ml), Kbf(Kbf_),
    M_HO(M_HO_), K_HO(K_HO_),
    lumpedM(_lumpedM),
    start_mesh_pos(pos.Size()), start_submesh_pos(sub_vel.Size()),
@@ -1252,7 +1295,46 @@ AdvectionOperator::AdvectionOperator(int size, BilinearForm &Mbf_,
    asmbl(_asmbl), lom(_lom), dofs(_dofs),
    ho_solver(hos), lo_solver(los), fct_solver(fct), mono_solver(mos) { }
 
-void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
+void check_violation(const Vector &u_new,
+    const Vector &u_min, const Vector &u_max,
+    string info, double tol, const Array<bool> *active_dofs)
+{
+   const int size = u_new.Size();
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs && (*active_dofs)[i] == false) { continue; }
+
+      if (u_new(i) + tol < u_min(i) || u_new(i) > u_max(i) + tol)
+      {
+         cout << info << " bounds violation: " << i << " "
+              << u_min(i) << " " << u_new(i) << " " << u_max(i) << endl;
+         cout << u_max(i) - u_new(i) << " " << u_new(i) - u_min(i) << endl;
+         MFEM_ABORT("Aborted due to bounds violation.");
+      }
+   }
+}
+
+void check_violation(const Vector &u, double dt, const Vector &du_new,
+    const Vector &u_min, const Vector &u_max,
+    string info, double tol, const Array<bool> *active_dofs)
+{
+   const int size = u.Size();
+   for (int i = 0; i < size; i++)
+   {
+      if (active_dofs && (*active_dofs)[i] == false) { continue; }
+
+      const double u_new = u(i) + dt * du_new(i);
+      if (u_new + tol < u_min(i) || u_new > u_max(i) + tol)
+      {
+         cout << info << " bounds violation: " << i << " "
+              << u_min(i) << " " << u_new << " " << u_max(i) << endl;
+         cout << u_max(i) - u_new << " " << u_new - u_min(i) << endl;
+         MFEM_ABORT("Aborted due to bounds violation.");
+      }
+   }
+}
+
+void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
 {
    if (exec_mode == 1)
    {
@@ -1319,38 +1401,22 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
       }
    }
 
-   const int size = Kbf.ParFESpace()->GetVSize();
-   const int NE   = Kbf.ParFESpace()->GetNE();
-
    // Needed because X and Y are allocated on the host by the ODESolver.
    X.Read(); Y.Read();
 
-   Vector u, d_u;
-   Vector* xptr = const_cast<Vector*>(&X);
-   u.MakeRef(*xptr, 0, size);
-   d_u.MakeRef(Y, 0, size);
-   Vector du_HO(u.Size()), du_LO(u.Size());
-
-   x_gf = u;
-   x_gf.ExchangeFaceNbrData();
+   const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   BlockVector block_Y(Y, block_offsets);
+   const Vector &u = block_X.GetBlock(0);
+   Vector &d_u = block_Y.GetBlock(0);
 
    if (mono_solver) { mono_solver->CalcSolution(u, d_u); }
    else if (fct_solver)
    {
       MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-      lo_solver->CalcLOSolution(u, du_LO);
-      ho_solver->CalcHOSolution(u, du_HO);
+      ho_solver->CalcHOSolution(u, d_u);
 
-      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
-      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
-      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
-                                  dofs.xi_min, dofs.xi_max, d_u);
-
-      if (dt_control == TimeStepControl::LOBoundsError)
-      {
-         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
-      }
+      // Limiting is deferred to LimitMult()
    }
    else if (lo_solver)
    {
@@ -1371,31 +1437,165 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
    d_u.SyncAliasMemory(Y);
 
    // Remap the product field, if there is a product field.
-   if (X.Size() > size)
+   if (block_offsets.Size() > 2)
    {
       MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
       MFEM_VERIFY(dt_control == TimeStepControl::FixedTimeStep,
                   "Automatic time step is not implemented for product remap.");
 
-      Vector us, d_us;
-      us.MakeRef(*xptr, size, size);
-      d_us.MakeRef(Y, size, size);
-
-      x_gf = us;
-      x_gf.ExchangeFaceNbrData();
+      const Vector &us = block_X.GetBlock(1);
+      Vector &d_us = block_Y.GetBlock(1);
 
       if (mono_solver) { mono_solver->CalcSolution(us, d_us); }
       else if (fct_solver)
       {
          MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
 
-         Vector d_us_HO(us.Size()), d_us_LO;
+         ho_solver->CalcHOSolution(us, d_us);
+
+         // Limiting is deferred to LimitMult()
+      }
+      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
+      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
+      else { MFEM_ABORT("No solver was chosen."); }
+
+      d_us.SyncAliasMemory(Y);
+   }
+}
+
+void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
+{
+   const int NE = Mbf.FESpace()->GetNE();
+   Array<bool> bool_els;
+
+   if (block_offsets.Size() <= 2)
+   {
+      // Only product fields must be masked
+      mask.SetSize(x.Size());
+      mask = true;
+      return;
+   }
+
+   const BlockVector bx(const_cast<Vector&>(x), block_offsets);
+   Array<bool> bool_dofs;
+   ComputeBoolIndicators(NE, bx.GetBlock(0), bool_els, bool_dofs);
+
+   // All DOFs must be active for consistency of update
+   const int ndof_el = bx.GetBlock(0).Size() / NE;
+   for (int k = 0; k < NE; k++)
+   {
+      if (!bool_els[k]) { continue; }
+
+      bool dofs_active = true;
+      for (int j = 0; j < ndof_el; j++)
+      {
+         if (!bool_dofs[j+ndof_el*k])
+         {
+            dofs_active = false;
+            break;
+         }
+      }
+
+      if (!dofs_active)
+      {
+         for (int j = 0; j < ndof_el; j++)
+         {
+            bool_dofs[j+ndof_el*k] = false;
+         }
+      }
+   }
+
+   // Apply the u mask to all product fields
+   const int ndofs = bool_dofs.Size();
+   const int ndim = block_offsets.Size() - 1;
+   mask.SetSize(ndofs * ndim);
+   for (int i = 0; i < ndofs; i++)
+   {
+      for (int d = 0; d < ndim; d++)
+      {
+         // Note that this puts a mask on the first field as well, meaning
+         // that propagation in new elements will be through Forward Euler.
+         mask[i+ndofs*d] = bool_dofs[i];
+      }
+   }
+}
+
+void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
+{
+   // Needed because X and Y are allocated on the host by the ODESolver.
+   X.Read(); Y.Read();
+
+   const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
+   BlockVector block_Y(Y, block_offsets);
+   const Vector &u = block_X.GetBlock(0);
+   Vector &d_u = block_Y.GetBlock(0);
+
+   if (fct_solver)
+   {
+      MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+      x_gf = u;
+      x_gf.ExchangeFaceNbrData();
+
+      Vector du_HO(d_u), du_LO(u.Size());
+
+      auto mba = dynamic_cast<MassBasedAvg *>(lo_solver);
+      if (mba) { mba->SetHOSolution(du_HO); }
+      lo_solver->CalcLOSolution(u, du_LO);
+
+      dofs.ComputeElementsMinMax(u, dofs.xe_min, dofs.xe_max, NULL, NULL);
+      dofs.ComputeBounds(dofs.xe_min, dofs.xe_max, dofs.xi_min, dofs.xi_max);
+
+      if (verify_bounds)
+      {
+         check_violation(u, dt, du_LO, dofs.xi_min, dofs.xi_max,
+                         "LimitMult LO u", 1e-12, nullptr);
+      }
+
+      fct_solver->CalcFCTSolution(x_gf, lumpedM, du_HO, du_LO,
+                                  dofs.xi_min, dofs.xi_max, d_u);
+
+      if (verify_bounds)
+      {
+         check_violation(u, dt, d_u, dofs.xi_min, dofs.xi_max,
+                         "LimitMult FCT solution u", 1e-12, nullptr);
+      }
+
+      if (dt_control == TimeStepControl::LOBoundsError)
+      {
+         UpdateTimeStepEstimate(u, du_LO, dofs.xi_min, dofs.xi_max);
+      }
+   }
+
+   d_u.SyncAliasMemory(Y);
+
+   // Remap the product field, if there is a product field.
+   if (block_offsets.Size() > 2)
+   {
+      MFEM_VERIFY(exec_mode == 1, "Products are processed only in remap mode.");
+      MFEM_VERIFY(dt_control == TimeStepControl::FixedTimeStep,
+                  "Automatic time step is not implemented for product remap.");
+
+      const Vector &us = block_X.GetBlock(1);
+      Vector &d_us = block_Y.GetBlock(1);
+
+      if (fct_solver)
+      {
+         MFEM_VERIFY(ho_solver && lo_solver, "FCT requires HO and LO solvers.");
+
+         x_gf = us;
+         x_gf.ExchangeFaceNbrData();
+
+         Vector d_us_HO(d_us), d_us_LO;
+
          if (fct_solver->NeedsLOProductInput())
          {
             d_us_LO.SetSize(us.Size());
             lo_solver->CalcLOSolution(us, d_us_LO);
          }
-         ho_solver->CalcHOSolution(us, d_us_HO);
+
+         const int size = Kbf.ParFESpace()->GetVSize();
+         const int NE   = Kbf.ParFESpace()->GetNE();
 
          // Compute the ratio s = us_old / u_old, and old active dofs.
          Vector s(size);
@@ -1404,7 +1604,7 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          const int myid = x_gf.ParFESpace()->GetMyRank();
          if (myid == 0) { std::cout << "      --- RK stage" << std::endl; }
-         std::cout << "      in:  ";
+         if (myid == 0) { std::cout << "      in:  "; }
          ComputeMinMaxS(s, s_bool_dofs, myid);
 #endif
 
@@ -1428,15 +1628,13 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
                                     s_bool_el_new, s_bool_dofs_new, d_us);
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
-         Vector us_new(size);
+         Vector us_new(size), s_new(size);
          add(1.0, us, dt, d_us, us_new);
-         std::cout << "      out: ";
-         ComputeMinMaxS(NE, us_new, u_new, myid);
+         if (myid == 0) { std::cout << "      out: "; }
+         ComputeRatio(NE, us_new, u_new, s_new, s_bool_el_new, s_bool_dofs_new);
+         ComputeMinMaxS(s_new, s_bool_dofs_new, myid);
 #endif
       }
-      else if (lo_solver) { lo_solver->CalcLOSolution(us, d_us); }
-      else if (ho_solver) { ho_solver->CalcHOSolution(us, d_us); }
-      else { MFEM_ABORT("No solver was chosen."); }
 
       d_us.SyncAliasMemory(Y);
    }
@@ -1470,6 +1668,7 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
                  Kbf.ParFESpace()->GetComm());
 
    dt_est = fmin(dt_est, dt);
+   dt_ratio = fmin(dt_ratio, (GetDt() != 0.)?(dt / GetDt()):(0.));
 }
 
 // Velocity coefficient
