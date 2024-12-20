@@ -16,7 +16,7 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     # Checkout Remhos in "remhos" subdirectory. Final path: /home/runner/work/remhos/remhos/remhos
