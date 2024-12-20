@@ -26,12 +26,6 @@
 // equations that are used to perform discontinuous field interpolation (remap)
 // as part of the Eulerian phase in Arbitrary-Lagrangian Eulerian (ALE)
 // simulations.
-//
-// single step:
-// mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 3 -dt 0.002 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1 -vs 20
-// RK2:
-// mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 3 -dt 0.002 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 2 -vs 20
-//
 
 #include "mfem.hpp"
 #include <fstream>
