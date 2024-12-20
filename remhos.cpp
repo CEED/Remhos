@@ -26,6 +26,8 @@
 // equations that are used to perform discontinuous field interpolation (remap)
 // as part of the Eulerian phase in Arbitrary-Lagrangian Eulerian (ALE)
 // simulations.
+//
+// Sample runs: see README.md, section 'Verification of Results'.
 
 #include "mfem.hpp"
 #include <fstream>
