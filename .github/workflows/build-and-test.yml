@@ -94,6 +94,7 @@ jobs:
         metis-dir: ${{ env.METIS_TOP_DIR }}
         mfem-dir: ${{ env.MFEM_TOP_DIR }}
         mfem-branch: ${{ env.MFEM_BRANCH }}
+        library-only: 'true'
 
     - name: build Remhos
       run: |
