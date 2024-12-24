@@ -695,7 +695,8 @@ int main(int argc, char *argv[])
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
-   Array<int> offset(levels + 1);
+   const int block_cnt = (sharp) ? 2*levels + 1 : levels + 1;
+   Array<int> offset(block_cnt);
    for (int i = 0; i < offset.Size(); i++) { offset[i] = i*vsize; }
    BlockVector S(offset, Device::GetMemoryType());
    // Primary scalar field is u.
@@ -1919,9 +1920,10 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
    if (evolve_sharp == true  && X.Size() > 2*size)  { levels++; }
    if (evolve_sharp == true  && X.Size() > 4*size)  { levels++; }
 
-   // u.
    const BlockVector block_X(const_cast<Vector&>(X), block_offsets);
    BlockVector block_Y(Y, block_offsets);
+
+   // u.
    const Vector &u = block_X.GetBlock(0);
    Vector &d_u_HO  = block_Y.GetBlock(0);
    ho_solver_b->CalcHOSolution(u, d_u_HO);
@@ -1949,7 +1951,6 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
    // u_sharp.
    if (evolve_sharp == true)
    {
-      const Vector &u_s = block_X.GetBlock(levels);
       Vector &d_u_s_HO  = block_Y.GetBlock(levels);
       ho_solver_s->CalcHOSolution(u, d_u_s_HO);
       d_u_s_HO.SyncAliasMemory(Y);
@@ -1958,18 +1959,20 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
    // us_sharp.
    if (levels > 1 && evolve_sharp == true)
    {
-      const Vector &us_s = block_X.GetBlock(levels+1);
+      // Starts from us.
+      const Vector &us = block_X.GetBlock(1);
       Vector &d_us_s_HO  = block_Y.GetBlock(levels+1);
-      ho_solver_s->CalcHOSolution(us_s, d_us_s_HO);
+      ho_solver_s->CalcHOSolution(us, d_us_s_HO);
       d_us_s_HO.SyncAliasMemory(Y);
    }
 
    // usq_sharp.
    if (levels > 2 && evolve_sharp == true)
    {
-      const Vector &usq_s = block_X.GetBlock(levels+2);
+      // Starts from usq.
+      const Vector &usq = block_X.GetBlock(2);
       Vector &d_usq_s_HO  = block_Y.GetBlock(levels+2);
-      ho_solver_s->CalcHOSolution(usq_s, d_usq_s_HO);
+      ho_solver_s->CalcHOSolution(usq, d_usq_s_HO);
       d_usq_s_HO.SyncAliasMemory(Y);
    }
 
