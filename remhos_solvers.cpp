@@ -94,58 +94,6 @@ void RKIDPSolver::ConstructD()
    }
 }
 
-void RKIDPSolver::AddMasked(const Array<bool> &mask, real_t b, const Vector &vb,
-                            Vector &va)
-{
-   MFEM_ASSERT(va.Size() == vb.Size(),
-               "incompatible Vectors!");
-
-#if !defined(MFEM_USE_LEGACY_OPENMP)
-   const bool use_dev = va.UseDevice() || va.UseDevice();
-   const int N = va.Size();
-   // Note: get read access first, in case c is the same as a/b.
-   auto ad = va.ReadWrite(use_dev);
-   auto bd = vb.Read(use_dev);
-   auto maskd = mask.Read(use_dev);
-   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
-   {
-      ad[i] += (maskd[i])?(b * bd[i]):(0.);
-   });
-#else
-   real_t *ap = va.GetData();
-   const real_t *bp = vb.GetData();
-   const bool   *maskp = mask.GetData();
-   const int      s = va.Size();
-   #pragma omp parallel for
-   for (int i = 0; i < s; i++)
-   {
-      ap[i] += (maskp[i])?(b * bp[i]):(0.);
-   }
-#endif
-}
-
-void RKIDPSolver::UpdateMask(const Vector &x, const Vector &dx, real_t dt,
-                             Array<bool> &mask)
-{
-   Array<bool> mask_new(mask.Size());
-   if (dt != 0.)
-   {
-      Vector x_new(x.Size());
-      add(x, dt, dx, x_new);
-      f->ComputeMask(x_new, mask_new);
-   }
-   else
-   {
-      f->ComputeMask(x, mask_new);
-   }
-   // All intermediate updates must be on active DOFs
-   // for a valid high-order update
-   for (int i = 0; i < mask.Size(); i++)
-   {
-      mask[i] = mask[i] && mask_new[i];
-   }
-}
-
 RKIDPSolver::RKIDPSolver(int s_, const real_t a_[], const real_t b_[],
                          const real_t c_[])
    : s(s_), a(a_), b(b_), c(c_)
@@ -183,52 +131,31 @@ void RKIDPSolver::Step(Vector &x, double &t, double &dt)
    if (c_next > c[0])// only when advancing after
    {
       x.Add(c[0] * dt, dxs[0]);
-      if (use_masks) { f->ComputeMask(x, mask); }
       f->SetTime(t + c[0] * dt);
       c_o = c[0];
    }
-   else
-   {
-      // Only initialize the mask
-      Vector x_new(x.Size());
-      add(x, c[0] * dt, dxs[0], x_new);
-      if (use_masks) { f->ComputeMask(x_new, mask); }
-   }
 
    // Step through higher stages
-
    const real_t *d_i = d + 1;
-
    for (int i = 1; i < s; i++)
    {
       const real_t c_n = (i<s-1)?(c[i]):(1.);
-      const real_t dc = c_n - c_o;
+      const real_t dc  = c_n - c_o;
       const real_t dct = dc * dt;
 
       // Explicit HO step
       f->SetDt(dct);
       f->MultUnlimited(x, dxs[i]);
 
-      // Update mask with the HO update
-      if (use_masks) { UpdateMask(x, dxs[i], dct, mask); }
-
       //
       // Form the unlimited update for the stage.
       // Note that it converts eq. (2.16) in JLG's paper into an update using
       // the previous limited updates.
       //
-      {
-         // for mask = 0, we get dxs (nothing happens).
-         //               the loop below won't change it -> Forward Euler.
-         // for mask = 1, we scale dxs by d_i[i].
-         if (use_masks) { AddMasked(mask, d_i[i]-1., dxs[i], dxs[i]); }
-         else           { dxs[i] *= d_i[i]; }
-      }
-      // Use all previous limited updates.
+      dxs[i] *= d_i[i];
       for (int j = 0; j < i; j++)
       {
-         if (use_masks) { AddMasked(mask, d_i[j], dxs[j], dxs[i]); }
-         else           { dxs[i].Add(d_i[j], dxs[j]); }
+         dxs[i].Add(d_i[j], dxs[j]);
       }
 
       // Limit the step (always a Forward Euler step).

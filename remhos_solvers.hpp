@@ -52,10 +52,6 @@ public:
    /// Perform the unlimited action of the operator
    virtual void MultUnlimited(const Vector &u, Vector &k) const = 0;
 
-   /// Compute mask of the state for the update
-   virtual void ComputeMask(const Vector &u, Array<bool> &mask) const
-   { MFEM_ABORT("Mask computation not implemented!"); }
-
    /// Limit the action vector @a k
    /// Assumes that MultUnlimited(u, k) has been called, which has computed the
    /// unlimited solution in @a k.
@@ -97,26 +93,15 @@ class RKIDPSolver : public IDPODESolver
    const real_t *a, *b, *c;
    real_t *d;
    Vector *dxs;
-   bool use_masks = false;
-   Array<bool> mask;
 
    // This function constructs coefficients that transform eq. (2.16) from
    // JLG's paper to an update that only uses the previous limited updates.
    // This function does not depend on the Operator f in any way.
    void ConstructD();
 
-   /// Adds only DOFs that have mask = true.
-   void AddMasked(const Array<bool> &mask, real_t b,
-                  const Vector &vb, Vector &va);
-
-   void UpdateMask(const Vector &x, const Vector &dx, real_t dt,
-                   Array<bool> &mask);
-
 public:
    RKIDPSolver(int s_, const real_t a_[], const real_t b_[], const real_t c_[]);
    ~RKIDPSolver();
-
-   void UseMask(bool mask_on) { use_masks = mask_on; }
 
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;

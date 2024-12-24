@@ -136,8 +136,6 @@ public:
 
    void MultUnlimited(const Vector &x, Vector &y) const override;
 
-   void ComputeMask(const Vector &x, Array<bool> &mask) const override;
-
    void LimitMult(const Vector &x, Vector &y) const override;
 
    void SetTimeStepControl(TimeStepControl tsc)
@@ -347,12 +345,7 @@ int main(int argc, char *argv[])
          cout << "Unknown ODE solver type: " << ode_solver_type << '\n';
          return 3;
    }
-   if (ode_solver_type > 10)
-   {
-      auto rk_idp = dynamic_cast<RKIDPSolver *>(idp_ode_solver);
-      if (rk_idp) { rk_idp->UseMask(false); }
-      ode_solver = idp_ode_solver;
-   }
+   if (ode_solver_type > 10) { ode_solver = idp_ode_solver; }
 
    // Check if the input mesh is periodic.
    const bool periodic = pmesh.GetNodes() != NULL &&
@@ -1977,63 +1970,6 @@ void AdvectionOperator::MultUnlimited(const Vector &X, Vector &Y) const
    }
 
    // Limiting is deferred to LimitMult().
-}
-
-void AdvectionOperator::ComputeMask(const Vector &x, Array<bool> &mask) const
-{
-   const int NE = K_bound.ParFESpace()->GetNE();
-   Array<bool> bool_els;
-
-   if (block_offsets.Size() <= 2)
-   {
-      // Only product fields must be masked
-      mask.SetSize(x.Size());
-      mask = true;
-      return;
-   }
-
-   const BlockVector bx(const_cast<Vector&>(x), block_offsets);
-   Array<bool> bool_dofs;
-   ComputeBoolIndicators(NE, bx.GetBlock(0), bool_els, bool_dofs);
-
-   // All DOFs must be active for consistency of update
-   const int ndof_el = bx.GetBlock(0).Size() / NE;
-   for (int k = 0; k < NE; k++)
-   {
-      if (!bool_els[k]) { continue; }
-
-      bool dofs_active = true;
-      for (int j = 0; j < ndof_el; j++)
-      {
-         if (!bool_dofs[j+ndof_el*k])
-         {
-            dofs_active = false;
-            break;
-         }
-      }
-
-      if (!dofs_active)
-      {
-         for (int j = 0; j < ndof_el; j++)
-         {
-            bool_dofs[j+ndof_el*k] = false;
-         }
-      }
-   }
-
-   // Apply the u mask to all product fields
-   const int ndofs = bool_dofs.Size();
-   const int ndim = block_offsets.Size() - 1;
-   mask.SetSize(ndofs * ndim);
-   for (int i = 0; i < ndofs; i++)
-   {
-      for (int d = 0; d < ndim; d++)
-      {
-         // Note that this puts a mask on the first field as well, meaning
-         // that propagation in new elements will be through Forward Euler.
-         mask[i+ndofs*d] = bool_dofs[i];
-      }
-   }
 }
 
 void AdvectionOperator::LimitMult(const Vector &X, Vector &Y) const
