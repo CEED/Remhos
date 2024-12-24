@@ -1,0 +1,4 @@
+*.o
+remhos
+*.mesh
+*.gf

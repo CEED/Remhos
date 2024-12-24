@@ -353,7 +353,8 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
 DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    : bounds_type(btype),
      pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
-     fec_bounds(pfes.GetOrder(0), pmesh->Dimension(), BasisType::GaussLobatto),
+     fec_bounds(std::max(pfes.GetOrder(0), 1),
+                pmesh->Dimension(), BasisType::GaussLobatto),
      pfes_bounds(pmesh, &fec_bounds),
      x_min(&pfes_bounds), x_max(&pfes_bounds)
 {
@@ -721,6 +722,8 @@ void DofInfo::FillNeighborDofs()
          }
       }
    }
+
+   delete face_to_el;
 }
 
 void DofInfo::FillSubcell2CellDof()

@@ -18,6 +18,11 @@
 #include "remhos_tools.hpp"
 #include "remhos_ho.hpp"
 
+#if MFEM_VERSION >= 40600
+#define MAX_D1D DofQuadLimits::MAX_D1D
+#define MAX_Q1D DofQuadLimits::MAX_Q1D
+#endif
+
 using namespace std;
 
 namespace mfem
@@ -275,25 +280,24 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 {
    // Compute the new HO solution.
-   Vector du_HO(u.Size());
    ParGridFunction u_HO_new(&pfes);
-   ho_solver.CalcHOSolution(u, du_HO);
-   add(1.0, u, dt, du_HO, u_HO_new);
-
-   // Mesh positions for the new HO solution.
-   ParMesh *pmesh = pfes.GetParMesh();
-   GridFunction x_new(pmesh->GetNodes()->FESpace());
-   // Copy the current nodes into x.
-   pmesh->GetNodes(x_new);
-   if (mesh_v)
+   if (du_HO)
    {
-      // Remap mode - get the positions of the mesh at time [t + dt].
-      //x_new.Add(dt, *mesh_v);
+      add(1.0, u, dt, *du_HO, u_HO_new);
+      du_HO = nullptr;
+   }
+   else
+   {
+      Vector du_HO(u.Size());
+      ho_solver.CalcHOSolution(u, du_HO);
+      add(1.0, u, dt, du_HO, u_HO_new);
    }
 
+   // Mesh positions.
+   ParMesh *pmesh = pfes.GetParMesh();
    const int NE = pfes.GetNE();
    Vector el_mass(NE), el_vol(NE);
-   MassesAndVolumesAtPosition(u_HO_new, x_new, el_mass, el_vol);
+   MassesAndVolumesAtPosition(u_HO_new, *pmesh->GetNodes(), el_mass, el_vol);
 
    const int ndofs = u.Size() / NE;
    for (int k = 0; k < NE; k++)
@@ -344,7 +348,7 @@ const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
    return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
-//====
+//
 //Residual Distribution
 //
 PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
@@ -667,7 +671,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_Q1D = MAX_Q1D;
 
          double Bu0[max_Q1D];
          double Bu1[max_Q1D];
@@ -735,7 +739,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
+         constexpr int max_Q1D = MAX_Q1D;
 
          double Bu0[max_Q1D];
          for (int q=0; q<Q1D; ++q)
@@ -808,8 +812,8 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       mfem::forall(nf, [=] MFEM_HOST_DEVICE (int f)
       {
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
-         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
 
          double BX0[max_Q1D][max_D1D];
          double BX1[max_Q1D][max_D1D];
@@ -909,8 +913,8 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
       MFEM_FORALL(f, nf,
       {
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
-         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
 
          double BX0[max_Q1D][max_D1D];
          for (int k2=0; k2<Q1D; ++k2)
@@ -1048,7 +1052,7 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    });
 }
 
-//====
+//
 //PA Residual Distribution Subcell
 //
 PAResidualDistributionSubcell::PAResidualDistributionSubcell
@@ -1394,8 +1398,8 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
       {
 
          constexpr int iDIM = 2;
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
-         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
          double U[iDIM][max_D1D][max_Q1D];
 
          for (int j1 = 0; j1 < quad1D; ++j1)
@@ -1487,8 +1491,8 @@ void PAResidualDistributionSubcell::ApplySubCellWeights(const Vector &u,
       MFEM_FORALL(e, NE,
       {
 
-         constexpr int max_Q1D = DofQuadLimits::MAX_Q1D;
-         constexpr int max_D1D = DofQuadLimits::MAX_D1D;
+         constexpr int max_Q1D = MAX_Q1D;
+         constexpr int max_D1D = MAX_D1D;
 
          //qpt x dof x dof
          double BX[max_D1D][max_D1D][max_Q1D];
