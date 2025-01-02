@@ -529,7 +529,7 @@ void ClipScaleSolver::CalcFCTSolution(const ParGridFunction &u, const Vector &m,
          auto umin = U_MIN(dof_id);
          auto umax = U_MAX(dof_id);
 
-#ifndef MFEM_USE_CUDA
+#if !defined(MFEM_USE_CUDA) && !defined(MFEM_USE_HIP)
          if (update_bounds)
          {
             const auto u_new_ho   = U(dof_id) + δt * DU_HO(dof_id);
