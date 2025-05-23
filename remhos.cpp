@@ -952,22 +952,25 @@ int main(int argc, char *argv[])
 
       if (visualization)
       {
-         socketstream sock_uu;
          x = x_final;
+
+         socketstream sock_uu;
          VisualizeField(sock_uu, "localhost", 19916, u_gf, "Remapped u",
                         400, 0, 400, 400);
-      }
 
-      ParaViewDataCollection pvdc("remap_after_opt", &pmesh);
-      pvdc.SetDataFormat(VTKFormat::BINARY32);
-      pvdc.SetCycle(0);
-      pvdc.SetTime(1.0);
-      pvdc.RegisterField("field", &u_gf);
-      pvdc.Save();
+         ParaViewDataCollection pvdc("remap_after_opt", &pmesh);
+         pvdc.SetDataFormat(VTKFormat::BINARY32);
+         pvdc.SetCycle(0);
+         pvdc.SetTime(1.0);
+         pvdc.RegisterField("field", &u_gf);
+         pvdc.Save();
+      }
 
       // Print errors w.r.t. exact solution.
       if (project_analytic)
       {
+         x = x_final;
+
          FunctionCoefficient fcoeff(u0_function);
          const double e_L1 = u_gf.ComputeL1Error(fcoeff);
          const double e_L2 = u_gf.ComputeL2Error(fcoeff);

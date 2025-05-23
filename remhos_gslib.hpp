@@ -43,11 +43,13 @@ enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 class InterpolationRemap
 {
 private:
-   // For now there is only one Mesh. Its nodes are at the initial positions.
-   // This class will not change the node positions of this Mesh.
+   // This class will not change the node positions of this Mesh object.
    ParMesh &pmesh_init;
+   // Mesh on the final mesh positions.
    ParMesh pmesh_final;
-   // Don't touch this (direct access to the mesh positions). Used only for vis.
+
+   // Don't touch this (direct access to the mesh positions).
+   // Used only for visualization.
    Vector *x;
    // Initial mesh node positions.
    const Vector pos_init;
@@ -65,6 +67,8 @@ private:
 
    // Mass of g for the given mesh positions.
    double Mass(const Vector &pos, const ParGridFunction &g);
+
+   double Objective(const ParGridFunction &g_interp, const ParGridFunction &g);
 
    // Integral(q1 * q2 * g1) at the given mesh positions.
    // When some pointer is nullptr, its function is taken as 1.
@@ -109,14 +113,12 @@ public:
    void SetEnergyFESpace(ParFiniteElementSpace &es) { pfes_e = &es; }
 
    // Remap of an L2 ParGridFunction.
-   void Remap(const ParGridFunction &u_initial,
-              const ParGridFunction &pos_final, ParGridFunction &u_final,
-              int opt_type);
+   void Remap(const ParGridFunction &u_init, const Vector &pos_final,
+              Vector &u_final, int opt_type);
 
    // Remap of a QuadratureFunction.
-   void Remap(const QuadratureFunction &u_0,
-              const ParGridFunction &pos_final, QuadratureFunction &u_final,
-              int opt_type);
+   void Remap(const QuadratureFunction &u_init, const Vector &pos_final,
+              Vector &u_final, int opt_type);
 
    // Remap of an analytic function.
    // Same as projecting the function to the final mesh.
