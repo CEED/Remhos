@@ -371,7 +371,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    {
       u_final = u_interpolated;
    }
-   if (opt_type == 1)
+   else if (opt_type == 1)
    {
       QuadratureFunction u_desing(u_interpolated), u_initial(u_interpolated);
       OptimizationSolver* optsolver = NULL;
@@ -480,43 +480,47 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
 }
 
 void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
-                               double mass, const ParGridFunction &pos_final,
-                               ParGridFunction &u, int opt_type)
+                               double mass, const Vector &pos_final,
+                               ParGridFunction &u_final, int opt_type)
 {
    pmesh_final.SetNodes(pos_final);
-   ParFiniteElementSpace pfes_tmp(&pmesh_final, u.ParFESpace()->FEColl());
+   ParFiniteElementSpace pfes_final(&pmesh_final,
+                                    u_final.ParFESpace()->FEColl());
+   ParFiniteElementSpace pfes_init(&pmesh_init,
+                                    u_final.ParFESpace()->FEColl());
 
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
 
    // Generate list of points where u_initial will be interpolated.
    // The interpolation is to Gauss-Legendre to keep optimal order.
-   L2_FECollection fec_GL(u.ParFESpace()->FEColl()->GetOrder(),
+   L2_FECollection fec_GL(pfes_final.FEColl()->GetOrder(),
                           dim, BasisType::GaussLegendre);
-   ParFiniteElementSpace pfes_GL(u.ParFESpace()->GetParMesh(), &fec_GL);
+   ParFiniteElementSpace pfes_GL(&pmesh_final, &fec_GL);
    Vector pos_dof_final;
    GetDOFPositions(pfes_GL, pos_final, pos_dof_final);
 
    // Interpolate the function.
    const int nodes_cnt = pos_dof_final.Size() / dim;
-   Vector interp_vals(nodes_cnt), node_pos(dim);
+   Vector node_pos(dim);
+   ParGridFunction u_interpolated_GL(&pfes_GL);
    for (int i = 0; i < nodes_cnt; i++)
    {
       for (int d = 0; d < dim; d++)
       {
          node_pos(d) = pos_dof_final(d * nodes_cnt + i);
       }
-      interp_vals(i) = func(node_pos);
+      // This assumes L2 ordering of the DOFs
+      // (as the ordering of the quad points).
+      u_interpolated_GL(i) = func(node_pos);
    }
 
-   // This assumes L2 ordering of the DOFs (as the ordering of the quad points).
-   ParGridFunction u_GL(&pfes_GL);
-   u_GL = interp_vals;
    // Go Gauss-Legendre -> Bernstein.
-   u.ProjectGridFunction(u_GL);
+   ParGridFunction u_interpolated(&pfes_final);
+   u_interpolated.ProjectGridFunction(u_interpolated_GL);
 
    // Report masses.
-   double mass_f = Mass(pos_final, u);
+   double mass_f = Mass(pos_final, u_interpolated);
    if (pmesh_init.GetMyRank() == 0)
    {
       std::cout << "Mass initial (analytic):  " << mass   << std::endl
@@ -529,11 +533,13 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
    // Compute min / max bounds.
    // Projects to a GridFunction to get some reasonable min/max per element.
+   // It seems better to take it on the initial mesh, I guess the uniform
+   // spacing gives more uniform bounds, and things converge better.
    Vector u_final_min, u_final_max;
-   ParGridFunction func_gf(u.ParFESpace());
+   ParGridFunction func_gf(&pfes_init);
    FunctionCoefficient coeff(func);
    func_gf.ProjectCoefficient(coeff);
-   CalcDOFBounds(func_gf, *u.ParFESpace(), pos_final,
+   CalcDOFBounds(func_gf, pfes_final, pos_final,
                  u_final_min, u_final_max, true);
    if (visualization)
    {
@@ -546,20 +552,21 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       vis_min.precision(8);
       vis_max.precision(8);
 
-      *x = pos_final;
       VisualizeField(vis_min, vishost, visport, gf_min, "u min",
                      0, 500, 300, 300);
       VisualizeField(vis_max, vishost, visport, gf_max, "u max",
                      300, 500, 300, 300);
-      *x = pos_init;
    }
 
    //
    // Optimize to fix the masses, using the min/max bounds.
    //
-   if (opt_type == 1)
+   if (opt_type == 0)
    {
-      *x = pos_final;
+      u_final = u_interpolated;
+   }
+   else if (opt_type == 1)
+   {
       OptimizationSolver* optsolver = NULL;
       {
 #ifdef MFEM_USE_HIOP
@@ -570,43 +577,53 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 #endif
       }
 
-      const double rtol = 1.e-12;
-      const double atol = 0.0;
-      Vector y_out(u.Size());
-
-      const int numContraints = 1;
+      Vector y_out(u_final.Size());
 
       mfem::Array<int> optProbInd;
 
-      RemhosHiOpProblem ot_prob(*u.ParFESpace(), u, u.Size(),
+      const int numContraints = 1;
+      RemhosHiOpProblem ot_prob(pfes_final, u_interpolated, u_final.Size(),
                                 u_final_min, u_final_max, mass,
                                 numContraints, h1_seminorm, optProbInd);
       optsolver->SetOptimizationProblem(ot_prob);
 
       optsolver->SetMaxIter(max_iter);
-      optsolver->SetAbsTol(atol);
-      optsolver->SetRelTol(rtol);
+      optsolver->SetAbsTol(0.0);
+      optsolver->SetRelTol(1e-12);
       optsolver->SetPrintLevel(3);
-      optsolver->Mult(u, y_out);
+      optsolver->Mult(u_interpolated, y_out);
 
-      u = y_out;
+      u_final = y_out;
 
       delete optsolver;
    }
    else if (opt_type == 2)
    {
-      ParGridFunction u_interpolated(u);
-      MDSolver md(pfes_tmp, mass, u_interpolated, u_final_min, u_final_max);
-
+      MDSolver md(pfes_final, mass, u_interpolated, u_final_min, u_final_max);
       md.Optimize(100, 1000, max_iter);
-      md.SetFinal(u);
+
+      md.SetFinal(u_final);
+   }
+   else if (opt_type == 3)
+   {
+      GridFunctionCoefficient u_interpolated_cf(&u_interpolated);
+      L2Obj obj(pfes_final, u_interpolated_cf);
+      BoxMirrorDescent md(obj, u_final, u_final_min, u_final_max, max_iter);
+      Vector target_volume(1); target_volume[0] = mass;
+      ScalarLatentVolumeProjector projector(target_volume, pos_final,
+                                            pfes_final, u_final);
+      md.AddProjector(projector);
+      ParGridFunction psi(&pfes_final);
+      psi = 0.0;
+      md.SetVerbose(1);
+      md.Optimize(psi);
+      md.UpdatePrimal(psi);
    }
    else if (opt_type == 4)
    {
-      ParGridFunction u_interpolated(u);
       Vector target_volume(1); target_volume[0] = mass;
       ScalarLatentVolumeProjector projector(target_volume, pos_final,
-                                            *u.ParFESpace(), u);
+                                            *u_final.ParFESpace(), u_final);
       ParGridFunction psi(u_interpolated);
       Vector search_l({infinity()}), search_r({-infinity()}), lambda(1);
       for (int i=0; i<u_interpolated.Size(); i++)
@@ -623,9 +640,10 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       projector.Apply(psi, u_final_min, u_final_max, 1.0, search_l, search_r,
                       lambda, max_iter);
    }
+   else { MFEM_ABORT("Optimization type not implemented"); }
 
    // Report masses.
-   mass_f = Mass(pos_final, u);
+   mass_f = Mass(pos_final, u_final);
    if (pmesh_init.GetMyRank() == 0)
    {
       std::cout << "Mass optimized:           " << mass_f << std::endl
@@ -637,7 +655,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
    // Check for bounds violations.
    if (Mpi::Root()) { std::cout << "-------\nBounds violations: \n"; }
-   CheckBounds(pmesh_init.GetMyRank(), u, u_final_min, u_final_max);
+   CheckBounds(pmesh_init.GetMyRank(), u_final, u_final_min, u_final_max);
 }
 
 void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,

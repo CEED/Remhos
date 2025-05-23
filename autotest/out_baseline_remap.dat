@@ -167,8 +167,8 @@ Mass optimized diff:      2.7755576e-17
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 13 -rs 2 -tf 0.75 -mono 3 -proj -opt 3
 Mass initial (analytic):  1.027019
 Mass interpolated diff:   1.2979308e-05
-Mass optimized diff:      1.2979308e-05
-L1 error: 0.00063819723
+Mass optimized diff:      6.8163697e-11
+L1 error: 0.023900177
 
 - 3D scalar GridFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/cube01_hex.mesh -p 10 -rs 3 -o 2 -tf 0.5 -mono 3 -opt 3

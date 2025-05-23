@@ -123,7 +123,7 @@ public:
    // Remap of an analytic function.
    // Same as projecting the function to the final mesh.
    void Remap(std::function<real_t(const Vector &)> func, double mass,
-              const ParGridFunction &pos_final, ParGridFunction &u_final,
+              const Vector &pos_final, ParGridFunction &u_final,
               int opt_type);
 
    // Remap of coupled indicator, density, specific internal energy for
