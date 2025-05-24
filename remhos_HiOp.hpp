@@ -540,7 +540,7 @@ class RemhosIndRhoEHiOpProblem : public OptimizationProblem
 {
 private:
    const Vector x_initial;
-   const ParGridFunction pos_final;
+   const Vector &pos_final;
    QuadratureSpace & qspace_;
    ParFiniteElementSpace & fespace_;
    const Vector & designVar;
@@ -583,7 +583,7 @@ private:
 public:
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
                             ParFiniteElementSpace & fespace,
-                            const ParGridFunction & pos_final_,
+                            const Vector          & pos_final_,
                             const Vector          & u_initial,
                             const Vector          & design_Var,
                             const int             & numDesVar,

@@ -125,7 +125,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
    if (visualization)
    {
-      ParGridFunction gf_min(u_init), gf_max(u_init);
+      ParGridFunction gf_min(&pfes_final), gf_max(&pfes_final);
       gf_min = u_final_min, gf_max = u_final_max;
 
       socketstream vis_min, vis_max;
@@ -134,8 +134,6 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
       vis_min.precision(8);
       vis_max.precision(8);
 
-
-      *x = pos_final;
       VisualizeField(vis_min, vishost, visport, gf_min, "u min",
                      0, 500, 300, 300);
       VisualizeField(vis_max, vishost, visport, gf_max, "u max",
@@ -151,8 +149,6 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
          pvdc.RegisterField("val", &u_interpolated);
          pvdc.Save();
       }
-
-      *x = pos_init;
    }
 
    //
@@ -660,12 +656,16 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
 void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
                                       Array<bool> &active_el_0,
-                                      const ParGridFunction &pos_final,
+                                      const Vector &pos_final,
                                       Vector &ind_rho_e, int opt_type)
 {
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
    MFEM_VERIFY(pfes_e && qspace, "Spaces are not specified.");
+
+   pmesh_final.SetNodes(pos_final);
+   QuadratureSpace qspace_final(pmesh_final, qspace->GetIntRule(0));
+   ParFiniteElementSpace pfes_e_final(&pmesh_final, pfes_e->FEColl());
 
    // Extract initial data from the BlockVector.
    const int size_qf = qspace->GetSize();
@@ -677,15 +677,15 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
 
    // Generate list of points where ire_initial will be interpolated.
    Vector pos_dof_final, pos_quad_final;
-   GetDOFPositions(*pfes_e, pos_final, pos_dof_final);
-   GetQuadPositions(*qspace, pos_final, pos_quad_final);
+   GetDOFPositions(pfes_e_final, pos_final, pos_dof_final);
+   GetQuadPositions(qspace_final, pos_final, pos_quad_final);
 
    // Generate the Low-Order-Refined GridFunctions for
    // interpolating the QuadratureFunctions.
    const int order = qspace->GetIntRule(0).GetOrder() / 2;
    const int ref_factor = order + 1;
    ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
-                       BasisType::ClosedGL);
+                                            BasisType::ClosedGL);
    L2_FECollection fec_lor(0, dim);
    ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
    ParGridFunction ind_0_lor(&pfes_lor), rho_0_lor(&pfes_lor);
@@ -698,16 +698,16 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    if (visualization)
    {
       socketstream sock_ind, sock_rho;
-      VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, "ind_0 LOR", 0, 500,
-                     400, 400);
-      VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR", 400, 500,
-                     400, 400);
+      VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, "ind_0 LOR",
+                     0, 500, 400, 400);
+      VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR",
+                     400, 500, 400, 400);
    }
 
    // Interpolate into ind_rho_e.
-   QuadratureFunction ind(qspace, ind_rho_e.GetData()),
-                      rho(qspace, ind_rho_e.GetData() + size_qf);
-   ParGridFunction e(pfes_e, ind_rho_e.GetData() + 2*size_qf);
+   QuadratureFunction ind(&qspace_final, ind_rho_e.GetData()),
+                      rho(&qspace_final, ind_rho_e.GetData() + size_qf);
+   ParGridFunction e(&pfes_e_final, ind_rho_e.GetData() + 2*size_qf);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, ind_0_lor, ind);
@@ -815,7 +815,6 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    if (opt_type == 0) { }
    else if (opt_type == 1)
    {
-      *x = pos_final;
       OptimizationSolver* optsolver = NULL;
       {
 #ifdef MFEM_USE_HIOP
@@ -839,7 +838,7 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       mfem::Vector x_maxsub(NumDesVar);
       mfem::Vector x_minsub(NumDesVar); 
 
-      if(subprob)
+      if (subprob)
       {
          NumDesVar = GetSizeOptimizationSubset(x_min,x_max);
          GetOptimizationSubsetInd(x_min,x_max,optProbInd);
@@ -855,13 +854,13 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
          x_minsub= minsub;
 
       }   
-      else{
+      else
+      {
          x_maxsub= x_max;
          x_minsub= x_min;
       }
 
-
-      RemhosIndRhoEHiOpProblem ot_prob(*qspace, *pfes_e,
+      RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
                                        pos_final,
                                        initial_design,
                                        ind_rho_e,
@@ -877,14 +876,12 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       optsolver->SetRelTol(1e-7);
       optsolver->SetPrintLevel(3);
 
-      if(subprob)
+      if (subprob)
       {
          optsolver->Mult(ind_rho_e_sub, y_out_sub);
          y_out.SetSubVector(optProbInd,y_out_sub);
       }
-      else{
-         optsolver->Mult(ind_rho_e, y_out);
-      }
+      else { optsolver->Mult(ind_rho_e, y_out); }
 
       ind_rho_e = y_out;
 
@@ -905,7 +902,8 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       target_volume[1] = mass_0;
       target_volume[2] = energy_0;
       IndRhoEVolumeProjectorCorrect projector(target_volume, pos_final,
-                                              *qspace, *pfes_e, ind_rho_e);
+                                              qspace_final, pfes_e_final,
+                                              ind_rho_e);
       Vector psi(ind_rho_e);
       int offset = 0;
       for (int i=0; i<ind.Size(); i++)
@@ -918,7 +916,7 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
          psi[offset + i] = inv_sigmoid(psi[offset + i], rho_min[i], rho_max[i]);
       }
       offset += rho.Size();
-      L2_FECollection nodal_fec(pfes_e->GetOrder(0), pfes_e->GetParMesh()->Dimension());
+      L2_FECollection nodal_fec(pfes_e->GetOrder(0), dim);
       ParFiniteElementSpace pfes_nodal(pfes_e->GetParMesh(), &nodal_fec);
       ParGridFunction E_gf(pfes_e, ind_rho_e.GetData() + offset);
       ParGridFunction lower_gf(&pfes_nodal, e_min);

@@ -48,9 +48,6 @@ private:
    // Mesh on the final mesh positions.
    ParMesh pmesh_final;
 
-   // Don't touch this (direct access to the mesh positions).
-   // Used only for visualization.
-   Vector *x;
    // Initial mesh node positions.
    const Vector pos_init;
 
@@ -107,7 +104,7 @@ private:
 public:
    InterpolationRemap(ParMesh &m)
        : pmesh_init(m), pmesh_final(pmesh_init, true),
-         x(pmesh_init.GetNodes()), pos_init(*x) { }
+         pos_init(*pmesh_init.GetNodes()) { }
 
    void SetQuadratureSpace(QuadratureSpace &qs) { qspace = &qs; }
    void SetEnergyFESpace(ParFiniteElementSpace &es) { pfes_e = &es; }
@@ -129,7 +126,7 @@ public:
    // Remap of coupled indicator, density, specific internal energy for
    // single material (no voupling between materials).
    void RemapIndRhoE(const Vector &ind_rho_e_0, Array<bool> &active_el_0,
-                     const ParGridFunction &pos_final,
+                     const Vector &pos_final,
                      Vector &ind_rho_e, int opt_type);
 
    bool visualization = true;
