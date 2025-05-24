@@ -106,7 +106,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
    u_interpolated = interp_vals;
 
    // Report masses.
-   double mass_0 = Mass(*pmesh_init.GetNodes(), u_init),
+   double mass_0 = Mass(pos_init,  u_init),
           mass_f = Mass(pos_final, u_interpolated);
    if (myid == 0)
    {
@@ -335,8 +335,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    u_interpolated = interp_vals;
 
    // Report mass error.
-   double mass_0 = Integrate(*pmesh_init.GetNodes(), &u_init,
-                             nullptr, nullptr),
+   double mass_0 = Integrate(pos_init,  &u_init, nullptr, nullptr),
           mass_f = Integrate(pos_final, &u_interpolated, nullptr, nullptr);
    if (myid == 0)
    {
@@ -717,16 +716,12 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    finder.FreeData();
 
    // Report conservation errors of ire_final.
-   const double volume_0 = Integrate(*pmesh_init.GetNodes(), &ind_0,
-                                     nullptr, nullptr);
-   const double volume_f = Integrate(pos_final, &ind,
-                                     nullptr, nullptr);
-   const double mass_0   = Integrate(*pmesh_init.GetNodes(), &ind_0, &rho_0,
-                                     nullptr);
-   const double mass_f   = Integrate(pos_final, &ind, &rho,
-                                     nullptr);
-   const double energy_0 = Integrate(*pmesh_init.GetNodes(), &ind_0, &rho_0, &e_0);
-   const double energy_f = Integrate(pos_final, &ind, &rho, &e);
+   const double volume_0 = Integrate(pos_init,  &ind_0, nullptr, nullptr);
+   const double volume_f = Integrate(pos_final, &ind, nullptr, nullptr);
+   const double mass_0   = Integrate(pos_init,  &ind_0, &rho_0, nullptr);
+   const double mass_f   = Integrate(pos_final, &ind,   &rho, nullptr);
+   const double energy_0 = Integrate(pos_init,  &ind_0, &rho_0, &e_0);
+   const double energy_f = Integrate(pos_final, &ind,   &rho,   &e);
 
    if (pmesh_init.GetMyRank() == 0)
    {
@@ -850,14 +845,14 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
 
          x_maxsub.SetSize(NumDesVar);
          x_minsub.SetSize(NumDesVar);
-         x_maxsub= maxsub;
-         x_minsub= minsub;
+         x_maxsub = maxsub;
+         x_minsub = minsub;
 
       }   
       else
       {
-         x_maxsub= x_max;
-         x_minsub= x_min;
+         x_maxsub = x_max;
+         x_minsub = x_min;
       }
 
       RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
@@ -868,9 +863,7 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
                                        x_minsub, x_maxsub,
                                        volume_0, mass_0, energy_0,
                                        3, false, optProbInd, true, subprob);
-
       optsolver->SetOptimizationProblem(ot_prob);
-
       optsolver->SetMaxIter(max_iter);
       optsolver->SetAbsTol(1e-7);
       optsolver->SetRelTol(1e-7);
@@ -884,14 +877,6 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       else { optsolver->Mult(ind_rho_e, y_out); }
 
       ind_rho_e = y_out;
-
-      QuadratureFunction ind_temp(qspace, ind_rho_e.GetData());
-      QuadratureFunction rho_temp(qspace, ind_rho_e.GetData() + size_qf);
-      ParGridFunction    energy_temp(pfes_e, ind_rho_e.GetData() + 2*size_qf);
-
-      ind = ind_temp;
-      rho = rho_temp;
-      e   = energy_temp;
 
       delete optsolver;
    }
@@ -917,8 +902,8 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       }
       offset += rho.Size();
       L2_FECollection nodal_fec(pfes_e->GetOrder(0), dim);
-      ParFiniteElementSpace pfes_nodal(pfes_e->GetParMesh(), &nodal_fec);
-      ParGridFunction E_gf(pfes_e, ind_rho_e.GetData() + offset);
+      ParFiniteElementSpace pfes_nodal(&pmesh_final, &nodal_fec);
+      ParGridFunction E_gf(&pfes_e_final, ind_rho_e.GetData() + offset);
       ParGridFunction lower_gf(&pfes_nodal, e_min);
       ParGridFunction upper_gf(&pfes_nodal, e_max);
       LogitCoefficient logit_coeff(E_gf, lower_gf, upper_gf);
