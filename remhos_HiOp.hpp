@@ -25,7 +25,7 @@ namespace mfem
 void GetOptimizationSubsetInd(
       const mfem::Vector & xmin, const mfem::Vector & xmax, mfem::Array<int> & optInd);
 
-int GetSizeOptimizationSubset(const mfem::Vector & xmin, const mfem::Vector & xmax);
+int GetSizeOptimizationSubset(const Vector &xmin, const Vector &xmax);
 
 
 class RemhosHiOpProblem : public OptimizationProblem

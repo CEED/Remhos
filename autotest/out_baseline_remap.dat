@@ -57,7 +57,7 @@ L1 error: 0.0047424026
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/cube01_hex.mesh -p 10 -rs 3 -o 2 -tf 0.5 -mono 3 -opt 1
 Mass initial (old mesh):  0.11601525
 Mass interpolated diff:   2.332488e-05
-Mass optimized diff:      2.0816682e-16
+Mass optimized diff:      1.6653345e-16
 
 - 2D scalar pacman QuadratureFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 4 -opt 1
@@ -96,7 +96,7 @@ L1 error: 0.10121707
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/cube01_hex.mesh -p 10 -rs 3 -o 2 -tf 0.5 -mono 3 -opt 1 -h1s
 Mass initial (old mesh):  0.11601525
 Mass interpolated diff:   2.332488e-05
-Mass optimized diff:      3.1918912e-16
+Mass optimized diff:      4.1633363e-17
 
 - 2D scalar pacman QuadratureFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 4 -opt 1 -h1s
