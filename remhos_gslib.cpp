@@ -284,7 +284,8 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
    // Check for bounds violations.
    CheckBounds(myid, u_final, u_final_min, u_final_max);
 
-   const double obj_L2 = Objective(u_interpolated, u_final_gf);
+   // Print final objective value.
+   const real_t obj_L2 = ObjectiveGF(u_interpolated, u_final_gf);
    if (myid == 0)
    {
       std::cout << "---\nObjective L2: " << obj_L2 << std::endl;
@@ -463,11 +464,8 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    // Check for bounds violations.
    CheckBounds(myid, u_final, u_min, u_max);
 
-   u_interpolated -= u_final;
-   real_t obj_l2 = pow(u_interpolated.Norml2(), 2.0);
-   MPI_Allreduce(MPI_IN_PLACE, &obj_l2, 1, MFEM_MPI_REAL_T, MPI_SUM,
-                 pmesh_init.GetComm());
-   obj_l2 = sqrt(obj_l2);
+   // Print final objective value.
+   const real_t obj_l2 = ObjectiveQF(u_interpolated, u_final);
    if (myid == 0)
    {
       std::cout << "---\nObjective l2: " << obj_l2 << std::endl;
@@ -651,6 +649,13 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
    // Check for bounds violations.
    if (Mpi::Root()) { std::cout << "-------\nBounds violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), u_final, u_final_min, u_final_max);
+
+   // Print final objective value.
+   const double obj_L2 = ObjectiveGF(u_interpolated, u_final);
+   if (myid == 0)
+   {
+      std::cout << "---\nObjective L2: " << obj_L2 << std::endl;
+   }
 }
 
 void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
@@ -668,7 +673,7 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
 
    // Extract initial data from the BlockVector.
    const int size_qf = qspace->GetSize();
-   int size_gf  = pfes_e->GetNDofs();
+   const int size_gf = pfes_e->GetNDofs();
    Vector *ire_ptr = const_cast<Vector *>(&ind_rho_e_0);
    QuadratureFunction ind_0(qspace, ire_ptr->GetData()),
                       rho_0(qspace, ire_ptr->GetData() + size_qf);
@@ -704,24 +709,32 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    }
 
    // Interpolate into ind_rho_e.
-   QuadratureFunction ind(&qspace_final, ind_rho_e.GetData()),
-                      rho(&qspace_final, ind_rho_e.GetData() + size_qf);
-   ParGridFunction e(&pfes_e_final, ind_rho_e.GetData() + 2*size_qf);
+   Vector ind_rho_e_interp(ind_rho_e.Size());
+   real_t *ire_interp_data = ind_rho_e_interp.GetData();
+   QuadratureFunction ind_interp(&qspace_final, ire_interp_data),
+                      rho_interp(&qspace_final, ire_interp_data + size_qf);
+   ParGridFunction e_interp(&pfes_e_final, ire_interp_data + 2*size_qf);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
-   finder.Interpolate(pos_quad_final, ind_0_lor, ind);
-   finder.Interpolate(pos_quad_final, rho_0_lor, rho);
+   finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
+   finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
    finder.Setup(pmesh_init);
-   finder.Interpolate(pos_dof_final, e_0, e);
+   finder.Interpolate(pos_dof_final, e_0, e_interp);
    finder.FreeData();
 
    // Report conservation errors of ire_final.
-   const double volume_0 = Integrate(pos_init,  &ind_0, nullptr, nullptr);
-   const double volume_f = Integrate(pos_final, &ind, nullptr, nullptr);
-   const double mass_0   = Integrate(pos_init,  &ind_0, &rho_0, nullptr);
-   const double mass_f   = Integrate(pos_final, &ind,   &rho, nullptr);
-   const double energy_0 = Integrate(pos_init,  &ind_0, &rho_0, &e_0);
-   const double energy_f = Integrate(pos_final, &ind,   &rho,   &e);
+   const double volume_0 = Integrate(pos_init,
+                                     &ind_0, nullptr, nullptr);
+   const double volume_f = Integrate(pos_final,
+                                     &ind_interp, nullptr, nullptr);
+   const double mass_0   = Integrate(pos_init,
+                                     &ind_0, &rho_0, nullptr);
+   const double mass_f   = Integrate(pos_final,
+                                     &ind_interp, &rho_interp, nullptr);
+   const double energy_0 = Integrate(pos_init,
+                                     &ind_0, &rho_0, &e_0);
+   const double energy_f = Integrate(pos_final,
+                                     &ind_interp, &rho_interp, &e_interp);
 
    if (pmesh_init.GetMyRank() == 0)
    {
@@ -750,23 +763,21 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
 
    // Compute min / max bounds.
    Vector ind_min, ind_max;
-   CalcQuadBounds(ind_0, ind, pos_final, ind_min, ind_max, ELEM_FINAL);
+   CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
    Vector rho_min, rho_max;
-   CalcRhoBounds(rho, ind, ind_max, rho_min, rho_max);
+   CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
    //    gf_min = rho_min, gf_max = rho_max;
 
-   //    *x = pos_final;
-   //    VisQuadratureFunction(pmesh_init, ind, "ind interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_init, rho, "rho interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_init, gf_min, "rho_min QF", 0, 500);
-   //    VisQuadratureFunction(pmesh_init, gf_max, "rho_max QF", 400, 500);
-   //    *x = pos_init;
+   //    VisQuadratureFunction(pmesh_final, ind_interp, "ind interp", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, rho_interp, "rho interp", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, gf_min, "rho_min QF", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, gf_max, "rho_max QF", 400, 500);
    //    MFEM_ABORT("rho bounds");
    // }
    Vector e_min, e_max;
-   CalcEBounds(e, ind_max, e_min, e_max);
+   CalcEBounds(e_interp, ind_max, e_min, e_max);
    // {
    //    ParGridFunction gf_min(e), gf_max(e);
    //    gf_min = e_min, gf_max = e_max;
@@ -796,9 +807,9 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    BlockVector x_min(offset);
    BlockVector x_max(offset);
 
-   initial_design.GetBlock(0) = ind;
-   initial_design.GetBlock(1) = rho;
-   initial_design.GetBlock(2) = e;
+   initial_design.GetBlock(0) = ind_interp;
+   initial_design.GetBlock(1) = rho_interp;
+   initial_design.GetBlock(2) = e_interp;
 
    x_min.GetBlock(0) = ind_min;
    x_min.GetBlock(1) = rho_min;
@@ -807,7 +818,10 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    x_max.GetBlock(1) = rho_max;
    x_max.GetBlock(2) = e_max;
 
-   if (opt_type == 0) { }
+   if (opt_type == 0)
+   {
+      ind_rho_e = ind_rho_e_interp;
+   }
    else if (opt_type == 1)
    {
       OptimizationSolver* optsolver = NULL;
@@ -821,7 +835,6 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
 
       Vector y_out(ind_rho_e.Size());
       y_out = initial_design;
-      ind_rho_e = initial_design;
 
       int NumDesVar = ind_rho_e.Size();
       mfem::Array<int> optProbInd;
@@ -847,7 +860,6 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
          x_minsub.SetSize(NumDesVar);
          x_maxsub = maxsub;
          x_minsub = minsub;
-
       }   
       else
       {
@@ -858,7 +870,6 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
                                        pos_final,
                                        initial_design,
-                                       ind_rho_e,
                                        NumDesVar,
                                        x_minsub, x_maxsub,
                                        volume_0, mass_0, energy_0,
@@ -874,7 +885,7 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
          optsolver->Mult(ind_rho_e_sub, y_out_sub);
          y_out.SetSubVector(optProbInd,y_out_sub);
       }
-      else { optsolver->Mult(ind_rho_e, y_out); }
+      else { optsolver->Mult(ind_rho_e_interp, y_out); }
 
       ind_rho_e = y_out;
 
@@ -889,21 +900,21 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
       IndRhoEVolumeProjectorCorrect projector(target_volume, pos_final,
                                               qspace_final, pfes_e_final,
                                               ind_rho_e);
-      Vector psi(ind_rho_e);
+      Vector psi(ind_rho_e_interp);
       int offset = 0;
-      for (int i=0; i<ind.Size(); i++)
+      for (int i=0; i<ind_interp.Size(); i++)
       {
          psi[i] = inv_sigmoid(psi[i], ind_min[i], ind_max[i]);
       }
-      offset += ind.Size();
-      for (int i=0; i<rho.Size(); i++)
+      offset += ind_interp.Size();
+      for (int i=0; i<rho_interp.Size(); i++)
       {
          psi[offset + i] = inv_sigmoid(psi[offset + i], rho_min[i], rho_max[i]);
       }
-      offset += rho.Size();
+      offset += rho_interp.Size();
       L2_FECollection nodal_fec(pfes_e->GetOrder(0), dim);
       ParFiniteElementSpace pfes_nodal(&pmesh_final, &nodal_fec);
-      ParGridFunction E_gf(&pfes_e_final, ind_rho_e.GetData() + offset);
+      ParGridFunction E_gf(&pfes_e_final, ind_rho_e_interp.GetData() + offset);
       ParGridFunction lower_gf(&pfes_nodal, e_min);
       ParGridFunction upper_gf(&pfes_nodal, e_max);
       LogitCoefficient logit_coeff(E_gf, lower_gf, upper_gf);
@@ -915,6 +926,10 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
                       search_l, search_r, lambda, 1e03);
    }
    else { MFEM_ABORT("not implemented!"); }
+
+   QuadratureFunction ind(&qspace_final, ind_rho_e.GetData()),
+                      rho(&qspace_final, ind_rho_e.GetData() + size_qf);
+   ParGridFunction e(&pfes_e_final, ind_rho_e.GetData() + 2*size_qf);
 
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr);
    const double mass_f_opt   = Integrate(pos_final, &ind, &rho,    nullptr);
@@ -952,6 +967,18 @@ void InterpolationRemap::RemapIndRhoE(const Vector &ind_rho_e_0,
    CheckBounds(pmesh_init.GetMyRank(), rho, rho_min, rho_max);
    if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
+
+   // Print final objective value.
+   const double ind_obj_l2 = ObjectiveQF(ind_interp, ind),
+                rho_obj_l2 = ObjectiveQF(rho_interp, rho),
+                e_obj_L2 = ObjectiveGF(e_interp, e);
+
+   if (myid == 0)
+   {
+      std::cout << "---\nObjective ind l2: " << ind_obj_l2 << std::endl;
+      std::cout <<      "Objective rho l2: " << rho_obj_l2 << std::endl;
+      std::cout <<      "Objective e   L2: " << e_obj_L2 << std::endl;
+   }
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
@@ -1045,11 +1072,22 @@ double InterpolationRemap::Mass(const Vector &pos, const ParGridFunction &g)
    return mass;
 }
 
-double InterpolationRemap::Objective(const ParGridFunction &g_interp,
-                                     const ParGridFunction &g)
+real_t InterpolationRemap::ObjectiveGF(const ParGridFunction &g_interp,
+                                       const ParGridFunction &g)
 {
    GridFunctionCoefficient ci(&g_interp);
    return g.ComputeL2Error(ci);
+}
+
+real_t InterpolationRemap::ObjectiveQF(const Vector &g_interp,
+                                       const Vector &g)
+{
+   Vector tmp(g_interp);
+   tmp -= g;
+   real_t obj_l2 = pow(tmp.Norml2(), 2.0);
+   MPI_Allreduce(MPI_IN_PLACE, &obj_l2, 1, MFEM_MPI_REAL_T, MPI_SUM,
+                 MPI_COMM_WORLD);
+   return sqrt(obj_l2);
 }
 
 double InterpolationRemap::Integrate(const Vector &pos,

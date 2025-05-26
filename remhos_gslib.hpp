@@ -43,6 +43,8 @@ enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 class InterpolationRemap
 {
 private:
+   int myid;
+
    // This class will not change the node positions of this Mesh object.
    ParMesh &pmesh_init;
    // Mesh on the final mesh positions.
@@ -65,7 +67,8 @@ private:
    // Mass of g for the given mesh positions.
    double Mass(const Vector &pos, const ParGridFunction &g);
 
-   double Objective(const ParGridFunction &g_interp, const ParGridFunction &g);
+   real_t ObjectiveGF(const ParGridFunction &g_interp, const ParGridFunction &g);
+   real_t ObjectiveQF(const Vector &g_interp, const Vector &g);
 
    // Integral(q1 * q2 * g1) at the given mesh positions.
    // When some pointer is nullptr, its function is taken as 1.
@@ -103,7 +106,7 @@ private:
 
 public:
    InterpolationRemap(ParMesh &m)
-       : pmesh_init(m), pmesh_final(pmesh_init, true),
+       : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),
          pos_init(*pmesh_init.GetNodes()) { }
 
    void SetQuadratureSpace(QuadratureSpace &qs) { qspace = &qs; }

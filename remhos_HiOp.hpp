@@ -384,7 +384,7 @@ virtual double CalcObjective(const Vector &x) const
       }
 
       MPI_Allreduce(MPI_IN_PLACE, &normSq, 1, MPI_DOUBLE, MPI_SUM,
-                  MPI_COMM_WORLD);
+                    MPI_COMM_WORLD);
 
       return normSq;
    }
@@ -543,7 +543,6 @@ private:
    const Vector &pos_final;
    QuadratureSpace & qspace_;
    ParFiniteElementSpace & fespace_;
-   const Vector & designVar;
    const int    numDesVar_;
    Vector d_lo, d_hi, massvec;
 
@@ -585,7 +584,6 @@ public:
                             ParFiniteElementSpace & fespace,
                             const Vector          & pos_final_,
                             const Vector          & u_initial,
-                            const Vector          & design_Var,
                             const int             & numDesVar,
                             const Vector          & xmin, 
                             const Vector          & xmax, 
@@ -598,7 +596,7 @@ public:
                             const bool            & isL2 = true,
                             const bool            & sub =false)
       : OptimizationProblem(numDesVar, NULL, NULL),
-        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), designVar(design_Var), numDesVar_(numDesVar),
+        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetEnergy(initalenergy), isL2_(isL2),
         size_qf(qspace.GetSize()), size_gf(fespace.GetNDofs()), offset(4), optProbInd(optProbInd_), subproblem(sub)
