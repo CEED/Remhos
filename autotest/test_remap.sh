@@ -63,14 +63,14 @@ run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 
 echo -e $run_line >> $file
 $run_line | grep -e 'Volume interpolated diff:' -e 'Volume optimized diff:' \
                  -e 'Mass interpolated diff:' -e 'Mass optimized diff:' \
-                 -e 'Energy interpolated diff:' -e 'Energy optimized diff:'>> $file
+                 -e 'energy interp diff:' -e 'Energy optimized diff:'>> $file
 
 echo -e '\n'"- 2D ind_rho_e (shapes constant rho-e HiOp)" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 4"
 echo -e $run_line >> $file
 $run_line | grep -e 'Volume interpolated diff:' -e 'Volume optimized diff:' \
                  -e 'Mass interpolated diff:' -e 'Mass optimized diff:' \
-                 -e 'Energy interpolated diff:' -e 'Energy optimized diff:'>> $file
+                 -e 'energy interp diff:' -e 'Energy optimized diff:'>> $file
 
 
 cd autotest

@@ -51,7 +51,7 @@ enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
 
 enum class MonolithicSolverType
 { None, ResDistMono, ResDistMonoSubcell,
-  InterpolationGF, InterpolationQF, InterpolationIndRhoE };
+  InterpolationGF, InterpolationQF, InterpolationIndRhoE, InterpolationHydro };
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -70,6 +70,7 @@ void velocity_function(const Vector &x, Vector &v);
 double u0_function(const Vector &x);
 double s0_function(const Vector &x);
 double q0_function(const Vector &x);
+void v0_function(const Vector &x, Vector &v);
 
 double u0_total_mass();
 
@@ -1026,27 +1027,36 @@ int main(int argc, char *argv[])
       return 0;
    }
 
-   if (mono_type == MonolithicSolverType::InterpolationIndRhoE)
+   if (mono_type == MonolithicSolverType::InterpolationIndRhoE ||
+       mono_type == MonolithicSolverType::InterpolationHydro)
    {
       MFEM_VERIFY(dim == 2, "Not setup in 3D yet.");
+
+      const bool remap_v = (mono_type==MonolithicSolverType::InterpolationHydro);
 
       const IntegrationRule &ir =
           IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
 
-      // Setup the BlockVector (ordered ind-rho-e).
-      const int size_qf = qspace.GetSize(),
-                size_gf = pfes.GetNDofs();
-      Array<int> offset(4);
+      H1_FECollection fec_v(order+1, dim, BasisType::GaussLobatto);
+      ParFiniteElementSpace pfes_v(&pmesh, &fec_v, dim);
+
+      // Setup the BlockVector (ordered ind-rho-e-v).
+      const int size_qf   = qspace.GetSize(),
+                size_gf_e = pfes.GetVSize(),
+                size_gf_v = pfes_v.GetVSize();
+      Array<int> offset(5);
       offset[0] = 0;
       offset[1] = offset[0] + size_qf;
       offset[2] = offset[1] + size_qf;
-      offset[3] = offset[2] + size_gf;
-      BlockVector ind_rho_e_0(offset, Device::GetMemoryType());
+      offset[3] = offset[2] + size_gf_e;
+      offset[4] = offset[3] + size_gf_v;
+      BlockVector ind_rho_e_v_0(offset, Device::GetMemoryType());
 
-      QuadratureFunction ind_0(&qspace, ind_rho_e_0.GetBlock(0).GetData()),
-                         rho_0(&qspace, ind_rho_e_0.GetBlock(1).GetData());
-      ParGridFunction e_0(&pfes, ind_rho_e_0.GetBlock(2).GetData());
+      QuadratureFunction ind_0(&qspace, ind_rho_e_v_0.GetBlock(0).GetData()),
+                         rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData());
+      ParGridFunction e_0(&pfes, ind_rho_e_v_0.GetBlock(2).GetData());
+      ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
 
       // Initialize only in the support of ind_0.
       Array<bool> ind_0_bool_el, ind_0_bool_dofs;
@@ -1057,15 +1067,26 @@ int main(int argc, char *argv[])
       InitializeQuadratureFunction(rho_0_coeff, x0, rho_0);
       e_0.ProjectCoefficient(e_0_coeff);
 
+      // Initialize velocity everywhere.
+      VectorFunctionCoefficient v_0_coeff(dim, v0_function);
+      v_0.ProjectCoefficient(v_0_coeff);
+
       // Visualize initial values.
       if (visualization)
       {
          VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 500);
          VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 500);
 
-         socketstream sock;
-         VisualizeField(sock, "localhost", 19916, e_0, "e_0 GF",
+         socketstream sock_e;
+         VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
                         800, 500, 400, 400);
+
+         if (remap_v)
+         {
+            socketstream sock_v;
+            VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
+                           1200, 500, 400, 400, "", true);
+         }
 
          ParaViewDataCollection pvdc("IndRhoE_before_opt", &pmesh);
          pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1094,8 +1115,9 @@ int main(int argc, char *argv[])
       interpolator.max_iter      = max_opt_iter;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
-      interpolator.RemapIndRhoE(ind_rho_e_0, ind_0_bool_el, x_final,
-                                ind_rho_e, optimization_type);
+      interpolator.SetVelocityFESpace(pfes_v);
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, ind_0_bool_el, x_final,
+                              ind_rho_e, optimization_type);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
@@ -2097,6 +2119,18 @@ double q0_function(const Vector &x)
       case 34:
       case 38: return 10.0;
       default: MFEM_ABORT("s0 is not defined for this problem.");
+   }
+}
+
+void v0_function(const Vector &x, Vector &v)
+{
+   switch (problem_num)
+   {
+      case 14:
+      case 18:
+      case 34:
+      case 38: v(0) = x(0); v(1) = x(1); break;
+      default: MFEM_ABORT("v0 is not defined for this problem.");
    }
 }
 
