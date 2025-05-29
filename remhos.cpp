@@ -175,6 +175,7 @@ int main(int argc, char *argv[])
    bool product_sync = false;
    int vis_steps = 100;
    const char *device_config = "cpu";
+   bool optRelevantSubset = false;
 
    int precision = 8;
    cout.precision(precision);
@@ -227,6 +228,9 @@ int main(int argc, char *argv[])
    args.AddOption(&h1_seminorm, "-h1s", "--h1semi", "-no-h1s",
                   "--no-h1semi",
                   "Use the H1-seminorm term in optimization.");
+   args.AddOption(&optRelevantSubset, "-ors", "--optRelSub", "-no-ors",
+                  "--no-optRelSub",
+                  "Use to optimize only relevant subset. min bound != max bound");
    args.AddOption(&max_opt_iter, "-mi", "--max-optimization-iterations",
                   "Maximum optimization iterations");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
@@ -941,6 +945,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.subprob   = optRelevantSubset;      
       ParGridFunction u_gf(&pfes);
 
       if (project_analytic)
@@ -1089,6 +1094,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.subprob   = optRelevantSubset;      
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.RemapIndRhoE(ind_rho_e_0, ind_0_bool_el, x_final,
