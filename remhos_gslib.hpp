@@ -43,16 +43,17 @@ enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 class InterpolationRemap
 {
 private:
-   // For now there is only one Mesh. Its nodes are at the initial positions.
-   // This class will not change the node positions of this Mesh.
+   int myid;
+
+   // This class will not change the node positions of this Mesh object.
    ParMesh &pmesh_init;
+   // Mesh on the final mesh positions.
    ParMesh pmesh_final;
-   // Don't touch this (direct access to the mesh positions). Used only for vis.
-   Vector *x;
+
    // Initial mesh node positions.
    const Vector pos_init;
 
-   ParFiniteElementSpace *pfes_e = nullptr;
+   ParFiniteElementSpace *pfes_e = nullptr, *pfes_v = nullptr;
    QuadratureSpace *qspace = nullptr;
 
    // Positions of the DOFs of pfes, for the given mesh positions.
@@ -66,11 +67,23 @@ private:
    // Mass of g for the given mesh positions.
    double Mass(const Vector &pos, const ParGridFunction &g);
 
-   // Integral(q1 * q2 * g1) at the given mesh positions.
-   // When some pointer is nullptr, its function is taken as 1.
+   real_t ObjectiveGF(const ParGridFunction &g_interp, const ParGridFunction &g);
+   real_t ObjectiveQF(const Vector &g_interp, const Vector &g);
+
+   // Computes volume / mass / internal energy / total energy:
+   //   integral(ind * rho * e + 0.5 ind rho v^2).
+   //   * whenever ind/rho/e is nullptr, their values are taken as 1.
+   //   * if v is nullptr, its value if taken as 0 (no second term).
+   //
+   // Computes momentum in some direction when v != nullptr, e = nullptr:
+   //   integral(ind * rho * v_comp).
+   //
+   // Uses the given mesh positions.
    // Uses the IntegrationRule of the QuadratureFunctions if these are given.
-   double Integrate(const Vector &pos, const QuadratureFunction *q1,
-                    const QuadratureFunction *q2, const ParGridFunction *g1);
+   double Integrate(const Vector &pos, const QuadratureFunction *ind,
+                    const QuadratureFunction *rho,
+                    const ParGridFunction *e,
+                    const ParGridFunction *v, int comp = 0);
 
    // Computes bounds for the DOFs of pfes, at the mesh positions given
    // by pos_final. The bounds are determined by the values of g_init, which
@@ -97,38 +110,43 @@ private:
                     const Vector &ind_max,
                     Vector &e_min, Vector &e_max);
 
+   void CalcVBounds(const ParGridFunction &v_interp,
+                    Vector &v_min, Vector &v_max);
+
    void CheckBounds(int myid, const Vector &v,
                     const Vector &v_min, const Vector &v_max);
 
 public:
    InterpolationRemap(ParMesh &m)
-       : pmesh_init(m), pmesh_final(pmesh_init, true),
-         x(pmesh_init.GetNodes()), pos_init(*x) { }
+       : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),
+         pos_init(*pmesh_init.GetNodes()) { }
 
    void SetQuadratureSpace(QuadratureSpace &qs) { qspace = &qs; }
    void SetEnergyFESpace(ParFiniteElementSpace &es) { pfes_e = &es; }
+   void SetVelocityFESpace(ParFiniteElementSpace &vs) { pfes_v = &vs; }
 
    // Remap of an L2 ParGridFunction.
-   void Remap(const ParGridFunction &u_initial,
-              const ParGridFunction &pos_final, ParGridFunction &u_final,
-              int opt_type);
+   void Remap(const ParGridFunction &u_init, const Vector &pos_final,
+              Vector &u_final, int opt_type);
 
    // Remap of a QuadratureFunction.
-   void Remap(const QuadratureFunction &u_0,
-              const ParGridFunction &pos_final, QuadratureFunction &u_final,
-              int opt_type);
+   void Remap(const QuadratureFunction &u_init, const Vector &pos_final,
+              Vector &u_final, int opt_type);
 
    // Remap of an analytic function.
    // Same as projecting the function to the final mesh.
    void Remap(std::function<real_t(const Vector &)> func, double mass,
-              const ParGridFunction &pos_final, ParGridFunction &u_final,
+              const Vector &pos_final, ParGridFunction &u_final,
               int opt_type);
 
-   // Remap of coupled indicator, density, specific internal energy for
-   // single material (no voupling between materials).
-   void RemapIndRhoE(const Vector &ind_rho_e_0, Array<bool> &active_el_0,
-                     const ParGridFunction &pos_final,
-                     Vector &ind_rho_e, int opt_type);
+   // Remap of coupled
+   // (indicator, density, specific internal energy, velocity) if remap_v or
+   // (indicator, density, specific internal energy) if remap_v = false,
+   // for a single material (no coupling between materials).
+   void RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
+                   Array<bool> &active_el_0,
+                   const Vector &pos_final,
+                   Vector &ind_rho_e_v, int opt_type);
 
    bool visualization = true;
    bool h1_seminorm   = false;

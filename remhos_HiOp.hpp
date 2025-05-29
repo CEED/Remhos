@@ -25,7 +25,7 @@ namespace mfem
 void GetOptimizationSubsetInd(
       const mfem::Vector & xmin, const mfem::Vector & xmax, mfem::Array<int> & optInd);
 
-int GetSizeOptimizationSubset(const mfem::Vector & xmin, const mfem::Vector & xmax);
+int GetSizeOptimizationSubset(const Vector &xmin, const Vector &xmax);
 
 
 class RemhosHiOpProblem : public OptimizationProblem
@@ -74,7 +74,7 @@ public:
       }
    }
 
-   virtual double CalcObjective(const Vector &x) const
+   real_t CalcObjective(const Vector &x) const override
    {
 
       ParGridFunction x_interpolated(&fespace); 
@@ -120,7 +120,7 @@ public:
       return val;
    }
 
-   virtual void CalcObjectiveGrad(const Vector &x, Vector &grad) const
+   void CalcObjectiveGrad(const Vector &x, Vector &grad) const override
    {
 
       ParGridFunction x_interpolated(&fespace); 
@@ -186,7 +186,8 @@ public:
       M_[0] = mass_form->ParallelAssemble();
    }
    
-   virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &grad) const
+   void CalcConstraintGrad(const int constNumber,
+                           const Vector &x, Vector &grad) const override
    {
       ParGridFunction x_interpolated(&fespace); 
       if(subproblem)
@@ -227,7 +228,8 @@ public:
       else { grad = tempGrad; } 
    }
 
-   virtual void CalcConstraint(const int constNumber, const Vector &x, Vector &constVal) const
+   void CalcConstraint(const int constNumber,
+                       const Vector &x, Vector &constVal) const override
    {
       ParGridFunction x_interpolated(&fespace); 
       if(subproblem)
@@ -292,7 +294,7 @@ class RemhosQuadHiOpProblem : public OptimizationProblem
 {
 private:
    const QuadratureFunction x_initial;
-   const ParGridFunction pos_final;
+   const Vector pos_final;
    QuadratureSpace & qspace;
    const QuadratureFunction & designVar;
    Vector d_lo, d_hi, massvec;
@@ -303,7 +305,7 @@ private:
 
 public:
    RemhosQuadHiOpProblem(QuadratureSpace &space,
-                     const ParGridFunction &pos_final_,
+                     const Vector &pos_final_,
                      const QuadratureFunction &u_initial,
                      const QuadratureFunction &design_Var,
                      const Vector &xmin, 
@@ -328,7 +330,7 @@ public:
       {
          double dx = space.GetMesh()->GetElementSize(0, 0);
          MPI_Allreduce(MPI_IN_PLACE, &dx, 1, MPI_DOUBLE,
-                       MPI_MIN, pos_final_.ParFESpace()->GetComm());
+                       MPI_MIN, MPI_COMM_WORLD);
          H1SemiNormWeight = dx * dx;
       }
    }
@@ -382,7 +384,7 @@ virtual double CalcObjective(const Vector &x) const
       }
 
       MPI_Allreduce(MPI_IN_PLACE, &normSq, 1, MPI_DOUBLE, MPI_SUM,
-                  MPI_COMM_WORLD);
+                    MPI_COMM_WORLD);
 
       return normSq;
    }
@@ -538,10 +540,9 @@ class RemhosIndRhoEHiOpProblem : public OptimizationProblem
 {
 private:
    const Vector x_initial;
-   const ParGridFunction pos_final;
+   const Vector &pos_final;
    QuadratureSpace & qspace_;
    ParFiniteElementSpace & fespace_;
-   const Vector & designVar;
    const int    numDesVar_;
    Vector d_lo, d_hi, massvec;
 
@@ -581,9 +582,8 @@ private:
 public:
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
                             ParFiniteElementSpace & fespace,
-                            const ParGridFunction & pos_final_,
+                            const Vector          & pos_final_,
                             const Vector          & u_initial,
-                            const Vector          & design_Var,
                             const int             & numDesVar,
                             const Vector          & xmin, 
                             const Vector          & xmax, 
@@ -596,7 +596,7 @@ public:
                             const bool            & isL2 = true,
                             const bool            & sub =false)
       : OptimizationProblem(numDesVar, NULL, NULL),
-        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), designVar(design_Var), numDesVar_(numDesVar),
+        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetEnergy(initalenergy), isL2_(isL2),
         size_qf(qspace.GetSize()), size_gf(fespace.GetNDofs()), offset(4), optProbInd(optProbInd_), subproblem(sub)
@@ -621,7 +621,7 @@ public:
       // }
    }
 
-virtual double CalcObjective(const Vector &x) const
+   double CalcObjective(const Vector &x) const override
    {
       Vector x_interpolated(offset[3]);  
 
@@ -726,7 +726,7 @@ virtual double CalcObjective(const Vector &x) const
       return w_1*normindSq + w_2*normrohSq +w_3* val;
    }
 
-   virtual void CalcObjectiveGrad(const Vector &x, Vector &grad) const
+   void CalcObjectiveGrad(const Vector &x, Vector &grad) const  override
    {
       Vector x_interpolated(offset[3]);  
 
@@ -896,7 +896,8 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       M_[0] = mass_form->ParallelAssemble();
    }
 
-virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &grad) const
+   void CalcConstraintGrad(const int constNumber,
+                           const Vector &x, Vector &grad) const override
    {
       Vector x_interpolated(offset[3]);  
 
@@ -995,7 +996,8 @@ virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &
       } 
 };
 
-virtual void CalcConstraint(const int constNumber, const Vector &x, Vector &constVal) const
+void CalcConstraint(const int constNumber,
+                    const Vector &x, Vector &constVal) const override
 {
       Vector x_interpolated(offset[3]);  
 

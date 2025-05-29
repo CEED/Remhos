@@ -32,11 +32,12 @@ void GetOptimizationSubsetInd(
       int counter = 0;
       double eps = 1e-10;
 
-      mfem::Vector diff(n); diff = xmin; diff -=xmax;
+      mfem::Vector diff(xmin);
+      diff -=xmax;
 
       for( int Ik = 0; Ik < n; Ik++)
       {
-         if( not std::abs(diff[Ik]) < eps)
+         if (std::abs(diff[Ik]) > eps)
          {
             optInd[counter] = Ik;
             counter ++;
@@ -44,20 +45,18 @@ void GetOptimizationSubsetInd(
       }
 }
 
-int GetSizeOptimizationSubset(const mfem::Vector & xmin, const mfem::Vector & xmax)
+int GetSizeOptimizationSubset(const Vector &xmin, const Vector &xmax)
 {
-      int n = xmin.Size();
+      const int n = xmin.Size();
+      const double eps = 1e-10;
+
+      Vector diff(xmin);
+      diff -= xmax;
+
       int counter = 0;
-      double eps = 1e-10;
-
-      mfem::Vector diff(n); diff = xmin; diff -=xmax;
-
-      for( int Ik = 0; Ik < n; Ik++)
+      for (int Ik = 0; Ik < n; Ik++)
       {
-         if( not std::abs(diff[Ik]) < eps)
-         {
-            counter ++;
-         }
+         if (std::abs(diff[Ik]) > eps) { counter++; }
       }
 
       return counter;
