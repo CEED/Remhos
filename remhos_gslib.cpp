@@ -897,10 +897,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       initial_design.GetBlock(1) = rho_interp;
       initial_design.GetBlock(2) = e_interp;
 
-      Vector y_out(ind_rho_e_v.Size());
+      int NumDesVar = ind_rho_e_v.Size();
+      if (!remap_v) { NumDesVar = initial_design.Size(); }
+
+      Vector y_out(NumDesVar);
       y_out = initial_design;
 
-      int NumDesVar = ind_rho_e_v.Size();
+
       mfem::Array<int> optProbInd;
       mfem::Vector ind_rho_e_sub;
       mfem::Vector y_out_sub;
@@ -908,6 +911,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       mfem::Vector maxsub;
 
       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
+
+      
+      std::cout<<NumDesVar<<" | "<<x_maxsub.Size()<<" | "<<x_minsub.Size()<<" | "<<initial_design.Size()<<std::endl;
 
       if (subprob)
       {
@@ -923,12 +929,16 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          x_minsub.SetSize(NumDesVar);
          x_maxsub = maxsub;
          x_minsub = minsub;
+               std::cout<<" in here: "<<std::endl;
+
       }   
       else
       {
          x_maxsub = x_max;
          x_minsub = x_min;
       }
+
+      std::cout<<NumDesVar<<" | "<<x_minsub.Size()<<" | "<<x_max.Size()<<std::endl;
 
       RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
                                        pos_final,
