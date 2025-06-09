@@ -897,6 +897,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       initial_design.GetBlock(1) = rho_interp;
       initial_design.GetBlock(2) = e_interp;
 
+      initial_design = x_min;
+
       int NumDesVar = ind_rho_e_v.Size();
       if (!remap_v) { NumDesVar = initial_design.Size(); }
 
