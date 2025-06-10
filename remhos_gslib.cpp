@@ -203,8 +203,9 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
                                 u_interpolated, NumDesVar,
                                 u_final_min_copy, u_final_max_copy,
                                 mass_0, numContraints, h1_seminorm, optProbInd, subprob);
-      optsolver->SetOptimizationProblem(ot_prob);
+      ot_prob.setWeightedSpaceType( weightedSpace);
 
+      optsolver->SetOptimizationProblem(ot_prob);
       optsolver->SetMaxIter(max_iter);
       optsolver->SetAbsTol(1e-7);
       optsolver->SetRelTol(1e-7);
@@ -914,9 +915,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 
       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
 
-      
-      std::cout<<NumDesVar<<" | "<<x_maxsub.Size()<<" | "<<x_minsub.Size()<<" | "<<initial_design.Size()<<std::endl;
-
       if (subprob)
       {
          NumDesVar = GetSizeOptimizationSubset(x_min,x_max);
@@ -931,16 +929,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          x_minsub.SetSize(NumDesVar);
          x_maxsub = maxsub;
          x_minsub = minsub;
-               std::cout<<" in here: "<<std::endl;
-
       }   
       else
       {
          x_maxsub = x_max;
          x_minsub = x_min;
       }
-
-      std::cout<<NumDesVar<<" | "<<x_minsub.Size()<<" | "<<x_max.Size()<<std::endl;
 
       RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
                                        pos_final,
@@ -949,6 +943,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                        x_minsub, x_maxsub,
                                        volume_0, mass_0, energy_0,
                                        3, false, optProbInd, true, subprob);
+      ot_prob.setWeightedSpaceType( weightedSpace);
+      
       optsolver->SetOptimizationProblem(ot_prob);
       optsolver->SetMaxIter(max_iter);
       optsolver->SetAbsTol(1e-7);

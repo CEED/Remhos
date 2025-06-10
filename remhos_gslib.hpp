@@ -152,6 +152,7 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
+   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace = hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 };
 
 } // namespace mfem

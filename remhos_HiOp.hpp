@@ -43,6 +43,9 @@ private:
 
    mutable ParBilinearForm * mass_form =nullptr;
 
+   mutable hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace_ = 
+         hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+
 public:
    RemhosHiOpProblem(ParFiniteElementSpace &space,
                      const ParGridFunction &u_initial,
@@ -72,6 +75,16 @@ public:
                        MPI_MIN, space.GetComm());
          H1SemiNormWeight = dx * dx;
       }
+   }
+
+   void setWeightedSpaceType( hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace)
+   {
+      weightedSpace_ = weightedSpace;
+   }
+
+   virtual hiop::hiopInterfaceBase::WeightedSpaceType getWeightedSpaceType() const override
+   {
+      return weightedSpace_; 
    }
 
    real_t CalcObjective(const Vector &x) const override
@@ -566,6 +579,9 @@ private:
 
    mutable ParBilinearForm * mass_form =nullptr;
 
+   mutable hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace_ = 
+         hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+
 class EnergyGradIntegrator : public mfem::LinearFormIntegrator {
 public:
   EnergyGradIntegrator(const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho);
@@ -619,6 +635,16 @@ public:
       //                  MPI_MIN, pos_final_.ParFESpace()->GetComm());
       //    H1SemiNormWeight = dx * dx;
       // }
+   }
+
+   void setWeightedSpaceType( hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace)
+   {
+      weightedSpace_ = weightedSpace;
+   }
+
+   virtual hiop::hiopInterfaceBase::WeightedSpaceType getWeightedSpaceType() const override
+   {
+      return weightedSpace_; 
    }
 
    double CalcObjective(const Vector &x) const override
@@ -964,6 +990,7 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
             else if( constNumber == 2)
             {
                double e_val = energy.GetValue(Tr, ip);
+ 
                ind_grad[offsetGP[e]+q] = w * rho[offsetGP[e]+q] * e_val;
                rho_grad[offsetGP[e]+q] = w * ind[offsetGP[e]+q] * e_val;
             }
@@ -1015,7 +1042,7 @@ void CalcConstraint(const int constNumber,
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&fespace_, x_interpolated.GetData() + 2*size_qf);
 
-      if( constNumber == 0)
+      if( constNumber == 0 )
       {
          double vol_s = Integrate(pos_final, &ind, nullptr, nullptr);
 

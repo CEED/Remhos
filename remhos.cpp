@@ -177,6 +177,7 @@ int main(int argc, char *argv[])
    int vis_steps = 100;
    const char *device_config = "cpu";
    bool optRelevantSubset = false;
+   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpaceType = hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 
    int precision = 8;
    cout.precision(precision);
@@ -270,6 +271,9 @@ int main(int argc, char *argv[])
                   "Enable remap of synchronized product fields.");
    args.AddOption(&vis_steps, "-vs", "--visualization-steps",
                   "Visualize every n-th timestep.");
+   args.AddOption((int*)(&weightedSpaceType), "-wst", "--mono-weightedspace",
+                  "weighted space type: 0 - Euclidean,\n\t"
+                  "                     1 - HilbertLumped,\n\t");
    args.Parse();
    if (!args.Good())
    {
@@ -947,6 +951,7 @@ int main(int argc, char *argv[])
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
       interpolator.subprob   = optRelevantSubset;      
+      interpolator.weightedSpace   = weightedSpaceType;
       ParGridFunction u_gf(&pfes);
 
       if (project_analytic)
@@ -1119,6 +1124,7 @@ int main(int argc, char *argv[])
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
       interpolator.subprob   = optRelevantSubset;      
+      interpolator.weightedSpace   = weightedSpaceType;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
