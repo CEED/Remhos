@@ -23,6 +23,15 @@
 namespace mfem
 {
 
+void ComputeLORMassMatRef(Geometry::Type gtype, bool UseDiagonalNbrs,
+                          DenseMatrix &RefMat);
+void GetDistOps(const FiniteElement *dummy, DenseMatrix &DistMat,
+                DenseMatrix &MassMatLOR);
+void ApplyDistOp(const DenseMatrix &DistMat, const Vector &elem_vec,
+                 Vector &elem_vec_dist);
+double GetAntiDiffFlux(const DenseMatrix &MassMatLOR,
+                       Vector &elem_vec_dist, int i, int j);
+
 int GetLocalFaceDofIndex(int dim, int loc_face_id, int face_orient,
                          int face_dof_id, int face_dof1D_cnt);
 
