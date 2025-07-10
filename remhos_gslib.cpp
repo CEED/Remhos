@@ -861,13 +861,23 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    //    MFEM_ABORT("e bounds");
    // }
    Vector v_min, v_max;
-   if (remap_v) { CalcVBounds(v_interp, v_min, v_max); }
+   int numBlocks = 4;
+   if (remap_v)
+   {
+       CalcVBounds(v_interp, v_min, v_max); 
+       numBlocks = 5;
+   }
 
-   Array<int> offset(4);
+   Array<int> offset(numBlocks);
    offset[0] = 0;
    offset[1] = offset[0] + size_qf;
    offset[2] = offset[1] + size_qf;
    offset[3] = offset[2] + size_gf_e;
+   if (remap_v)
+   {
+      offset[4] = offset[3] + size_gf_v;
+   }
+
    BlockVector x_min(offset);
    BlockVector x_max(offset);
 
@@ -877,6 +887,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    x_max.GetBlock(0) = ind_max;
    x_max.GetBlock(1) = rho_max;
    x_max.GetBlock(2) = e_max;
+
+   if (remap_v)
+   {
+      x_min.GetBlock(3) = v_min;
+      x_max.GetBlock(3) = v_max;
+   }
 
    if (opt_type == 0)
    {
@@ -897,15 +913,16 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       initial_design.GetBlock(0) = ind_interp;
       initial_design.GetBlock(1) = rho_interp;
       initial_design.GetBlock(2) = e_interp;
+      if (remap_v)
+      {
+         initial_design.GetBlock(3) = v_interp;
+      }
 
-      initial_design = x_min;
-
-      int NumDesVar = ind_rho_e_v.Size();
-      if (!remap_v) { NumDesVar = initial_design.Size(); }
-
+      int NumDesVar = initial_design.Size();
       Vector y_out(NumDesVar);
-      y_out = initial_design;
 
+      initial_design = x_min;      
+      y_out = initial_design;
 
       mfem::Array<int> optProbInd;
       mfem::Vector ind_rho_e_sub;
@@ -936,16 +953,34 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          x_minsub = x_min;
       }
 
-      RemhosIndRhoEHiOpProblem ot_prob(qspace_final, pfes_e_final,
+      OptimizationProblem * ot_prob = nullptr;
+
+      if (remap_v)
+      {
+         ot_prob = new RemhosHydroHiOpProblem(qspace_final, pfes_e_final, pfes_v_final,
+                                       pos_final,
+                                       initial_design,
+                                       NumDesVar,
+                                       x_minsub, x_maxsub,
+                                       volume_0, mass_0, moment_0, energy_0,
+                                       5, false, optProbInd, true, subprob);
+
+         dynamic_cast<RemhosHydroHiOpProblem*>(ot_prob)->setWeightedSpaceType( weightedSpace);
+      }
+      else
+      {
+         ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final, pfes_e_final,
                                        pos_final,
                                        initial_design,
                                        NumDesVar,
                                        x_minsub, x_maxsub,
                                        volume_0, mass_0, energy_0,
                                        3, false, optProbInd, true, subprob);
-      ot_prob.setWeightedSpaceType( weightedSpace);
+
+         dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType( weightedSpace);
+      }
       
-      optsolver->SetOptimizationProblem(ot_prob);
+      optsolver->SetOptimizationProblem(*ot_prob);
       optsolver->SetMaxIter(max_iter);
       optsolver->SetAbsTol(1e-7);
       optsolver->SetRelTol(1e-7);
@@ -961,6 +996,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       ind_rho_e_v = y_out;
 
       delete optsolver;
+      delete ot_prob;
    }
    else if (opt_type == 4)
    {
