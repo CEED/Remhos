@@ -740,6 +740,9 @@ public:
       real_t val = dQdeta(oneGridFunction);
 
       //std::cout<<"ind: "<< normindSq<<" | rho: "<< normrohSq<<"| energy: "<<val <<std::endl;
+            std::cout<<"ind: "<< normindSq<<std::endl;
+      std::cout<<"rho: "<< normrohSq<<std::endl;
+      std::cout<<"e: "<< val<<std::endl;
 
       return w_1*normindSq + w_2*normrohSq +w_3* val;
    }
@@ -1207,7 +1210,7 @@ public:
       // SetInequalityConstraint(d_lo, d_hi);
 
       SetSolutionBounds(xmin, xmax);
-      
+     
       spatialDim = scalarfespace_.GetMesh()->SpaceDimension ();
 
       offset_[0] = 0;
@@ -1255,6 +1258,20 @@ public:
       QuadratureFunction roh_diff(&qspace_);
       ParGridFunction    e_diff(&scalarfespace_);
       ParGridFunction    v_diff(&vectorfespace_);
+
+               ParaViewDataCollection pvdc1("IndRhoE_input", qspace_.GetMesh());
+         pvdc1.SetDataFormat(VTKFormat::BINARY32);
+         pvdc1.SetCycle(0);
+         pvdc1.SetTime(1.0);
+         // pvdc.RegisterQField("ind", &ind);
+         // pvdc.RegisterQField("rho", &rho);
+         pvdc1.RegisterField("energy", &e_0);
+         pvdc1.RegisterField("velocity", &velocity);
+                  pvdc1.RegisterField("velocity_0", &v_0);
+
+         pvdc1.Save();
+
+         // mfem_error("error_here");
 
       subtract( ind     , ind_0, ind_diff);
       subtract( rho     , rho_0, roh_diff);
@@ -1337,19 +1354,23 @@ public:
       //-------------------------------------------------------------------
       // Velocity L2 norm (0.5*(u_1-u_0)^2)
 
-      ParLinearForm dQdV(&vectorfespace_);
+      ParLinearForm dQdV(&scalarfespace_);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
 
       InnerProductCoefficient v_diff_coeffsquared(v_diff_coeff, v_diff_coeff);
       ProductCoefficient half_v_diff_coeffsquared(0.5, v_diff_coeffsquared);
 
-      auto *lfi_2 = new DomainLFIntegrator(half_v_diff_coeffsquared);
+      auto *lfi_2 = new DomainLFIntegrator(half_v_diff_coeffsquared);      
       dQdV.AddDomainIntegrator(lfi_2);
       dQdV.Assemble();
 
-      normVSq = dQdV(oneGridFunctionVec);
+      normVSq = dQdV(oneGridFunction);
 
       //-------------------------------------------------------------------
+      std::cout<<"ind: "<< normindSq<<std::endl;
+      std::cout<<"rho: "<< normrohSq<<std::endl;
+      std::cout<<"e: "<< normESq<<std::endl;
+      std::cout<<"v: "<< normVSq<<std::endl;
 
       return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq;
    }
@@ -1389,6 +1410,7 @@ public:
       subtract( velocity, v_0  , v_diff);
 
       BlockVector ind_rho_e_v_grad(offset_, Device::GetMemoryType());
+      ind_rho_e_v_grad = 0.0;
 
       //------------------------------------------------------------------------
 
@@ -1435,7 +1457,7 @@ public:
       ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
       ParGridFunction    e_grad(&scalarfespace_);
-      ParGridFunction    v_grad(&vectorfespace_);
+      ParGridFunction    v_grad(&vectorfespace_); v_grad = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
 
@@ -1627,8 +1649,8 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
             {
                double velSq = vel_GP * vel_GP;
  
-               ind_grad[offsetGP[e]+q] = w * (rho_GP * e_GP + 0.5* rho_GP *velSq);
-               rho_grad[offsetGP[e]+q] = w * (ind_GP * e_GP + 0.5* ind_GP *velSq);
+               ind_grad[offsetGP[e]+q] = w * rho_GP * ( e_GP + 0.5 * velSq );
+               rho_grad[offsetGP[e]+q] = w * ind_GP * ( e_GP + 0.5 * velSq );
 
             }
             else{mfem_error("Constraint index does not exist.");}
@@ -1714,12 +1736,16 @@ void CalcConstraint(const int constNumber,
          double vol_s = Integrate(pos_final, &ind, nullptr, nullptr, nullptr);
 
          constVal[0] = vol_s - targetVol;
+
+         std::cout<<"Const 1: "<< constVal[0]<<std::endl;
       }
       else if( constNumber == 1)
       {
          double mass_s = Integrate(pos_final, &ind, &rho, nullptr, nullptr);
 
          constVal[1] = mass_s - targetMass;
+
+         std::cout<<"Const 2: "<< constVal[1]<<std::endl;
       }
       else if( ( spatialDim == 2 && ( constNumber == 2 || constNumber == 3 )) ||
                ( spatialDim == 3 && ( constNumber == 2 || constNumber == 3 || constNumber == 4 )))
@@ -1734,6 +1760,8 @@ void CalcConstraint(const int constNumber,
                               &ind, &rho, nullptr, &vel, d);
 
          constVal[2+d] = momentum_s - targetMomentum[d];
+
+                  std::cout<<"Const "<< 3+d<<": " << constVal[2+d]<<std::endl;
       }
       else if( ( spatialDim == 2 && constNumber == 4) ||
                ( spatialDim == 3 && constNumber == 5))
@@ -1742,6 +1770,7 @@ void CalcConstraint(const int constNumber,
                                      &ind, &rho, &energy, &vel);
 
          constVal[2+spatialDim] = tot_energy - targetEnergy;
+                           std::cout<<"Const "<< 3+spatialDim<<": " << constVal[2+spatialDim]<<std::endl;
       }
 
       else{mfem_error("Constraint index does not exist.");}

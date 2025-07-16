@@ -116,6 +116,9 @@ private:
    void CheckBounds(int myid, const Vector &v,
                     const Vector &v_min, const Vector &v_max);
 
+   void GetTargetValues(const Vector &interp,
+                    const Vector &min, const Vector &max, Vector &target);
+
 public:
    InterpolationRemap(ParMesh &m)
        : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),

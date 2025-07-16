@@ -909,10 +909,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 #endif
       }
 
+      Vector rho_target, e_target;
+      GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
+      GetTargetValues( e_interp, e_min, e_max, e_target );
+
       BlockVector initial_design(offset);
       initial_design.GetBlock(0) = ind_interp;
-      initial_design.GetBlock(1) = rho_interp;
-      initial_design.GetBlock(2) = e_interp;
+      initial_design.GetBlock(1) = rho_target;
+      initial_design.GetBlock(2) = e_target;
       if (remap_v)
       {
          initial_design.GetBlock(3) = v_interp;
@@ -921,7 +925,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       int NumDesVar = initial_design.Size();
       Vector y_out(NumDesVar);
 
-      initial_design = x_min;      
       y_out = initial_design;
 
       mfem::Array<int> optProbInd;
@@ -936,7 +939,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       {
          NumDesVar = GetSizeOptimizationSubset(x_min,x_max);
          GetOptimizationSubsetInd(x_min,x_max,optProbInd);
-         ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
+         //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
+         initial_design.GetSubVector(optProbInd,ind_rho_e_sub);
          y_out.GetSubVector(optProbInd,y_out_sub);
 
          x_min.GetSubVector(optProbInd,minsub);
@@ -957,7 +961,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 
       if (remap_v)
       {
-         ot_prob = new RemhosHydroHiOpProblem(qspace_final, pfes_e_final, pfes_v_final,
+         ot_prob = new RemhosHydroHiOpProblem(qspace_final, 
+                                       pfes_e_final,
+                                       pfes_v_final,
                                        pos_final,
                                        initial_design,
                                        NumDesVar,
@@ -969,7 +975,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       else
       {
-         ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final, pfes_e_final,
+         ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final, 
+                                       pfes_e_final,
                                        pos_final,
                                        initial_design,
                                        NumDesVar,
@@ -991,7 +998,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          optsolver->Mult(ind_rho_e_sub, y_out_sub);
          y_out.SetSubVector(optProbInd,y_out_sub);
       }
-      else { optsolver->Mult(ind_rho_e_v_interp, y_out); }
+      else { optsolver->Mult(initial_design, y_out); }
 
       ind_rho_e_v = y_out;
 
@@ -1037,10 +1044,19 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    QuadratureFunction ind(&qspace_final, ind_rho_e_v.GetData()),
                       rho(&qspace_final, ind_rho_e_v.GetData() + size_qf);
    ParGridFunction e(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf);
+   ParGridFunction v(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
 
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr, nullptr);
    const double mass_f_opt   = Integrate(pos_final, &ind, &rho,    nullptr, nullptr);
    const double energy_f_opt = Integrate(pos_final, &ind, &rho,    &e, nullptr);
+
+   Vector moment_f_opt(dim);
+   for (int d = 0; d < dim; d++)
+   {
+      moment_f_opt(d) = Integrate(pos_final, &ind, &rho, nullptr, &v, d);
+   }
+   const double tot_energy_f_opt = Integrate(pos_final, &ind, &rho, &e, &v);
+
    if (Mpi::Root())
    {
       std::cout << "-------\n"
@@ -1057,14 +1073,37 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                 << (mass_f_opt - mass_0) << endl
                 << "Mass optimized diff %:   "
                 << (mass_f_opt - mass_0) / mass_0 * 100
-                << endl << "*\n"
-                << "Energy initial:          " << energy_0 << std::endl
+                << endl << "*\n";
+
+      if (remap_v) {
+            for (int d = 0; d < dim; d++)
+            {
+      std::cout << "Moment in dim "<<d+1 <<" initial:            " << moment_0[d] << std::endl
+                << "Moment in dim "<<d+1 <<" optimized:          " << moment_f_opt(d) << std::endl
+                << "Moment in dim "<<d+1 <<" optimized diff:     "
+                << (moment_f_opt(d) - moment_0[d]) << endl
+                << "Moment in dim "<<d+1 <<" optimized diff %:   "
+                << (moment_f_opt(d) - moment_0[d]) / moment_0[d] * 100
+                << endl << "*\n";
+            }
+
+      std::cout<< "Total energy initial:          " << tot_en_0 << std::endl
+                << "Total energy optimized:        " << tot_energy_f_opt << std::endl
+                << "Total energy optimized diff:   "
+                << (tot_energy_f_opt- tot_en_0) << endl
+                << "Total energy optimized diff %: "
+                << (tot_energy_f_opt- tot_en_0) / tot_en_0 * 100
+                << endl;
+      }
+      else{
+      std::cout << "Energy initial:          " << energy_0 << std::endl
                 << "Energy optimized:        " << energy_f_opt << std::endl
                 << "Energy optimized diff:   "
                 << (energy_f_opt- energy_0) << endl
                 << "Energy optimized diff %: "
                 << (energy_f_opt- energy_0) / energy_0 * 100
                 << endl;
+      }
    }
 
    // Check for bounds violations.
@@ -1531,6 +1570,23 @@ void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
    // Make it more strict, per component, if this looks bad.
    v_min = min;
    v_max = max;
+}
+
+void InterpolationRemap::GetTargetValues(const Vector &interp,
+                                       const Vector &min, const Vector &max, Vector &target)
+{ 
+   int size = interp.Size();
+   
+   target.SetSize(size);
+
+   for(int ik = 0; ik< size; ik++)
+   {
+      if( std::abs(min[ik] - max[ik]) < 1e-12)
+      {
+         target[ik] = min[ik];
+      }
+      else{ target[ik] = interp[ik]; }
+   }
 }
 
 void InterpolationRemap::CheckBounds(int myid, const Vector &v,
