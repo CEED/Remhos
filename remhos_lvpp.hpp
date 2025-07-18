@@ -7,6 +7,7 @@
 #include "general/forall.hpp"
 #include "mfem.hpp"
 #include "mpi.h"
+#include "./remap.hpp"
 
 namespace mfem
 {
@@ -18,18 +19,8 @@ inline real_t sigmoid(const real_t x)
 
 inline real_t sigmoid(const real_t x, const real_t l, const real_t u)
 {
-   return l + (u - l) * sigmoid(x);
-}
-
-inline real_t inv_sigmoid(const real_t x)
-{
-   real_t y = std::max(std::min(x, 1.0 - 1e-09), 1e-09);
-   return std::log(y / (1.0 - y));
-}
-
-inline real_t inv_sigmoid(const real_t x, const real_t l, const real_t u)
-{
-   return (u - l) > 1e-09 ? inv_sigmoid((x - l) / (u - l)) : 0.0;
+   real_t scale = (u - l);
+   return l + scale*sigmoid(x);
 }
 
 inline real_t der_sigmoid(const real_t x)
@@ -40,7 +31,8 @@ inline real_t der_sigmoid(const real_t x)
 
 inline real_t der_sigmoid(const real_t x, const real_t l, const real_t u)
 {
-   return (u-l)*der_sigmoid(x);
+   real_t scale = (u - l);
+   return scale*der_sigmoid(x);
 }
 
 class MappedGridFunctionCoefficient : public GridFunctionCoefficient
@@ -59,1248 +51,550 @@ public:
    }
 };
 
-class SigmoidCoefficient : public GridFunctionCoefficient
-{
-protected:
-   GridFunction &lower, &upper;
-public:
-   SigmoidCoefficient(GridFunction &latent_gf, GridFunction &lower,
-                      GridFunction &upper)
-      : GridFunctionCoefficient(&latent_gf), lower(lower), upper(upper) {}
-   real_t Eval(ElementTransformation &T, const IntegrationPoint &ip)
-   {
-      const real_t l = lower.GetValue(T, ip);
-      const real_t u = upper.GetValue(T, ip);
-      const real_t x = GridFunctionCoefficient::Eval(T, ip);
-      return sigmoid(x, l, u);
-   }
-};
-
-class LogitCoefficient : public GridFunctionCoefficient
-{
-protected:
-   GridFunction &lower, &upper;
-public:
-   LogitCoefficient(GridFunction &primal_gf, GridFunction &lower,
-                    GridFunction &upper)
-      : GridFunctionCoefficient(&primal_gf), lower(lower), upper(upper) {}
-   real_t Eval(ElementTransformation &T, const IntegrationPoint &ip)
-   {
-      const real_t l = lower.GetValue(T, ip);
-      const real_t u = upper.GetValue(T, ip);
-      const real_t x = GridFunctionCoefficient::Eval(T, ip);
-      return inv_sigmoid(x, l, u);
-   }
-};
-
-class DerSigmoidCoefficient : public GridFunctionCoefficient
-{
-protected:
-   GridFunction &lower, &upper;
-public:
-   DerSigmoidCoefficient(GridFunction &latent_gf, GridFunction &lower,
-                         GridFunction &upper)
-      : GridFunctionCoefficient(&latent_gf), lower(lower), upper(upper) {}
-   real_t Eval(ElementTransformation &T, const IntegrationPoint &ip)
-   {
-      const real_t l = lower.GetValue(T, ip);
-      const real_t u = upper.GetValue(T, ip);
-      const real_t x = GridFunctionCoefficient::Eval(T, ip);
-      return der_sigmoid(x, l, u);
-   }
-};
-
-/// @brief Hessian of Differentiable Objective
-/// @details At: x -> H_x(F)
-///          Mult: x -> y = H_x(F)*y
-///          InvMult: x -> y = H_x(F)^{-1}*y
-class ObjectiveHessian : public Operator
+class RemapObjective : public Functional
 {
 public:
-   using Operator::Operator;
-   virtual void At(const Vector &x) = 0;
-   virtual void InvMult(const Vector &x, Vector &y) const
+   // Initialize the LVPPRemap Functional.
+   // space_idx[i] = -1 : quadrature function, >= 0 : finite element space index
+   // x_initial : initial values before remapping
+   RemapObjective(MPI_Comm comm, QuadratureSpace &qs,
+                  std::vector<ParFiniteElementSpace*> &fes,
+                  const Array<int> &space_idx,
+                  const BlockVector &x_initial)
+      : Functional(comm, x_initial.Size())
+      , qs(qs), fes(fes), qf(qs), gfs(fes.size())
+      , zero_cf(0.0)
+      , numVars(space_idx.Size()), space_idx(space_idx)
+      , x_initial(x_initial)
    {
-      MFEM_ABORT("Not Implemented");
-   }
-};
+      MFEM_VERIFY(space_idx.Max() < (int)fes.size() && space_idx.Min() >= -1,
+                  "Size mismatch between fes and space_idx")
 
-/// @brief F(u)
-/// @details Eval: x -> F(u)
-///          Mult: x -> y = grad F(x)
-///          GetGradient: x -> y = H_x(F)
-class DifferentiableObjective : public Operator
-{
-protected:
-   std::unique_ptr<ObjectiveHessian> hessian;
-   MPI_Comm comm;
-public:
-   using Operator::Operator;
-   virtual real_t Eval(const Vector &x) = 0;
-   Operator & GetGradient(const Vector &x) const override
-   {
-      MFEM_ASSERT(hessian, "Hessian is not set");
-      hessian->At(x);
-      return *hessian;
-   }
-   MPI_Comm GetComm() { return comm; }
-};
-
-class L2Obj : public DifferentiableObjective
-{
-private:
-protected:
-   Coefficient &targ_cf;
-   Vector proj_targ;
-   Vector diff_targ;
-   std::unique_ptr<ParGridFunction> targ_gf;
-   std::unique_ptr<ParBilinearForm> mass_form;
-   std::unique_ptr<QuadratureFunction> targ_qf;
-   MPI_Comm comm;
-public:
-
-private:
-protected:
-public:
-   L2Obj(ParFiniteElementSpace &fes, Coefficient &targ_cf): targ_cf(targ_cf)
-   {
-      proj_targ.SetSize(fes.GetVSize());
-      targ_gf.reset(new ParGridFunction(&fes, proj_targ.GetData()));
-      targ_gf->ProjectCoefficient(targ_cf);
-      mass_form.reset(new ParBilinearForm(&fes));
-      comm = fes.GetComm();
-      mass_form->AddDomainIntegrator(new MassIntegrator());
-      mass_form->Assemble();
-   }
-
-   L2Obj(QuadratureSpaceBase &qspace, Coefficient &targ_cf): targ_cf(targ_cf)
-   {
-      proj_targ.SetSize(qspace.GetSize());
-      targ_qf.reset(new QuadratureFunction(&qspace, proj_targ.GetData()));
-      targ_cf.Project(*targ_qf);
-      comm = dynamic_cast<ParMesh*>(qspace.GetMesh())->GetComm();
-   }
-
-   real_t Eval(const Vector &x) override
-   {
-      real_t obj = 0.0;
-      if (targ_gf)
+      // GridFunction initialization
+      for (int i=0; i<fes.size(); i++)
       {
-         ParGridFunction x_gf(targ_gf->ParFESpace(), x.GetData());
-         obj = x_gf.ComputeL2Error(targ_cf);
-         obj = obj * obj * 0.5;
+         gfs[i] = std::make_unique<ParGridFunction>(fes[i]);
       }
-      else
+
+      // Compute Block offsets for each variable
+      true_offsets.SetSize(0); true_offsets.Append(0);
+      for (int i=0; i<numVars; i++)
       {
-         const Vector &weights = targ_qf->GetSpace()->GetWeights();
-         for (int i=0; i<proj_targ.Size(); i++)
-         {
-            const real_t val = proj_targ[i] - x[i];
-            obj += weights[i] * val*val;
-         }
-         obj *= 0.5;
-         MPI_Allreduce(MPI_IN_PLACE, &obj, 1, MFEM_MPI_REAL_T,
-                       MPI_SUM, comm);
+         if (space_idx[i] < 0) { true_offsets.Append(qs.GetSize()); }
+         else { true_offsets.Append(fes[space_idx[i]]->GetTrueVSize()); }
       }
-      return obj;
+      true_offsets.PartialSum();
    }
+
+   // Compute L2-objective, 0.5 * \sum_var ||x_var - x_initial_var||^2_{L2}
    void Mult(const Vector &x, Vector &y) const override
    {
-      subtract(x, proj_targ, y);
+      BlockVector x_block(const_cast<Vector&>(x), true_offsets);
+      real_t result = 0.0;
+      for (int i=0; i<numVars; i++)
+      {
+         const int sid = space_idx[i];
+         if (sid < 0)
+         {
+            qf = x_block.GetBlock(i);
+            qf -= x_initial.GetBlock(i);
+            qf *= qf;
+            result += qf.Integrate(); // this will take care of parallel reduction
+         }
+         else
+         {
+            add(x_block.GetBlock(i), -1.0, x_initial.GetBlock(i),
+                gfs[sid]->GetTrueVector());
+            gfs[sid]->SetFromTrueVector();
+            real_t err = gfs[sid]->ComputeL2Error(zero_cf);
+            result += err * err;
+         }
+      }
+      y.SetSize(1);
+      y[0] = 0.5 * result;
    }
+
+   // Compute true gradient in L2 sense
+   // Note that derivative is M*(x-x_initial), but we are using the true gradient.
+   void EvalGradient(const Vector &x, Vector &grad) const override
+   {
+      add(x, -1.0, x_initial, grad);
+   }
+
+   /// Hessian is identity. So, HessianMult simply returns the directio d.
+   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
+   {
+      hess = d;
+   }
+
+   QuadratureSpace &GetQuadratureSpace() const { return qs; }
+   std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const { return fes; }
+   Array<int> GetSpaceIdx() const { return space_idx; }
+
+
+protected:
+   QuadratureSpace &qs;
+   std::vector<ParFiniteElementSpace*> fes;
+   mutable QuadratureFunction qf;
+   mutable std::vector<std::unique_ptr<ParGridFunction>> gfs;
+   mutable ConstantCoefficient zero_cf;
+   const int numVars;
+   Array<int> space_idx;
+   Array<int> true_offsets;
+   const BlockVector &x_initial;
+private:
 };
 
-class LatentVolumeProjector
+class RemapProblem : public ConstrainedOptimizationProblem
 {
-private:
-protected:
-   const int vdim;
-   const Vector &targetVolume;
-   ParFiniteElementSpace *fespace=nullptr;
-   QuadratureSpace *qspace=nullptr;
-   MPI_Comm comm;
-   int verbose;
 public:
-   enum PrimalType
+   RemapProblem(RemapObjective &objective,
+                const BlockVector &x_min,
+                const BlockVector &x_max,
+                StackedSharedFunctional &C)
+      : ConstrainedOptimizationProblem(objective, &C)
+      , x_min(x_min), x_max(x_max)
+   {}
+   void Mult(const Vector &x, Vector &y) const override
    {
-      GF, QF
+      objective.Mult(x, y);
+      /// Do something with the constraints
+   }
+   void EvalGradient(const Vector &x, Vector &grad) const override
+   {
+      objective.EvalGradient(x, grad);
+      /// Do something with the constraints
+   }
+   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
+   {
+      objective.HessianMult(x, d, hess);
+      /// Do something with the constraints
+   }
+   const Vector &GetLowerBounds() const { return x_min; }
+   const Vector &GetUpperBounds() const { return x_max; }
+   QuadratureSpace &GetQuadratureSpace() const { return static_cast<RemapObjective&>(objective).GetQuadratureSpace(); }
+   std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const
+   {
+      return static_cast<RemapObjective&>(objective).GetFiniteElementSpaces();
+   }
+   Array<int> GetSpaceIdx() const { return static_cast<RemapObjective&>(objective).GetSpaceIdx(); }
+   // Compute KKT residual with grad = grad objective + <lambda, grad C>
+   real_t ComputeKKT(const BlockVector &x,
+                     const BlockVector &grad) const
+   {
+      real_t kkt = kkt_res(x, x_min, x_max, grad);
+      MPI_Allreduce(MPI_IN_PLACE, &kkt, 1, MPITypeMap<real_t>::mpi_type, MPI_SUM,
+                    GetComm());
+      HYPRE_BigInt n = x.Size();
+      MPI_Allreduce(MPI_IN_PLACE, &n, 1, MPITypeMap<HYPRE_BigInt>::mpi_type, MPI_SUM,
+                    GetComm());
+      return kkt / n;
+   }
+
+protected:
+   const BlockVector &x_min; // lower bounds
+   const BlockVector &x_max; // upper bounds
+};
+
+// Solve [alpha I_nn, I_nb; I_bn, -w I_bb]. As long as alpha > 0 and w >= 0, the system is well-posed.
+// Here, I is a rectangular identity matrix corresponding to the bounds.
+// That is, I_{bn}[i,j] = 1 when there is a bound for the i-th primal variable
+class PointwiseSolver : public Operator
+{
+   Array<int> x_offsets, b_offsets;
+   real_t alpha;
+   const BlockVector *w;
+   Array<bool> has_bounds;
+public:
+
+   PointwiseSolver(const Array<int> x_offsets, const Array<int> b_offsets)
+      : Operator(x_offsets.Last() + b_offsets.Last())
+      , x_offsets(x_offsets), b_offsets(b_offsets)
+      , alpha(1.0), has_bounds(b_offsets.Size()-1)
+   {
+      MFEM_VERIFY(x_offsets.Size() == b_offsets.Size(),
+                  "PointwiseSolver: Size mismatch between x_offsets and b_offsets");
+      for (int i=0; i<b_offsets.Size()-1; i++)
+      {
+         has_bounds[i] = b_offsets[i+1] - b_offsets[i] > 0;
+         if (has_bounds[i])
+         {
+            MFEM_VERIFY(b_offsets[i+1] - b_offsets[i] == x_offsets[i+1] - x_offsets[i],
+                        "PointwiseSolver: Size mismatch between bounds and primal variables");
+         }
+      }
+   }
+   void Mult(const Vector &b, Vector &x) const override
+   {
+      const int numPrimalDof = x_offsets.Last();
+      const int numLatentDof = b_offsets.Last();
+      MFEM_VERIFY(numPrimalDof + numLatentDof == Width(),
+                  "PointwiseSolver: Size mismatch between x and offsets");
+      MFEM_VERIFY(b.Size() == numPrimalDof + b_offsets.Last(),
+                  "PointwiseSolver: Size mismatch between b and offsets");
+      BlockVector primal_b(const_cast<Vector&>(b), x_offsets);
+      BlockVector latent_b(const_cast<Vector&>(b), numPrimalDof, b_offsets);
+
+      x.SetSize(Width());
+      BlockVector primal_x(x, x_offsets);
+      BlockVector latent_x(x, numPrimalDof, b_offsets);
+
+      const int numBlocks = primal_x.NumBlocks();
+
+      // pointwise solve
+      DenseMatrix A_point(2);
+      A_point(0,0) = alpha; A_point(0,1) = 1.0; A_point(1,0) = 1.0;
+      DenseMatrixInverse Ainv(A_point);
+      Vector x_point(2), b_point(2);
+
+      // for each block
+      for (int i_block=0; i_block<numBlocks; i_block++)
+      {
+         if (!has_bounds[i_block]) // no bound
+         {
+            // alpha I = b
+            primal_x.GetBlock(i_block) = primal_b.GetBlock(i_block);
+            primal_x.GetBlock(i_block) /= alpha;
+            continue;
+         }
+
+         // have bounds
+         // alpha xp +   xl = bp
+         //       xp - w xl = bl
+         const Vector &bp = primal_b.GetBlock(i_block);
+         const Vector &bl = latent_b.GetBlock(i_block);
+
+         Vector &xp = primal_x.GetBlock(i_block);
+         Vector &xl = latent_x.GetBlock(i_block);
+
+         const Vector &wb = w->GetBlock(i_block);
+         for (int i=0; i<bp.Size(); i++)
+         {
+            A_point(1,1) = -wb[i];
+            b_point[0] = bp[i];
+            b_point[1] = bl[i];
+            Ainv.Factor();
+            Ainv.Mult(b_point, x_point);
+            xp[i] = x_point[0];
+            xl[i] = x_point[1];
+         }
+      }
+   }
+   void Update(const real_t alpha, const BlockVector &w)
+   {
+      this->alpha = alpha;
+      this->w = &w;
    };
-   PrimalType ptype;
+};
 
-private:
+class LVPPSolver : public IterativeSolver
+{
+public:
+   // Constructor for the LVPP solver
+   // problem: Remap problem
+   // offsets: block offsets for the primal variables
+   // b_offsets: block offsets for the bounds
+   LVPPSolver(RemapProblem &problem, const Array<int> &offsets,
+              const Array<int> &b_offsets)
+      : IterativeSolver(problem.GetComm())
+      , problem(problem), offsets(offsets), b_offsets(b_offsets)
+      , pointwise_solver(offsets, b_offsets)
+   {
+      // input and output are primal variables
+      width = height = offsets.Last();
+
+      total_offsets = offsets;
+      for (int i=0; i<b_offsets.Size()-1; i++)
+      {
+         total_offsets.Append(b_offsets[i+1] + width);
+      }
+   }
+
+   LVPPSolver(RemapProblem &problem, const Array<int> &offsets)
+      : LVPPSolver(problem, offsets, offsets)
+   {}
+
+   void LinearConstraints(bool is_linear)
+   {
+      this->is_linear_constraints = is_linear;
+   }
+
+   // Solves the LVPP problem
+   /*
+       It uses the Augmented Lagrangian method.
+       For each AL iteration, it solves the subproblem
+        min_x { L(x, lambda, mu) = F(x) + 0.5 mu * C(x)^T C(x) + <lambda, C(x)> }
+       where F is the objective functional,
+       C is the equality constraint operator,
+       lambda is the Lagrange multiplier vector (initialized to zero),
+       mu is the penalty parameter (initialized to 1.0).
+       After each AL iteration, lambda <- lambda + mu * C(x)
+
+       The subproblem is solved using LVPP method.
+
+       min_x L(x, lambda, mu) + 1/alpha * D(x, x_k)
+       where D is the Bregman distance operator,
+       x_k is the previous iteration.
+       Instead of D(x, x_k), we uses its dual form
+       D(x, x_k) = D^*(psi, psi_k)
+       where psi = sigmoid(x) with proper scaling.
+   */
+   void Mult(const Vector &x, Vector &y) const override
+   {
+      // Cast x to block vector.
+      const BlockVector x_block(const_cast<Vector&>(x), offsets);
+
+      // Get info from the problem
+      Functional &obj = problem.GetObjective();
+      StackedSharedFunctional &C = static_cast<StackedSharedFunctional&>
+                                   (*problem.GetEqualityConstraints());
+      // Create the Augmented Lagrangian functional
+      // J(x) + 0.5 mu * C(x)^T C(x) + <lambda, C(x)>
+
+      Array<int> space_idx = problem.GetSpaceIdx();
+
+      const BlockVector x_max(const_cast<Vector&>(problem.GetUpperBounds()),
+                              b_offsets);
+      const BlockVector x_min(const_cast<Vector&>(problem.GetLowerBounds()),
+                              b_offsets);
+      Array<bool> has_bounds(0);
+      for (int i=0; i<x_max.NumBlocks(); i++) { has_bounds.Append(x_max.GetBlock(i).Size() > 0); }
+
+      const int numPrimalDof = x.Size(); // primal ndof
+      const int numLatentDof = x_max.Size();
+      const int numTotalDof = numPrimalDof + numLatentDof; // total ndof
+      const int numConst = C.Height(); // num of constraints
+      const int numVars = offsets.Size()-1;
+
+      MFEM_VERIFY(numVars == x_min.NumBlocks()
+                  && x.Size() == offsets.Last()
+                  && x_max.Size() == b_offsets.Last(),
+                  "Size mismatch between x, x_min, x_max and offsets, b_offsets");
+      MFEM_VERIFY(total_offsets.Size() == numVars*2 + 1,
+                  "Size mismatch between total_offsets and numVars");
+
+      // Create an auxiliary vector for the inner solve
+      BlockVector x_all(total_offsets);
+      BlockVector x_primal(x_all, offsets);
+      BlockVector x_latent(x_all, numPrimalDof, b_offsets);
+
+      BlockVector dx_all(total_offsets);
+      BlockVector dx_primal(dx_all, offsets);
+      BlockVector dx_latent(dx_all, numPrimalDof, b_offsets);
+
+      BlockVector G(total_offsets);
+      BlockVector G_primal(G, offsets);
+      BlockVector G_latent(G, numPrimalDof, b_offsets);
+
+      // Latent auxiliary vector
+      BlockVector x_latent_k(b_offsets);
+      BlockVector Upsi(b_offsets); // Upsi = sigmoid(x)
+      BlockVector dUpsi(b_offsets); // dUpsi = der_sigmoid(x)
+
+      real_t alpha = 1e-03; // step size for the proximal solver
+
+      x_primal = x_block;
+      x_latent = 0.0;
+
+      // Values
+      Vector obj_value(1);
+      Vector C_x(numConst); // C(x)
+      C.Mult(x_primal, C_x);
+      // gradient. Will be used GN iteration
+      BlockVector gradF(offsets);
+      DenseMatrix gradC(numTotalDof, numConst);
+      gradC = 0.0;
+      DenseMatrix gradC_primal(numPrimalDof, numConst);
+      Vector lambda(numConst);
+      lambda = C_x;
+      real_t mu = 1.0;
+      Vector new_lambda(numConst);
+
+      real_t kkt_target = abs_tol;
+
+      // AL loop for Remap Problem
+      for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
+      {
+         real_t kkt_AL_target = prox_abs_tol;
+         // PG loop for AL Subproblem
+         for (int it_PG=0; it_PG<prox_max_iter; it_PG++)
+         {
+            x_latent_k = x_latent;
+            // alpha = 1.0;
+            alpha = std::pow(it_PG + 1, 2);
+            real_t res_PG_target = nonlin_abs_tol;
+            // Nonlinear loop for PG subproblem.
+            for (int it_GN=0; it_GN<nonlin_max_iter; it_GN++)
+            {
+               // Objective
+               // obj.Mult(x_primal, obj_value);
+               obj.GetGradient().Mult(x_primal, gradF);
+
+               // Constraints
+               C.Mult(x_primal, C_x);
+               C.GetGradientMatrix(x_primal, gradC_primal);
+
+               // (grad C(x))*(lambda + mu * C(x))
+               add(lambda, mu, C_x, new_lambda);
+               gradC_primal.Mult(new_lambda, G_primal);
+               // grad F(x) + (grad C(x))*(lambda + mu * C(x))
+               G_primal += gradF;
+               // alpha F(x) + (grad C(x))*(lambda + mu * C(x))
+               G_primal *= alpha;
+
+               // [alpha F(x) + (grad C(x))*(lambda + mu*C(x)) + (psi - psi_k)]
+               // [u - U(psi)]
+               MapLatent(x_latent, x_min, x_max, Upsi, dUpsi);
+               for (int i=0; i<numVars; i++)
+               {
+                  if (!has_bounds[i]) { continue; }
+                  G_primal.GetBlock(i) += x_latent.GetBlock(i);
+                  G_primal.GetBlock(i) -= x_latent_k.GetBlock(i);
+                  add(x_primal.GetBlock(i), -1.0, Upsi.GetBlock(i), G_latent.GetBlock(i));
+               }
+               // Hessian solver. Hessian is I + hess (mu||C(x)||^2 + lambda^T C(x))
+               // However, we approximate Hessian of the second term by mu*(grad C)(grad C)^T
+               // This leads to a modified Gauss-Newton method, and can be solved
+               // using Woodbury formula
+               pointwise_solver.Update(alpha, dUpsi);
+               if (is_linear_constraints)
+               {
+                  // Linear constraints, so we can use the pointwise solver directly
+                  pointwise_solver.Mult(G, dx_all);
+               }
+               else
+               {
+                  // pointwise_solver.Mult(G, dx_all);
+                  gradC.SetSubMatrix(0, 0, gradC_primal);
+                  Woodbury(GetComm(), pointwise_solver, mu*alpha, gradC, gradC,
+                           G, dx_all);
+               }
+               x_all -= dx_all;
+               real_t succdiff_norm = std::sqrt(Dot(dx_primal, dx_primal));
+               real_t violate_norm = std::sqrt(Dot(G_latent, G_latent));
+
+               if (it_GN == 0) { res_PG_target = std::max(res_PG_target, succdiff_norm*nonlin_rel_tol); }
+               if (print_level >= 3)
+               {
+                  out << "    GN Iteration " << it_GN + 1 << ", ||dx||_l2 = " << succdiff_norm <<
+                         ", Latent primal inconsistency: " << violate_norm << std::endl;
+               }
+               if (succdiff_norm < res_PG_target)
+               {
+                  if (print_level >= 2)
+                  {
+                     out << "    PG Converged in " << it_GN + 1
+                         << " iterations, residual norm = " << succdiff_norm << std::endl;
+                  }
+                  break; // PG subproblem converged
+               }
+            } // end of PG subproblem loop
+            obj.Mult(x_primal, obj_value);
+            obj.GetGradient().Mult(x_primal, gradF);
+
+            C.Mult(x_primal, C_x);
+            C.GetGradientMatrix(x_primal, gradC_primal);
+
+            add(lambda, mu, C_x, new_lambda);
+            gradC_primal.Mult(lambda, G_primal);
+            G_primal += gradF;
+
+            real_t kkt_AL = problem.ComputeKKT(x_primal, G_primal);
+            // If first iteration, setup the relative tolerance
+            if (it_PG == 0) { kkt_AL_target = std::max(kkt_AL_target, kkt_AL*prox_rel_tol); }
+            if (print_level >= 2)
+            {
+               out << "  PG Iteration " << it_PG + 1 << ", KKT residual = " << kkt_AL <<
+                   std::endl;
+            }
+            if (kkt_AL < kkt_AL_target)
+            {
+               if (print_level >= 1)
+               {
+                  out << "  AL subproblem converged in " << it_PG + 1
+                      << " PG iterations, KKT residual = " << kkt_AL << std::endl;
+               }
+               break; // AL subproblem solved
+            }
+         } // end of AL subproblem loop
+         // Check KKT for Remap Problem, grad obj(x) + grad C(x)*lambda points inward
+         obj.Mult(x_primal, obj_value);
+         obj.GetGradient().Mult(x_primal, gradF);
+
+         C.Mult(x_primal, C_x);
+         C.GetGradientMatrix(x_primal, gradC_primal);
+
+         lambda.Add(mu, C_x);
+         gradC_primal.Mult(lambda, G_primal);
+         G_primal += gradF;
+
+         real_t kkt = problem.ComputeKKT(x_primal, G_primal);
+
+         if (print_level >= 1)
+         {
+            out << "AL Iteration " << it_AL + 1 << ", KKT residual = " << kkt << std::endl;
+            out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = ";
+            for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << std::endl;
+         }
+
+         // If first iteration, setup the relative tolerance.
+         if (it_AL == 0) { kkt_target = std::max(kkt_target, kkt*rel_tol); }
+         if ((C_x.Normlinf() < kkt_target) && it_AL > 0)
+         {
+            if (print_level >= 0)
+            {
+               out << "Remap Problem converged in " << it_AL + 1
+                   << " iterations, KKT residual = " << kkt << std::endl;
+               out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = ";
+               for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << std::endl;
+            }
+            break; // Remap Problem solved
+         }
+      } // end of AL loop
+      y = x_primal;
+   }
+   void SetAbsTol(real_t tol) { abs_tol = tol; }
+   void SetRelTol(real_t tol) { rel_tol = tol; }
+   void SetProxMaxIter(int n) { prox_max_iter = n; }
+   void SetProxAbsTol(real_t tol) { prox_abs_tol = tol; }
+   void SetProxRelTol(real_t tol) { prox_rel_tol = tol; }
+   void SetNonlinMaxIter(int n) { nonlin_max_iter = n; }
+   void SetNonlinAbsTol(real_t tol) { nonlin_abs_tol = tol; }
+   void SetNonlinRelTol(real_t tol) { nonlin_rel_tol = tol; }
 protected:
-public:
-   void SetVerbose(int lv=0) { verbose = Mpi::Root() ? lv : 0; }
+   // Inner solver parameters
+   bool is_linear_constraints = false; // whether the constraints are linear
+   int prox_max_iter = 100;
+   real_t prox_abs_tol = 1e-06;
+   real_t prox_rel_tol = 1e-06;
+   int nonlin_max_iter = 100;
+   real_t nonlin_abs_tol = 1e-08;
+   real_t nonlin_rel_tol = 1e-08;
 
-   LatentVolumeProjector(const Vector &targetVolume,
-                         ParFiniteElementSpace &fes):vdim(targetVolume.Size()),
-      targetVolume(targetVolume),
-      fespace(&fes), ptype(GF),
-      comm(dynamic_cast<ParFiniteElementSpace*>(&fes)->GetComm()),
-      verbose(0)
-   { }
-   LatentVolumeProjector(const Vector &targetVolume,
-                         QuadratureSpaceBase &qspace):vdim(targetVolume.Size()),
-      targetVolume(targetVolume), qspace(static_cast<QuadratureSpace*>(&qspace)),
-      comm(static_cast<ParMesh*>(qspace.GetMesh())->GetComm()), ptype(QF), verbose(0)
-   { }
-   MPI_Comm GetComm() { return comm; }
-   virtual void Apply(Vector &x, const Vector &lower, const Vector &upper,
-                      const real_t step_size,
-                      const Vector &search_l, const Vector &search_r,
-                      Vector &lambda, int max_iter) = 0;
-};
-
-
-/**
-   * @brief Projector for scalar volume int u = targetVolume
-**/
-class ScalarLatentVolumeProjector : public LatentVolumeProjector
-{
-private:
-   Vector &primal;
-   const Vector &pos;
-   std::unique_ptr<ParGridFunction> primal_gf;
-   std::unique_ptr<QuadratureFunction> primal_qf;
-public:
-   ScalarLatentVolumeProjector(const Vector &targetVolume,
-                               const Vector &pos,
-                               ParFiniteElementSpace &fes,
-                               Vector &primal)
-      : LatentVolumeProjector(targetVolume, fes), primal(primal),
-        pos(pos),
-        primal_gf(new ParGridFunction(&fes, primal))
-   { }
-
-   ScalarLatentVolumeProjector(const Vector &targetVolume,
-                               const Vector &pos,
-                               QuadratureSpaceBase &qspace,
-                               Vector &primal)
-      : LatentVolumeProjector(targetVolume, qspace), primal(primal),
-        pos(pos)
-   { primal_qf.reset(new QuadratureFunction(this->qspace, primal.GetData()));}
-
-   real_t calculateMass(const QuadratureFunction &q1)
+   void MapLatent(const BlockVector &psi, const BlockVector &xmin,
+                  const BlockVector &xmax, BlockVector &Upsi, BlockVector &dUpsi) const
    {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
+      const int N = psi.Size();
+      const bool use_dev = psi.UseDevice() || xmin.UseDevice() || xmax.UseDevice() ||
+                           Upsi.UseDevice();
+      auto psi_ = psi.Read(use_dev);
+      auto xmin_ = xmin.Read(use_dev);
+      auto xmax_ = xmax.Read(use_dev);
+      auto Upsi_ = Upsi.Write(use_dev);
+      auto dUpsi_ = dUpsi.Write(use_dev);
+      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
       {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector q1_vals(nqp);
-         q1.GetValues(e, q1_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * q1_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
+         Upsi_[i] = sigmoid(psi_[i], xmin_[i], xmax_[i]);
+         dUpsi_[i] = der_sigmoid(psi_[i], xmin_[i], xmax_[i]);
+      });
    }
 
-   real_t calculateMass(const ParGridFunction &g) const
-   {
-      real_t mass = 0.0;
-      const int NE = g.ParFESpace()->GetNE();
-      for (int e = 0; e < NE; e++)
-      {
-         auto el = g.ParFESpace()->GetFE(e);
-         auto ir = IntRules.Get(el->GetGeomType(), el->GetOrder() + 2);
-         IsoparametricTransformation Tr;
-         // Must be w.r.t. the given positions.
-         g.ParFESpace()->GetParMesh()->GetElementTransformation(e, pos, &Tr);
-
-         Vector g_vals(ir.GetNPoints());
-         g.GetValues(Tr, ir, g_vals);
-
-         for (int q = 0; q < ir.GetNPoints(); q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            mass += Tr.Weight() * ip.weight * g_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &mass, 1, MPI_DOUBLE, MPI_SUM,
-                    g.ParFESpace()->GetComm());
-      return mass;
-   }
-
-   real_t calculateShiftedMass(const real_t shift, const Vector &x,
-                               const Vector &lower, const Vector &upper)
-   {
-      const bool use_dev = primal.UseDevice() || x.UseDevice();
-      const int N = primal.Size();
-      auto primal_rw = primal.ReadWrite(use_dev);
-      auto x_r = x.Read(use_dev);
-      auto l_r = lower.Read(use_dev);
-      auto u_r = upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { primal_rw[i] = sigmoid(x_r[i] + shift, l_r[i], u_r[i]); });
-      if (qspace)
-      {
-         return calculateMass(*primal_qf);
-      }
-      else
-      {
-         return calculateMass(*primal_gf);
-      }
-   }
-
-   void Apply(Vector &x, const Vector &lower, const Vector &upper,
-              const real_t step_size, const Vector &search_l, const Vector &search_r,
-              Vector &lambda, int max_iter) override
-   {
-      lambda.SetSize(1);
-      real_t lambda_lower = search_l[0];
-      real_t lambda_upper = search_r[0];
-
-      real_t vol, vol_lower, vol_upper;
-      real_t mid;
-      while (true)
-      {
-         mid = lambda_lower;
-         vol_lower = calculateShiftedMass(mid, x, lower, upper);
-         if (vol_lower > targetVolume[0])
-         {
-            lambda_lower = lambda_lower + (lambda_lower - lambda_upper);
-         }
-         else { break;}
-      }
-      while (true)
-      {
-         mid = lambda_upper;
-         vol_upper = calculateShiftedMass(mid, x, lower, upper);
-         if (vol_upper < targetVolume[0])
-         {
-            lambda_upper = lambda_upper + (lambda_upper - lambda_lower);
-         }
-         else { break; }
-      }
-      vol_lower = vol_lower - targetVolume[0];
-      vol_upper = vol_upper - targetVolume[0];
-      int iter = 0;
-      bool was_negative = false;
-
-      // Regula Falsi method with Illinois update
-      while (lambda_upper - lambda_lower > 1e-08 && iter < max_iter)
-      {
-         iter++;
-         // convex combination of upper and lower bracket
-         mid = (vol_upper*lambda_lower - vol_lower*lambda_upper)/(vol_upper - vol_lower);
-
-         if (verbose > 1)
-         {
-            out << " mid : " << mid
-                << " ( interval: " << lambda_upper - lambda_lower << " )"
-                << ": vol-diff = " << std::flush;
-         }
-         vol = calculateShiftedMass(mid, x, lower, upper);
-         if (verbose > 1)
-         {
-            out << vol - targetVolume[0] << std::endl;
-         }
-         if (vol < targetVolume[0])
-         {
-            vol_lower = vol - targetVolume[0];
-            lambda_lower = mid;
-            // Illinois update
-            if (iter > 1 && was_negative)
-            {
-               vol_upper = 0.5*vol_upper;
-            }
-            was_negative = true;
-         }
-         else
-         {
-            lambda_upper = mid;
-            vol_upper = vol - targetVolume[0];
-            if (iter > 1 && !was_negative)
-            {
-               vol_lower = 0.5*vol_lower;
-            }
-            was_negative = false;
-         }
-      }
-      if (verbose)
-      {
-         out << "Volume projection converged in " << iter << " iterations\n"
-             << "  with volume diff: " << vol - targetVolume[0]
-             << " (" << std::fixed << std::setprecision(4)
-             << (vol - targetVolume[0])/targetVolume[0]*100 << "%)" << std::endl;
-      }
-
-      lambda = mid;
-      x += step_size*mid;
-   }
-};
-
-class IndRhoEVolumeProjector : public LatentVolumeProjector
-{
-private:
-   Vector &primal;
-   Vector ind_vec;
-   Vector rho_vec;
-   Vector E_vec;
-   Array<int> offsets;
-   const Vector &pos;
-   std::unique_ptr<QuadratureFunction> ind_qf;
-   std::unique_ptr<QuadratureFunction> rho_qf;
-   std::unique_ptr<ParGridFunction> E_gf;
-public:
-
-   IndRhoEVolumeProjector(const Vector &targetVolume,
-                          const Vector &pos,
-                          QuadratureSpaceBase &qspace,
-                          ParFiniteElementSpace &fes,
-                          Vector &primal)
-      : LatentVolumeProjector(targetVolume, qspace), primal(primal),
-        pos(pos)
-   {
-      offsets.SetSize(4);
-      offsets[0] = 0;
-      offsets[1] = qspace.GetSize();
-      offsets[2] = qspace.GetSize();
-      offsets[3] = fes.GetVSize();
-      offsets.PartialSum();
-      int qsize = qspace.GetSize();
-      ind_qf.reset(new QuadratureFunction(this->qspace,
-                                          primal.GetData() + offsets[0]));
-      rho_qf.reset(new QuadratureFunction(this->qspace,
-                                          primal.GetData() + offsets[1]));
-      E_gf.reset(new ParGridFunction(&fes, primal.GetData() + offsets[2]));
-      ind_vec.SetDataAndSize(primal.GetData() + offsets[0], offsets[1] - offsets[0]);
-      rho_vec.SetDataAndSize(primal.GetData() + offsets[1], offsets[2] - offsets[1]);
-      E_vec.SetDataAndSize(primal.GetData() + offsets[2], offsets[3] - offsets[2]);
-   }
-
-   real_t calculateIndMass(const QuadratureFunction &ind)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         ind.GetValues(e, ind_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * ind_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-
-   real_t calculateRhoMass(const QuadratureFunction &ind,
-                           const QuadratureFunction &rho)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         Vector rho_vals(nqp);
-         ind.GetValues(e, ind_vals);
-         rho.GetValues(e, rho_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * rho_vals(q)*ind_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-
-   real_t calculateEMass(const QuadratureFunction &ind,
-                         const QuadratureFunction &rho, const ParGridFunction &E)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         Vector rho_vals(nqp);
-         Vector E_vals(nqp);
-         rho.GetValues(e, rho_vals);
-         ind.GetValues(e, ind_vals);
-         E.GetValues(e, ir, E_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * rho_vals(q)*ind_vals(q)*E_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-
-   real_t calculateShiftedIndMass(const real_t shift, const Vector &ind_latent,
-                                  const Vector &ind_lower, const Vector &ind_upper)
-   {
-      const bool use_dev = primal.UseDevice() || ind_latent.UseDevice();
-      const int N = ind_vec.Size();
-      auto ind_rw = ind_vec.ReadWrite(use_dev);
-      auto x_r = ind_latent.Read(use_dev);
-      auto l_r = ind_lower.Read(use_dev);
-      auto u_r = ind_upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { ind_rw[i] = sigmoid(x_r[i] + shift, l_r[i], u_r[i]); });
-      return calculateIndMass(*ind_qf);
-   }
-
-   real_t calculateShiftedRhoMass(const real_t shift, const Vector &rho_latent,
-                                  const Vector &rho_lower, const Vector &rho_upper)
-   {
-      const bool use_dev = primal.UseDevice() || rho_latent.UseDevice();
-      const int N = rho_vec.Size();
-      auto rho_rw = rho_vec.ReadWrite(use_dev);
-      auto x_r = rho_latent.Read(use_dev);
-      auto l_r = rho_lower.Read(use_dev);
-      auto u_r = rho_upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { rho_rw[i] = sigmoid(x_r[i] + shift, l_r[i], u_r[i]); });
-      return calculateRhoMass(*ind_qf, *rho_qf);
-   }
-
-   real_t calculateShiftedEMass(const real_t shift, const Vector &E_latent,
-                                const Vector &E_lower, const Vector &E_upper)
-   {
-      const bool use_dev = primal.UseDevice() || E_latent.UseDevice();
-      const int N = rho_vec.Size();
-      auto E_rw = E_vec.ReadWrite(use_dev);
-      auto x_r = E_latent.Read(use_dev);
-      auto l_r = E_lower.Read(use_dev);
-      auto u_r = E_upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { E_rw[i] = sigmoid(x_r[i] + shift, l_r[i], u_r[i]); });
-      return calculateEMass(*ind_qf, *rho_qf, *E_gf);
-   }
-
-   real_t calculateShiftedMass(const int i, const real_t shift,
-                               const Vector &latent,
-                               const Vector &lower, const Vector &upper)
-   {
-      if (i == 0)
-      {
-         return calculateShiftedIndMass(shift, latent, lower, upper);
-      }
-      else if (i == 1)
-      {
-         return calculateShiftedRhoMass(shift, latent, lower, upper);
-      }
-      else
-      {
-         return calculateShiftedEMass(shift, latent, lower, upper);
-      }
-   }
-
-   void Apply(Vector &x_all, const Vector &lower_all, const Vector &upper_all,
-              const real_t step_size, const Vector &search_l, const Vector &search_r,
-              Vector &lambda, int max_iter) override
-   {
-      lambda.SetSize(3);
-      int qsize = this->qspace->GetSize();
-
-      Vector x, lower, upper;
-      for (int i=0; i<offsets.Size()-1; i++)
-      {
-         x.SetDataAndSize(x_all.GetData() + offsets[i], offsets[i+1] - offsets[i]);
-         lower.SetDataAndSize(lower_all.GetData() + offsets[i],
-                              offsets[i+1] - offsets[i]);
-         upper.SetDataAndSize(upper_all.GetData() + offsets[i],
-                              offsets[i+1] - offsets[i]);
-         real_t lambda_lower = search_l[i];
-         real_t lambda_upper = search_r[i];
-
-         real_t vol, vol_lower, vol_upper;
-         real_t mid;
-         int trial = 0;
-         int max_trial = 3;
-         for (; trial < max_trial; trial++)
-         {
-            mid = lambda_lower;
-            vol_lower = calculateShiftedMass(i, mid, x, lower, upper);
-            if (vol_lower > targetVolume[i])
-            {
-               if (Mpi::Root())
-               {
-
-                  out << i << ": Initial lower bound not feasible. Lower: " << vol_lower << ", "
-                      <<
-                  "Target: " << targetVolume[i] << std::endl;
-               }
-               lambda_lower = lambda_lower + (lambda_lower - lambda_upper);
-            }
-            else { break;}
-         }
-         if (trial == max_trial)
-         {
-            if (Mpi::Root())
-            {
-               out << i << ": Initial lower bound not feasible. Stop Searching" << std::endl;
-            }
-            lambda_upper = lambda_lower;
-         }
-         for (; trial < max_trial; trial++)
-         {
-            mid = lambda_upper;
-            vol_upper = calculateShiftedMass(i, mid, x, lower, upper);
-            if (vol_upper < targetVolume[i])
-            {
-               if (Mpi::Root())
-               {
-                  out << i << ": Initial upper bound not feasible. Upper: " << vol_upper << ", "
-                      <<
-                  "Target: " << targetVolume[i] << std::endl;
-               }
-               lambda_upper = lambda_upper + (lambda_upper - lambda_lower);
-            }
-            else { break; }
-         }
-         if (trial == max_trial)
-         {
-            if (Mpi::Root())
-            {
-               out << i << ": Failed to find feasible bound. " << vol_lower << ", "
-                   << vol_upper << ", " <<
-                               "Target: " << targetVolume[i] << std::endl;
-            }
-            lambda_lower = lambda_upper;
-         }
-         vol_lower = vol_lower - targetVolume[i];
-         vol_upper = vol_upper - targetVolume[i];
-         int iter = 0;
-         bool was_negative = false;
-         mid = lambda_lower + lambda_upper;
-
-         // Regula Falsi method with Illinois update
-         while (lambda_upper - lambda_lower > 1e-08 && iter < max_iter)
-         {
-            iter++;
-            // convex combination of upper and lower bracket
-            mid = (vol_upper*lambda_lower - vol_lower*lambda_upper)/(vol_upper - vol_lower);
-
-            if (verbose > 1 && Mpi::Root())
-            {
-               out << " mid : " << mid
-                   << " ( interval: " << lambda_upper - lambda_lower << " )"
-                   << ": vol-diff = " << std::flush;
-            }
-            vol = calculateShiftedMass(i, mid, x, lower, upper);
-            if (verbose > 1 && Mpi::Root())
-            {
-               out << vol - targetVolume[i] << std::endl;
-            }
-            if (vol < targetVolume[i])
-            {
-               vol_lower = vol - targetVolume[i];
-               lambda_lower = mid;
-               // Illinois update
-               if (iter > 1 && was_negative)
-               {
-                  vol_upper = 0.5*vol_upper;
-               }
-               was_negative = true;
-            }
-            else
-            {
-               lambda_upper = mid;
-               vol_upper = vol - targetVolume[i];
-               if (iter > 1 && !was_negative)
-               {
-                  vol_lower = 0.5*vol_lower;
-               }
-               was_negative = false;
-            }
-         }
-         if (verbose && Mpi::Root())
-         {
-            out << "Volume projection converged in " << iter << " iterations\n"
-                << "  with volume diff: " << vol - targetVolume[i]
-                << " (" << std::fixed << std::setprecision(4)
-                << (vol - targetVolume[i])/targetVolume[i]*100 << "%)" << std::endl;
-         }
-
-         lambda[i] = mid;
-         x += step_size*mid;
-      }
-   }
-};
-
-class IndRhoEVolumeProjectorCorrect : public LatentVolumeProjector
-{
-private:
-   Vector &primal;
-   Vector ind_vec;
-   Vector rho_vec;
-   Vector E_vec;
-   Array<int> offsets;
-   const Vector &pos;
-   std::unique_ptr<QuadratureFunction> ind_qf;
-   std::unique_ptr<QuadratureFunction> rho_qf;
-   std::unique_ptr<ParGridFunction> indrho_gf;
-   std::unique_ptr<ParGridFunction> E_gf;
-   std::unique_ptr<QuadratureFunction> E_qf;
-   std::unique_ptr<L2_FECollection> nodal_fec;
-   std::unique_ptr<ParFiniteElementSpace> nodal_fespace;
-
-public:
-
-   IndRhoEVolumeProjectorCorrect(const Vector &targetVolume,
-                                 const Vector &pos,
-                                 QuadratureSpaceBase &qspace,
-                                 ParFiniteElementSpace &fes,
-                                 Vector &primal)
-      : LatentVolumeProjector(targetVolume, qspace), primal(primal),
-        pos(pos)
-   {
-      offsets.SetSize(4);
-      offsets[0] = 0;
-      offsets[1] = qspace.GetSize();
-      offsets[2] = qspace.GetSize();
-      offsets[3] = fes.GetVSize();
-      offsets.PartialSum();
-      int qsize = qspace.GetSize();
-      ind_qf.reset(new QuadratureFunction(this->qspace,
-                                          primal.GetData() + offsets[0]));
-      rho_qf.reset(new QuadratureFunction(this->qspace,
-                                          primal.GetData() + offsets[1]));
-      E_gf.reset(new ParGridFunction(&fes, primal.GetData() + offsets[2]));
-      ind_vec.SetDataAndSize(primal.GetData() + offsets[0], offsets[1] - offsets[0]);
-      rho_vec.SetDataAndSize(primal.GetData() + offsets[1], offsets[2] - offsets[1]);
-      E_vec.SetDataAndSize(  primal.GetData() + offsets[2], offsets[3] - offsets[2]);
-      E_qf.reset(new QuadratureFunction(this->qspace));
-      indrho_gf.reset(new ParGridFunction(&fes));
-      this->fespace = &fes;
-      nodal_fec.reset(new L2_FECollection(fes.GetOrder(0),
-                                          fes.GetMesh()->Dimension()));
-      nodal_fespace.reset(new ParFiniteElementSpace(this->fespace->GetParMesh(),
-                          nodal_fec.get()));
-   }
-
-   real_t calculateIndMass(const QuadratureFunction &ind)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         ind.GetValues(e, ind_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * ind_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-   void calculateJacobian(DenseMatrix &J, const Vector &lambda,
-                          const Vector &latent, const Vector &lower,
-                          const Vector &upper)
-   {
-      J.SetSize(3);
-      J = 0.0;
-      DenseMatrix pJ(3); // point Jacobian
-      DenseMatrix pJ_prv(3);
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      const int qsize = qspace->GetSize();
-      Vector ind_latent_vals, rho_latent_vals, E_latent_vals;
-      Vector ind_mins, rho_mins, E_mins;
-      Vector ind_maxs, rho_maxs, E_maxs;
-      QuadratureFunction ind_latent(qspace, latent.GetData()),
-                         ind_min(qspace, lower.GetData()),
-                         ind_max(qspace, upper.GetData());
-      QuadratureFunction rho_latent(qspace, latent.GetData() + qsize),
-                         rho_min(qspace, lower.GetData() + qsize),
-                         rho_max(qspace, upper.GetData() + qsize);
-      ParGridFunction E_latent(fespace, latent.GetData() + 2*qsize),
-                      E_min(fespace, lower.GetData() + 2*qsize),
-                      E_max(fespace, upper.GetData() + 2*qsize);
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-         ind_latent_vals.SetSize(nqp); ind_mins.SetSize(nqp); ind_maxs.SetSize(nqp);
-         rho_latent_vals.SetSize(nqp); rho_mins.SetSize(nqp); rho_maxs.SetSize(nqp);
-         E_latent_vals.SetSize(nqp); E_mins.SetSize(nqp); E_maxs.SetSize(nqp);
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-         ind_latent.GetValues(e, ind_latent_vals);
-         ind_min.GetValues(e, ind_mins);
-         ind_max.GetValues(e, ind_maxs);
-         rho_latent.GetValues(e, rho_latent_vals);
-         rho_min.GetValues(e, rho_mins);
-         rho_max.GetValues(e, rho_maxs);
-         E_latent.GetValues(e, ir, E_latent_vals);
-         E_min.GetValues(e, ir, E_mins);
-         E_max.GetValues(e, ir, E_maxs);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            const real_t w = Tr.Weight() * ip.weight;
-
-            const real_t eta = sigmoid(ind_latent_vals(q), ind_mins(q), ind_maxs(q));
-            const real_t rho = sigmoid(rho_latent_vals(q), rho_mins(q), rho_maxs(q));
-            const real_t E = sigmoid(E_latent_vals(q), E_mins(q), E_maxs(q));
-
-            const real_t deta = der_sigmoid(ind_latent_vals(q), ind_mins(q),
-                                            ind_maxs(q));
-            const real_t drho = der_sigmoid(rho_latent_vals(q), rho_mins(q),
-                                            rho_maxs(q));
-            const real_t dE = der_sigmoid(E_latent_vals(q), E_mins(q), E_maxs(q));
-
-            pJ = 0.0;
-            pJ_prv = 0.0;
-            real_t pointerr = mfem::infinity();
-            int pJ_it = 0;
-            while (pointerr > 1e-08)
-            {
-               pJ_prv = pJ;
-
-               pJ(0,0) = (1     +       lambda[1]*pJ_prv(1, 0) +         lambda[2]*(pJ_prv(1,
-                          0)*E   + pJ_prv(2,0)*rho));
-               pJ(0,1) = (        rho + lambda[1]*pJ_prv(1, 1) +         lambda[2]*(pJ_prv(1,
-                                  1)*E   + pJ_prv(2,1)*rho));
-               pJ(0,2) = (              lambda[1]*pJ_prv(1, 2) + rho*E + lambda[2]*(pJ_prv(1,
-                                        2)*E   + pJ_prv(2,2)*rho));
-
-               pJ(1,0) = (              lambda[1]*pJ_prv(0, 0) +         lambda[2]*(pJ_prv(0,
-                                        0)*E   + pJ_prv(2,0)*eta));
-               pJ(1,1) = (        eta + lambda[1]*pJ_prv(0, 1) +         lambda[2]*(pJ_prv(0,
-                                  1)*E   + pJ_prv(2,1)*eta));
-               pJ(1,2) = (              lambda[1]*pJ_prv(0, 2) + eta*E + lambda[2]*(pJ_prv(0,
-                                        2)*E   + pJ_prv(2,2)*eta));
-
-               pJ(2,0) = (                                               lambda[2]*(pJ_prv(0,
-                         0)*rho + pJ_prv(1,0)*eta));
-               pJ(2,1) = (                                               lambda[2]*(pJ_prv(0,
-                         1)*rho + pJ_prv(1,1)*eta));
-               pJ(2,2) = (                                     rho*eta + lambda[2]*(pJ_prv(0,
-                         2)*rho + pJ_prv(1,2)*eta));
-               pJ_prv -= pJ;
-               pointerr = pJ_prv.FNorm();
-               if (pJ_it++ > 1e04)
-               {
-                  pJ = 0.0;
-                  break;
-               }
-            }
-            Vector dU({deta, drho, dE});
-            pJ.LeftScaling(dU);
-            J.Add(w, pJ);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, J.GetData(), 9, MFEM_MPI_REAL_T, MPI_SUM, comm);
-      // pJ = J;
-      // MultAtB(pJ, pJ, J);
-   }
-
-   real_t calculateRhoMass(const QuadratureFunction &ind,
-                           const QuadratureFunction &rho)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         Vector rho_vals(nqp);
-         ind.GetValues(e, ind_vals);
-         rho.GetValues(e, rho_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * rho_vals(q)*ind_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-
-   real_t calculateEMass(const QuadratureFunction &ind,
-                         const QuadratureFunction &rho, const ParGridFunction &E)
-   {
-      Mesh *mesh = qspace->GetMesh();
-      const int NE = mesh->GetNE();
-      real_t integral = 0.0;
-      for (int e = 0; e < NE; e++)
-      {
-         const IntegrationRule &ir = qspace->GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         // Transformation w.r.t. the given mesh positions.
-         IsoparametricTransformation Tr;
-         mesh->GetElementTransformation(e, pos, &Tr);
-
-         Vector ind_vals(nqp);
-         Vector rho_vals(nqp);
-         Vector E_vals(nqp);
-         rho.GetValues(e, rho_vals);
-         ind.GetValues(e, ind_vals);
-         E.GetValues(e, ir, E_vals);
-
-         for (int q = 0; q < nqp; q++)
-         {
-            const IntegrationPoint &ip = ir.IntPoint(q);
-            Tr.SetIntPoint(&ip);
-            integral += Tr.Weight() * ip.weight * rho_vals(q)*ind_vals(q)*E_vals(q);
-         }
-      }
-      MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM, comm);
-      return integral;
-   }
-
-   void evaluatePrimalIndValues(const Vector &ind_latent,
-                                const Vector &ind_lower, const Vector &ind_upper)
-   {
-      const bool use_dev = primal.UseDevice() || ind_latent.UseDevice();
-      const int N = ind_vec.Size();
-      auto ind_rw = ind_vec.ReadWrite(use_dev);
-      auto x_r = ind_latent.Read(use_dev);
-      auto l_r = ind_lower.Read(use_dev);
-      auto u_r = ind_upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { ind_rw[i] = sigmoid(x_r[i], l_r[i], u_r[i]); });
-   }
-
-   void evaluatePrimalRhoValues(const Vector &rho_latent,
-                                const Vector &rho_lower, const Vector &rho_upper)
-   {
-      const bool use_dev = primal.UseDevice() || rho_latent.UseDevice();
-      const int N = rho_vec.Size();
-      auto rho_rw = rho_vec.ReadWrite(use_dev);
-      auto x_r = rho_latent.Read(use_dev);
-      auto l_r = rho_lower.Read(use_dev);
-      auto u_r = rho_upper.Read(use_dev);
-      mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i) { rho_rw[i] = sigmoid(x_r[i], l_r[i], u_r[i]); });
-   }
-
-   void evaluatePrimalEValues(const Vector &E_latent,
-                              const Vector &E_lower, const Vector &E_upper)
-   {
-      ParGridFunction E_latent_gf(nodal_fespace.get(), (real_t*)nullptr),
-                      E_lower_gf(nodal_fespace.get(), (real_t*)nullptr),
-                      E_upper_gf(nodal_fespace.get(), (real_t*)nullptr);
-      E_latent_gf.SetData(E_latent.GetData());
-      E_lower_gf.SetData(E_lower.GetData());
-      E_upper_gf.SetData(E_upper.GetData());
-      SigmoidCoefficient E_cf(E_latent_gf, E_lower_gf, E_upper_gf);
-      E_gf->ProjectCoefficient(E_cf);
-   }
-
-   int CalcFixedPoint(const Vector &lambda, const Vector &lower,
-                      const Vector &upper,
-                      Vector &latent)
-   {
-      int qsize = this->qspace->GetSize();
-      int vsize = this->fespace->GetVSize();
-      Vector latent_init(latent.Size());
-      latent_init = latent;
-
-      real_t err = mfem::infinity();
-      Vector ind_latent(latent.GetData()+offsets[0], offsets[1]-offsets[0]);
-      Vector ind_latent_init(latent_init.GetData()+offsets[0], offsets[1]-offsets[0]);
-      Vector ind_lower(lower.GetData()+offsets[0], offsets[1]-offsets[0]);
-      Vector ind_upper(upper.GetData()+offsets[0], offsets[1]-offsets[0]);
-
-      Vector rho_latent(latent.GetData()+offsets[1], offsets[2]-offsets[1]);
-      Vector rho_latent_init(latent_init.GetData()+offsets[1], offsets[2]-offsets[1]);
-      Vector rho_lower(lower.GetData()+offsets[1], offsets[2]-offsets[1]);
-      Vector rho_upper(upper.GetData()+offsets[1], offsets[2]-offsets[1]);
-
-      Vector E_latent(latent.GetData()+offsets[2], offsets[3]-offsets[2]);
-      Vector E_latent_init(latent_init.GetData()+offsets[2], offsets[3]-offsets[2]);
-      Vector E_lower(lower.GetData()+offsets[2], offsets[3]-offsets[2]);
-      Vector E_upper(upper.GetData()+offsets[2], offsets[3]-offsets[2]);
-      MFEM_VERIFY(offsets[3] - offsets[2] - nodal_fespace->GetVSize() == 0,
-                  "E latent vector size does not match the grid function size");
-
-      QuadratureFunctionCoefficient ind_cf(*ind_qf);
-      QuadratureFunctionCoefficient rho_cf(*rho_qf);
-      ProductCoefficient indrho_cf(ind_cf, rho_cf);
-      ParGridFunction E_latent_init_gf(nodal_fespace.get(), (real_t*)nullptr);
-      E_latent_init_gf.SetData(E_latent_init.GetData());
-      GridFunctionCoefficient E_latent_init_cf(&E_latent_init_gf);
-      SumCoefficient E_latent_updated_cf(E_latent_init_cf, indrho_cf, 1.0, lambda[2]);
-
-      ParGridFunction E_latent_gf(nodal_fespace.get(), E_latent);
-      int it = 0;
-      Vector latent_prev(latent_init.Size());
-      while (err > 1e-08 && it < 100)
-      {
-         it++;
-         latent_prev = latent;
-
-         // E = sigmoid(psi_E^0 + lambda[2]*rho*ind)
-         E_latent_gf.ProjectCoefficient(E_latent_updated_cf);
-         evaluatePrimalEValues(E_latent, E_lower, E_upper);
-         E_qf->ProjectGridFunction(*E_gf);
-
-         // rho = sigmoid(psi_rho^0 + lambda[1]*ind + lambda[2]*E*ind)
-         *rho_qf = *E_qf;
-         *rho_qf *= *ind_qf;
-         *rho_qf *= lambda[2];
-         rho_qf->Add(lambda[1], *ind_qf);
-         add(*rho_qf, 1.0, rho_latent_init, rho_latent);
-         evaluatePrimalRhoValues(rho_latent, rho_lower, rho_upper);
-
-         // ind = sigmoid(psi_ind^0 + lambda[0] + lambda[1]*rho + lambda[2]*E*rho)
-         *ind_qf = *E_qf;
-         *ind_qf *= *rho_qf;
-         *ind_qf *= lambda[2];
-         ind_qf->Add(lambda[1], *rho_qf);
-         *ind_qf += lambda[0];
-         add(*ind_qf, 1.0, ind_latent_init, ind_latent);
-         evaluatePrimalIndValues(ind_latent, ind_lower, ind_upper);
-
-         err = latent.DistanceSquaredTo(latent_prev);
-         MPI_Allreduce(MPI_IN_PLACE, &err, 1, MFEM_MPI_REAL_T, MPI_SUM, comm);
-         err = std::sqrt(err);
-
-         real_t latent_max = latent.Max();
-         MPI_Allreduce(MPI_IN_PLACE, &latent_max, 1, MFEM_MPI_REAL_T, MPI_MAX, comm);
-         if (verbose>1) { out << "\tFixedPoint Iter: " << it << " lam: " << lambda[0] << ", " << lambda[1] << ", " << lambda[2] << std::endl; }
-         if (verbose>1) { out << "\tFixedPoint Iter: " << it << " err: " << err << std::endl; }
-         if (verbose>1) { out << "\tFixedPoint Iter: " << it << " max: " << latent_max << std::endl; }
-      }
-      return it;
-   }
-
-   void Apply(Vector &x_all, const Vector &lower_all, const Vector &upper_all,
-              const real_t step_size, const Vector &search_l, const Vector &search_r,
-              Vector &lambda, int max_iter) override
-   {
-      Vector x_all_init(x_all.Size());
-      x_all_init = x_all;
-      int qsize = this->qspace->GetSize();
-      lambda.SetSize(3);
-      lambda = 0.0;
-      real_t mass_err = mfem::infinity();
-      Vector currErr(3);
-      int it = 0;
-      DenseMatrix Jacobian(3);
-      while (mass_err > 1e-10)
-      {
-         it++;
-         if (verbose) { out << "Iter: " << it << std::endl; }
-         x_all = x_all_init;
-         CalcFixedPoint(lambda, lower_all, upper_all, x_all);
-         currErr[0] = calculateIndMass(*ind_qf)-targetVolume[0];
-         currErr[1] = calculateRhoMass(*ind_qf, *rho_qf)-targetVolume[1];
-         currErr[2] = calculateEMass(*ind_qf, *rho_qf, *E_gf)-targetVolume[2];
-         if (verbose) { out << "Ind: " << currErr[0] << " Rho: " << currErr[1] << " E: " << currErr[2] << std::endl; }
-         // lambda.Add(-step_size, currErr);
-         // Second order Correction. Need to calculate the Jacobian
-         // The Jacobian is a 3x3 matrix. It is calculated using integration of point Jacobian.
-         // This is not stable.. Need a better way to calculate the Jacobian or use a better nonlinear solver
-         calculateJacobian(Jacobian, lambda, x_all, lower_all, upper_all);
-         if (verbose) { out << "Jacobian Norm: " << Jacobian.FNorm() << std::endl; }
-
-         bool isSingular = false;
-         for (int d=0; d<3; d++)
-         {
-            if (std::fabs(Jacobian(d,d)) < 1e-9)
-            {
-               if (verbose) { out << d + 1 << "th Diagonal Component is Zero:" << Jacobian(d,d) << std::endl; }
-               isSingular = true;
-            }
-         }
-
-         if (isSingular)
-         {
-            if (verbose) { out << "Jacobian is singular. Add Regularization" << std::endl; }
-            for (int d=0; d<3; d++) { Jacobian(d,d) += 10; }
-         }
-         if (Jacobian.CheckFinite()) { Jacobian = 0.0; for (int d=0; d<3; d++) {Jacobian(d,d)=1.0;}}
-         else {Jacobian.Invert();}
-         // damped Newton step
-         Jacobian.AddMult(currErr, lambda, -std::min(1.0, step_size*it));
-         // lambda.Add(-step_size, currErr);
-         mass_err = currErr.Norml2();
-         if (it > max_iter)
-         {
-            return;
-         }
-      }
-   }
-};
-
-class BoxMirrorDescent
-{
-private:
-protected:
-   DifferentiableObjective &obj;
-   const Vector &lower, &upper;
-   Vector &primal;
-   Vector grad, xnew;
-   LatentVolumeProjector *projector;
-   int max_iter;
-   real_t tol;
-   int verbose = 0;
-public:
-
-private:
-protected:
-public:
-   void SetVerbose(int lv=1) { verbose = Mpi::Root() ? lv : 0; }
-   BoxMirrorDescent(DifferentiableObjective &obj, Vector &primal,
-                    const Vector &lower, const Vector &upper,
-                    int max_iter = 1000, real_t tol = 1e-08)
-      : obj(obj), primal(primal), lower(lower), upper(upper),
-        max_iter(max_iter), tol(tol) { }
-
-
-   void AddProjector(LatentVolumeProjector &projector)
-   {
-      this->projector = &projector;
-   }
-
-   void UpdatePrimal(const Vector &x)
-   {
-      for (int i=0; i<x.Size(); i++)
-      {
-         primal[i] = sigmoid(x[i], lower[i], upper[i]);
-      }
-   }
-
-   void Step(const Vector &x, real_t step_size, Vector &y)
-   {
-      UpdatePrimal(x);
-      grad.SetSize(primal.Size());
-      obj.Mult(primal, grad);
-
-      add(x, -step_size, grad, y);
-   }
-   void Step(Vector &x, real_t step_size)
-   {
-      UpdatePrimal(x);
-      grad.SetSize(primal.Size());
-      obj.Mult(primal, grad);
-
-      x.Add(-step_size, grad);
-   }
-
-   void Optimize(Vector &x)
-   {
-      xnew.SetSize(x.Size());
-      real_t step_size = 1.0;
-      Vector lambda(1);
-      lambda = 0.0;
-      if (projector)
-      {
-         Vector search_l(1), search_r(1);
-         search_l[0] = -1e6;
-         search_r[0] = 1e6;
-         projector->Apply(x, lower, upper, 1.0, search_l, search_r, lambda, max_iter);
-      }
-      int N = x.Size();
-      MPI_Allreduce(MPI_IN_PLACE, &N, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-      for (int i=0; i<max_iter; i++)
-      {
-         /* step_size = i+1.0; */
-         if (verbose) { std::cout << "Iter: " << i << " step-size: " << step_size << std::flush; }
-         Step(x, step_size);
-         if (projector)
-         {
-            Vector search_l(1), search_r(1);
-            // roughly estimate the search range
-            // TODO: Update search interval
-            search_l[0] = -grad.Normlinf();
-            search_r[0] = +grad.Normlinf();
-            MPI_Allreduce(MPI_IN_PLACE, search_l.GetData(), 1, MFEM_MPI_REAL_T, MPI_MIN,
-                          projector->GetComm());
-            MPI_Allreduce(MPI_IN_PLACE, search_r.GetData(), 1, MFEM_MPI_REAL_T, MPI_MAX,
-                          projector->GetComm());
-            projector->Apply(x, lower, upper, step_size, search_l, search_r, lambda,
-                             max_iter);
-         }
-         UpdatePrimal(x);
-         real_t val = obj.Eval(primal);
-         if (verbose) { std::cout << " val: " << val; }
-         // TDOO: Check convergence using KKT
-         real_t kkt_residual = 0.0;
-         for (int i=0; i<grad.Size(); i++)
-         {
-            const real_t direction = -grad[i] + lambda[0];
-            const real_t eta = std::max((lower[i] - primal[i])*direction,
-                                        (upper[i] - primal[i])*direction);
-            kkt_residual += std::fabs(eta);
-         }
-         kkt_residual /= N;
-         MPI_Allreduce(MPI_IN_PLACE, &kkt_residual, 1, MFEM_MPI_REAL_T, MPI_SUM,
-                       projector->GetComm());
-         if (kkt_residual < tol)
-         {
-            if (verbose) { std::cout << "Converged: " << kkt_residual << std::endl; }
-            break;
-         }
-         else
-         {
-            if (verbose) { std::cout << " KKT: " << kkt_residual << std::endl; }
-         }
-      }
-   }
+   RemapProblem &problem; // The LVPP problem to solve
+
+   Array<int> offsets; // primal offsets
+   Array<int> b_offsets; // bound offsets
+   Array<int> total_offsets; // both primal and latent
+   mutable PointwiseSolver pointwise_solver;
 };
 
 
