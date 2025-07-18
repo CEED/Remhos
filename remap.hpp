@@ -912,8 +912,8 @@ private:
    const Array<int> space_idx;
    const int num_vars;
 
-   std::vector<std::unique_ptr<Operator>> mass;
-   std::vector<std::unique_ptr<Solver>> mass_prec;
+   std::vector<std::unique_ptr<HypreParMatrix>> mass;
+   std::vector<std::unique_ptr<HypreBoomerAMG>> mass_prec;
    std::vector<std::unique_ptr<Operator>> projector;
 public:
    MultiL2RieszMap(QuadratureSpace &qspace,
@@ -945,17 +945,15 @@ public:
             curr_mass.Assemble();
             curr_mass.Finalize();
             mass[i].reset(curr_mass.ParallelAssemble());
-            auto prec = std::make_unique<HypreBoomerAMG>();
-            auto solver = std::make_unique<CGSolver>(fespace[i]->GetComm());
-            prec->SetPrintLevel(0);
-            solver->SetRelTol(1e-10);
+            mass_prec[i] = std::make_unique<HypreBoomerAMG>(static_cast<HypreParMatrix&>(*mass[i]));
+            projector[i] = std::make_unique<HyprePCG>(fespace[i]->GetComm());
+            HyprePCG *solver = static_cast<HyprePCG*>(projector[i].get());
+            mass_prec[i]->SetPrintLevel(0);
             solver->SetAbsTol(1e-10);
             solver->SetMaxIter(1e06);
             solver->SetPrintLevel(0);
-            solver->SetPreconditioner(*prec);
+            solver->SetPreconditioner(*mass_prec[i]);
             solver->SetOperator(static_cast<const HypreParMatrix&>(*mass[i]));
-            mass_prec[i] = std::move(prec);
-            projector[i] = std::move(solver);
          }
          else
          {

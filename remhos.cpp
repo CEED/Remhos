@@ -1067,6 +1067,7 @@ int main(int argc, char *argv[])
                          rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData());
       ParGridFunction e_0(&pfes, ind_rho_e_v_0.GetBlock(2).GetData());
       ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
+      v_0.SetTrueVector();
 
       // Initialize only in the support of ind_0.
       Array<bool> ind_0_bool_el, ind_0_bool_dofs;

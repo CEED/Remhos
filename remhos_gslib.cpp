@@ -253,14 +253,14 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
-      opt_solver.LinearConstraints(true);
+      opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
       opt_solver.SetRelTol(1e-08);
       opt_solver.SetAbsTol(1e-08);
 
-      opt_solver.SetProxMaxIter(1);
+      opt_solver.SetProxMaxIter(30);
       opt_solver.SetProxAbsTol(1e-08);
       opt_solver.SetProxRelTol(1e-08);
 
@@ -449,14 +449,14 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
 
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
-      opt_solver.LinearConstraints(true);
+      opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
       opt_solver.SetRelTol(1e-08);
       opt_solver.SetAbsTol(1e-08);
 
-      opt_solver.SetProxMaxIter(1);
+      opt_solver.SetProxMaxIter(30);
       opt_solver.SetProxAbsTol(1e-08);
       opt_solver.SetProxRelTol(1e-08);
 
@@ -651,7 +651,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
-      opt_solver.LinearConstraints(true);
+      opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(3000);
@@ -1130,7 +1130,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       RemapProblem opt_prob(remap_obj, x_min_final, x_max_final, C);
       LVPPSolver opt_solver(opt_prob, offsets);
-      opt_solver.LinearConstraints(true);
+      opt_solver.SetPenalty(
+         0.1); // this problem is a bit more sensitive. Use smaller penalty.
+      opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
@@ -1141,11 +1143,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       opt_solver.SetProxAbsTol(1e-08);
       opt_solver.SetProxRelTol(1e-08);
 
-      opt_solver.SetNonlinMaxIter(1e04);
+      opt_solver.SetNonlinMaxIter(10);
       opt_solver.SetNonlinAbsTol(1e-10);
       opt_solver.SetNonlinRelTol(1e-10);
       BlockVector x_final_TVector(offsets);
       opt_solver.Mult(x_initial, x_final_TVector);
+   return;
       BlockVector x_final_LVector(ind_rho_e_v, offset);
       for (int i=0; i<3; i++)
       {

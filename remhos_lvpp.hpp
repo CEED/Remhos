@@ -314,9 +314,9 @@ public:
       : LVPPSolver(problem, offsets, offsets)
    {}
 
-   void LinearConstraints(bool is_linear)
+   void IncludeConstraintHessian(bool use_hessian_approx)
    {
-      this->is_linear_constraints = is_linear;
+      this->use_hessian_approx = use_hessian_approx;
    }
 
    // Solves the LVPP problem
@@ -391,8 +391,6 @@ public:
       BlockVector Upsi(b_offsets); // Upsi = sigmoid(x)
       BlockVector dUpsi(b_offsets); // dUpsi = der_sigmoid(x)
 
-      real_t alpha = 1e-03; // step size for the proximal solver
-
       x_primal = x_block;
       x_latent = 0.0;
 
@@ -407,10 +405,10 @@ public:
       DenseMatrix gradC_primal(numPrimalDof, numConst);
       Vector lambda(numConst);
       lambda = C_x;
-      real_t mu = 1.0;
       Vector new_lambda(numConst);
 
       real_t kkt_target = abs_tol;
+      real_t alpha;
 
       // AL loop for Remap Problem
       for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
@@ -421,7 +419,7 @@ public:
          {
             x_latent_k = x_latent;
             // alpha = 1.0;
-            alpha = std::pow(it_PG + 1, 2);
+            alpha = alpha0*std::pow(it_PG + 1, 2);
             real_t res_PG_target = nonlin_abs_tol;
             // Nonlinear loop for PG subproblem.
             for (int it_GN=0; it_GN<nonlin_max_iter; it_GN++)
@@ -457,7 +455,7 @@ public:
                // This leads to a modified Gauss-Newton method, and can be solved
                // using Woodbury formula
                pointwise_solver.Update(alpha, dUpsi);
-               if (is_linear_constraints)
+               if (!use_hessian_approx)
                {
                   // Linear constraints, so we can use the pointwise solver directly
                   pointwise_solver.Mult(G, dx_all);
@@ -561,9 +559,13 @@ public:
    void SetNonlinMaxIter(int n) { nonlin_max_iter = n; }
    void SetNonlinAbsTol(real_t tol) { nonlin_abs_tol = tol; }
    void SetNonlinRelTol(real_t tol) { nonlin_rel_tol = tol; }
+   void SetAlpha(real_t alpha) { this->alpha0 = alpha; }
+   void SetPenalty(real_t mu) { this->mu = mu; }
 protected:
    // Inner solver parameters
-   bool is_linear_constraints = false; // whether the constraints are linear
+   real_t alpha0 = 1.0;
+   real_t mu = 1.0;
+   bool use_hessian_approx = false; // whether the constraints are linear
    int prox_max_iter = 100;
    real_t prox_abs_tol = 1e-06;
    real_t prox_rel_tol = 1e-06;
