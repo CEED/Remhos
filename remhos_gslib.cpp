@@ -1171,7 +1171,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    QuadratureFunction ind(&qspace_final, ind_rho_e_v.GetData()),
                       rho(&qspace_final, ind_rho_e_v.GetData() + size_qf);
    ParGridFunction e(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf);
-   ParGridFunction v(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
+   ParGridFunction v(&pfes_v_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
 
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr,
                                          nullptr);
