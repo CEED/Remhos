@@ -251,22 +251,25 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
       BlockVector u_final_min_block(u_final_min.GetData(), offsets);
       BlockVector u_final_max_block(u_final_max.GetData(), offsets);
 
+      // RHO GF -> RHO GF
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
       opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
-      opt_solver.SetRelTol(1e-08);
-      opt_solver.SetAbsTol(1e-08);
+      opt_solver.SetRelTol(infinity());
+      opt_solver.SetAbsTol(infinity());
 
-      opt_solver.SetProxMaxIter(30);
-      opt_solver.SetProxAbsTol(1e-08);
-      opt_solver.SetProxRelTol(1e-08);
+      opt_solver.SetConstAbsTol(1e-08);
+
+      opt_solver.SetProxMaxIter(10);
+      opt_solver.SetProxAbsTol(1e-06);
+      opt_solver.SetProxRelTol(1e-06);
 
       opt_solver.SetNonlinMaxIter(1e04);
-      opt_solver.SetNonlinAbsTol(1e-10);
-      opt_solver.SetNonlinRelTol(1e-10);
+      opt_solver.SetNonlinAbsTol(1e-08);
+      opt_solver.SetNonlinRelTol(1e-08);
       // opt_solver.LinearConstraints(true);
       // opt_solver.SetPrintLevel(1);
       //
@@ -447,18 +450,21 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
       BlockVector u_final_min_block(u_min.GetData(), offsets);
       BlockVector u_final_max_block(u_max.GetData(), offsets);
 
+      // RHO QF -> RHO QF
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
       opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
-      opt_solver.SetRelTol(1e-08);
-      opt_solver.SetAbsTol(1e-08);
+      opt_solver.SetRelTol(1e-06);
+      opt_solver.SetAbsTol(1e-06);
 
-      opt_solver.SetProxMaxIter(30);
-      opt_solver.SetProxAbsTol(1e-08);
-      opt_solver.SetProxRelTol(1e-08);
+      opt_solver.SetConstAbsTol(1e-08);
+
+      opt_solver.SetProxMaxIter(10);
+      opt_solver.SetProxAbsTol(1e-06);
+      opt_solver.SetProxRelTol(1e-06);
 
       opt_solver.SetNonlinMaxIter(1e04);
       opt_solver.SetNonlinAbsTol(1e-10);
@@ -649,20 +655,23 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       BlockVector u_final_min_block(u_final_min.GetData(), offsets);
       BlockVector u_final_max_block(u_final_max.GetData(), offsets);
 
+      // RHO FUNC -> RHO GF
       RemapProblem opt_prob(remap_obj, u_final_min_block, u_final_max_block, C);
       LVPPSolver opt_solver(opt_prob, offsets);
       opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
-      opt_solver.SetMaxIter(3000);
-      opt_solver.SetRelTol(1e-08);
-      opt_solver.SetAbsTol(1e-08);
+      opt_solver.SetMaxIter(1e06);
+      opt_solver.SetRelTol(infinity());
+      opt_solver.SetAbsTol(infinity());
 
-      opt_solver.SetProxMaxIter(1);
-      opt_solver.SetProxAbsTol(1e-08);
-      opt_solver.SetProxRelTol(1e-08);
+      opt_solver.SetConstAbsTol(1e-08);
 
-      opt_solver.SetNonlinMaxIter(100);
+      opt_solver.SetProxMaxIter(30);
+      opt_solver.SetProxAbsTol(1e-06);
+      opt_solver.SetProxRelTol(1e-06);
+
+      opt_solver.SetNonlinMaxIter(1e04);
       opt_solver.SetNonlinAbsTol(1e-10);
       opt_solver.SetNonlinRelTol(1e-10);
       opt_solver.Mult(x_initial, u_final.GetTrueVector());
@@ -1049,41 +1058,57 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                           qspace_final.GetSize(),
                           qspace_final.GetSize(),
                           pfes_e_final.GetTrueVSize()});
+      Array<int> b_offsets(offsets);
       if (remap_v)
       {
          for (int i=0; i<dim; i++)
          {
             space_idx.Append(1);
             offsets.Append(pfes_v_scalar_final.GetTrueVSize());
+            b_offsets.Append(pfes_v_scalar_final.GetTrueVSize());
          }
       }
-      Array<int> b_offsets(offsets);
       if (remap_v)
       {
          // no bound constraints on v
-         for (int i=0; i<dim; i++) { b_offsets[3+i] = 0; }
+         // for (int i=0; i<dim; i++) { b_offsets[3+i] = 0; }
       }
       offsets.PartialSum();
       b_offsets.PartialSum();
+      MFEM_VERIFY(dynamic_cast<const L2_FECollection*>(pfes_e_final.FEColl()) !=
+                  nullptr,
+                  "Expecting L2_FECollection for pfes_e_final.");
 
       BlockVector x_initial(offsets);
       BlockVector x_initial_LVec(ind_rho_e_v_interp, offset);
       // Since all functions other than v satisfy L-vector == T-vector,
       // we can use the L-vector for bounds.
-      BlockVector x_min_final(x_min.GetData(), offsets);
-      BlockVector x_max_final(x_max.GetData(), offsets);
-      x_initial.GetBlock(0) = x_initial_LVec.GetBlock(0);
-      x_initial.GetBlock(1) = x_initial_LVec.GetBlock(1);
-      x_initial.GetBlock(2) = x_initial_LVec.GetBlock(2);
+      BlockVector x_min_final_LVec(x_min.GetData(), offset);
+      BlockVector x_max_final_LVec(x_max.GetData(), offset);
+      BlockVector x_min_final(b_offsets);
+      BlockVector x_max_final(b_offsets);
+      for (int i=0; i<3; i++)
+      {
+         x_initial.GetBlock(i) = x_initial_LVec.GetBlock(i);
+         x_min_final.GetBlock(i) = x_min_final_LVec.GetBlock(i);
+         x_max_final.GetBlock(i) = x_max_final_LVec.GetBlock(i);
+      }
       if (remap_v)
       {
-         ParGridFunction v(&pfes_v_scalar_final, (real_t*)nullptr);
+         ParGridFunction vtmp(&pfes_v_scalar_final, (real_t*)nullptr);
          const int n = pfes_v_scalar_final.GetVSize();
+         MFEM_VERIFY(n*dim == pfes_v_final.GetVSize(),
+                     "Expecting 3*n dofs for pfes_v_scalar_final.");
          for (int i=0; i<dim; i++)
          {
-            v.MakeRef(&pfes_v_scalar_final, x_initial_LVec.GetBlock(3), i*n);
-            v.SetTrueVector();
-            x_initial.GetBlock(3+i) = v.GetTrueVector();
+            vtmp.MakeRef(&pfes_v_scalar_final, x_initial_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_initial.GetBlock(3+i));
+
+            vtmp.MakeRef(&pfes_v_scalar_final, x_min_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_min_final.GetBlock(3+i));
+
+            vtmp.MakeRef(&pfes_v_scalar_final, x_max_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_max_final.GetBlock(3+i));
          }
       }
 
@@ -1108,9 +1133,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       else
       {
-         funcs[2] = std::make_unique<ComposedFunctional>(
-                       remap::energy_f, remap::energy_df, qspace_final, fes, space_idx);
-         funcs[2]->SetTarget(tot_en_0);
          for (int i=0; i<dim; i++)
          {
             funcs[3+i] = std::make_unique<ComposedFunctional>(
@@ -1119,6 +1141,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
             qspace_final, fes, space_idx);
             funcs[3+i]->SetTarget(moment_0[i]);
          }
+         funcs[2] = std::make_unique<ComposedFunctional>(
+                       remap::energy_f, remap::energy_df, qspace_final, fes, space_idx);
+         funcs[2]->SetTarget(tot_en_0);
       }
 
       StackedSharedFunctional C(offsets.Last());
@@ -1128,27 +1153,32 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          f->SetRieszMap(projector);
          C.AddFunctional(*f);
       }
+      // HYDRO
       RemapProblem opt_prob(remap_obj, x_min_final, x_max_final, C);
       LVPPSolver opt_solver(opt_prob, offsets);
-      opt_solver.SetPenalty(
-         0.1); // this problem is a bit more sensitive. Use smaller penalty.
+      // this problem is a bit more sensitive. Use smaller penalty.
+      opt_solver.SetPenalty(0.05);
+
       opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
       opt_solver.SetMaxIter(1e06);
-      opt_solver.SetRelTol(1e-08);
-      opt_solver.SetAbsTol(1e-08);
+      opt_solver.SetRelTol(1e-05);
+      opt_solver.SetAbsTol(1e-05);
 
-      opt_solver.SetProxMaxIter(1);
-      opt_solver.SetProxAbsTol(1e-08);
-      opt_solver.SetProxRelTol(1e-08);
+      opt_solver.SetConstAbsTol(1e-08);
 
-      opt_solver.SetNonlinMaxIter(10);
+      opt_solver.SetProxMaxIter(30);
+      opt_solver.SetProxAbsTol(1e-06);
+      opt_solver.SetProxRelTol(1e-06);
+
+      opt_solver.SetNonlinMaxIter(1e02);
       opt_solver.SetNonlinAbsTol(1e-10);
       opt_solver.SetNonlinRelTol(1e-10);
+
       BlockVector x_final_TVector(offsets);
       opt_solver.Mult(x_initial, x_final_TVector);
-   return;
+
       BlockVector x_final_LVector(ind_rho_e_v, offset);
       for (int i=0; i<3; i++)
       {
@@ -1156,14 +1186,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       if (remap_v)
       {
-         ParGridFunction v(&pfes_v_scalar_final);
-         const int n = pfes_v_scalar_final.GetVSize();
-         for (int i=0; i<dim; i++)
-         {
-            v.SetFromTrueDofs(x_final_TVector.GetBlock(3+i));
-            v.SetFromTrueVector();
-            for (int j=0; j<v.Size(); j++) { x_final_LVector.GetBlock(3)[i*n + j] = v[j]; }
-         }
+         ParGridFunction vtmp(&pfes_v_final, x_final_LVector.GetBlock(3));
+         Vector v_final_TVector(x_final_TVector.GetBlock(3).GetData(),
+                                pfes_v_final.GetTrueVSize());
+         vtmp.SetFromTrueDofs(v_final_TVector);
       }
    }
    else { MFEM_ABORT("not implemented!"); }

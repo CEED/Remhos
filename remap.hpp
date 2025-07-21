@@ -51,7 +51,7 @@ inline real_t kkt_res(const BlockVector &x,
          {
             gval = 0.0;
          }
-         res += abs(gval);
+         res += std::min(abs(gval), 1.0);
       }
    }
    return res;

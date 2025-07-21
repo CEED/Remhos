@@ -386,6 +386,10 @@ public:
       BlockVector G_primal(G, offsets);
       BlockVector G_latent(G, numPrimalDof, b_offsets);
 
+      BlockVector res(total_offsets);
+      BlockVector res_primal(res, offsets);
+      BlockVector res_latent(res, numPrimalDof, b_offsets);
+
       // Latent auxiliary vector
       BlockVector x_latent_k(b_offsets);
       BlockVector Upsi(b_offsets); // Upsi = sigmoid(x)
@@ -398,6 +402,7 @@ public:
       Vector obj_value(1);
       Vector C_x(numConst); // C(x)
       C.Mult(x_primal, C_x);
+      real_t C_x_prev = C_x.Normlinf();
       // gradient. Will be used GN iteration
       BlockVector gradF(offsets);
       DenseMatrix gradC(numTotalDof, numConst);
@@ -406,49 +411,66 @@ public:
       Vector lambda(numConst);
       lambda = C_x;
       Vector new_lambda(numConst);
+      real_t last_min_Cx = infinity();
+      real_t mu = mu0;
 
       real_t kkt_target = abs_tol;
       real_t alpha;
 
+      int it_AL, it_PG, it_GN_all, it_GN;
       // AL loop for Remap Problem
+      real_t kkt = prox_abs_tol0;
+      real_t prox_abs_tol = prox_abs_tol0;
+      real_t prox_rel_tol = prox_rel_tol0;
       for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
       {
+         it_GN_all = 0;
          real_t kkt_AL_target = prox_abs_tol;
          // PG loop for AL Subproblem
-         for (int it_PG=0; it_PG<prox_max_iter; it_PG++)
+         for (it_PG=0; it_PG<prox_max_iter; it_PG++)
          {
             x_latent_k = x_latent;
-            // alpha = 1.0;
-            alpha = alpha0*std::pow(it_PG + 1, 2);
-            real_t res_PG_target = nonlin_abs_tol;
-            // Nonlinear loop for PG subproblem.
-            for (int it_GN=0; it_GN<nonlin_max_iter; it_GN++)
+            alpha = alpha0;
+            // alpha = alpha0*std::pow(1.0 + it_PG, 1);
+
+            // Objective
+            // obj.Mult(x_primal, obj_value);
+            obj.GetGradient().Mult(x_primal, gradF);
+
+            // Constraints
+            C.Mult(x_primal, C_x);
+            C.GetGradientMatrix(x_primal, gradC_primal);
+
+            // (grad C(x))*(lambda + mu * C(x))
+            add(lambda, mu, C_x, new_lambda);
+            gradC_primal.Mult(new_lambda, G_primal);
+            // grad F(x) + (grad C(x))*(lambda + mu * C(x))
+            G_primal += gradF;
+            // alpha F(x) + (grad C(x))*(lambda + mu * C(x))
+            G_primal *= alpha;
+
+            // [alpha F(x) + (grad C(x))*(lambda + mu*C(x)) + (psi - psi_k)]
+            for (int i=0; i<numVars; i++)
             {
-               // Objective
-               // obj.Mult(x_primal, obj_value);
-               obj.GetGradient().Mult(x_primal, gradF);
-
-               // Constraints
-               C.Mult(x_primal, C_x);
-               C.GetGradientMatrix(x_primal, gradC_primal);
-
-               // (grad C(x))*(lambda + mu * C(x))
-               add(lambda, mu, C_x, new_lambda);
-               gradC_primal.Mult(new_lambda, G_primal);
-               // grad F(x) + (grad C(x))*(lambda + mu * C(x))
-               G_primal += gradF;
-               // alpha F(x) + (grad C(x))*(lambda + mu * C(x))
-               G_primal *= alpha;
-
+               if (!has_bounds[i]) { continue; }
+               G_primal.GetBlock(i) += x_latent.GetBlock(i);
+               G_primal.GetBlock(i) -= x_latent_k.GetBlock(i);
+            }
+            dx_latent = 0.0;
+            real_t res_PG_target = nonlin_abs_tol;
+            res_primal = G_primal;
+            gradC.SetSubMatrix(0, 0, gradC_primal);
+            // Nonlinear loop for PG subproblem.
+            for (it_GN=0; it_GN<nonlin_max_iter; it_GN++)
+            {
                // [alpha F(x) + (grad C(x))*(lambda + mu*C(x)) + (psi - psi_k)]
                // [u - U(psi)]
                MapLatent(x_latent, x_min, x_max, Upsi, dUpsi);
                for (int i=0; i<numVars; i++)
                {
                   if (!has_bounds[i]) { continue; }
-                  G_primal.GetBlock(i) += x_latent.GetBlock(i);
-                  G_primal.GetBlock(i) -= x_latent_k.GetBlock(i);
-                  add(x_primal.GetBlock(i), -1.0, Upsi.GetBlock(i), G_latent.GetBlock(i));
+                  res_primal.GetBlock(i) -= dx_latent.GetBlock(i);
+                  add(x_primal.GetBlock(i), -1.0, Upsi.GetBlock(i), res_latent.GetBlock(i));
                }
                // Hessian solver. Hessian is I + hess (mu||C(x)||^2 + lambda^T C(x))
                // However, we approximate Hessian of the second term by mu*(grad C)(grad C)^T
@@ -457,27 +479,26 @@ public:
                pointwise_solver.Update(alpha, dUpsi);
                if (!use_hessian_approx)
                {
-                  // Linear constraints, so we can use the pointwise solver directly
-                  pointwise_solver.Mult(G, dx_all);
+                  pointwise_solver.Mult(res, dx_all);
                }
                else
                {
-                  // pointwise_solver.Mult(G, dx_all);
-                  gradC.SetSubMatrix(0, 0, gradC_primal);
                   Woodbury(GetComm(), pointwise_solver, mu*alpha, gradC, gradC,
-                           G, dx_all);
+                           res, dx_all);
                }
                x_all -= dx_all;
+               for (auto &v : x_latent) { v = std::min(std::max(v, -1e08), 1e08); }
                real_t succdiff_norm = std::sqrt(Dot(dx_primal, dx_primal));
-               real_t violate_norm = std::sqrt(Dot(G_latent, G_latent));
+               real_t violate_norm = std::sqrt(Dot(res_latent, res_latent));
+               real_t res_norm = std::max(succdiff_norm, violate_norm);
 
-               if (it_GN == 0) { res_PG_target = std::max(res_PG_target, succdiff_norm*nonlin_rel_tol); }
+               if (it_GN == 0) { res_PG_target = std::max(res_PG_target, res_norm*nonlin_rel_tol); }
                if (print_level >= 3)
                {
                   out << "    GN Iteration " << it_GN + 1 << ", ||dx||_l2 = " << succdiff_norm <<
                          ", Latent primal inconsistency: " << violate_norm << std::endl;
                }
-               if (succdiff_norm < res_PG_target)
+               if (res_norm < res_PG_target)
                {
                   if (print_level >= 2)
                   {
@@ -487,6 +508,7 @@ public:
                   break; // PG subproblem converged
                }
             } // end of PG subproblem loop
+            it_GN_all += it_GN + 1;
             obj.Mult(x_primal, obj_value);
             obj.GetGradient().Mult(x_primal, gradF);
 
@@ -494,6 +516,7 @@ public:
             C.GetGradientMatrix(x_primal, gradC_primal);
 
             add(lambda, mu, C_x, new_lambda);
+            last_min_Cx = std::min(C_x.Normlinf(), last_min_Cx);
             gradC_primal.Mult(lambda, G_primal);
             G_primal += gradF;
 
@@ -515,29 +538,27 @@ public:
                break; // AL subproblem solved
             }
          } // end of AL subproblem loop
-         // Check KKT for Remap Problem, grad obj(x) + grad C(x)*lambda points inward
-         obj.Mult(x_primal, obj_value);
-         obj.GetGradient().Mult(x_primal, gradF);
-
-         C.Mult(x_primal, C_x);
-         C.GetGradientMatrix(x_primal, gradC_primal);
-
          lambda.Add(mu, C_x);
-         gradC_primal.Mult(lambda, G_primal);
-         G_primal += gradF;
+         real_t mu_prev = mu;
+         if (C_x.Normlinf() > C_x_prev && C_x.Normlinf() > const_abs_tol)
+         {
+            mu = mu*1.5;
+         }
+         C_x_prev = C_x.Normlinf();
 
-         real_t kkt = problem.ComputeKKT(x_primal, G_primal);
+         kkt = problem.ComputeKKT(x_primal, G_primal);
 
          if (print_level >= 1)
          {
-            out << "AL Iteration " << it_AL + 1 << ", KKT residual = " << kkt << std::endl;
+            out << "AL Iteration " << it_AL + 1 << " with mu = " << mu_prev << " (" << it_PG + 1 << " - " << it_GN_all
+                << "), KKT residual = " << kkt << std::endl;
             out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = ";
             for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << std::endl;
          }
 
          // If first iteration, setup the relative tolerance.
          if (it_AL == 0) { kkt_target = std::max(kkt_target, kkt*rel_tol); }
-         if ((C_x.Normlinf() < kkt_target) && it_AL > 0)
+         if ((kkt < kkt_target && C_x.Normlinf() < const_abs_tol) && it_AL > 0)
          {
             if (print_level >= 0)
             {
@@ -553,22 +574,29 @@ public:
    }
    void SetAbsTol(real_t tol) { abs_tol = tol; }
    void SetRelTol(real_t tol) { rel_tol = tol; }
+
+   void SetConstAbsTol(real_t tol) { const_abs_tol = tol; }
+
    void SetProxMaxIter(int n) { prox_max_iter = n; }
-   void SetProxAbsTol(real_t tol) { prox_abs_tol = tol; }
-   void SetProxRelTol(real_t tol) { prox_rel_tol = tol; }
+   void SetProxAbsTol(real_t tol) { prox_abs_tol0 = tol; }
+   void SetProxRelTol(real_t tol) { prox_rel_tol0 = tol; }
+
    void SetNonlinMaxIter(int n) { nonlin_max_iter = n; }
    void SetNonlinAbsTol(real_t tol) { nonlin_abs_tol = tol; }
    void SetNonlinRelTol(real_t tol) { nonlin_rel_tol = tol; }
    void SetAlpha(real_t alpha) { this->alpha0 = alpha; }
-   void SetPenalty(real_t mu) { this->mu = mu; }
+   void SetPenalty(real_t mu) { this->mu0 = mu; }
 protected:
    // Inner solver parameters
    real_t alpha0 = 1.0;
-   real_t mu = 1.0;
+   real_t mu0 = 1.0;
    bool use_hessian_approx = false; // whether the constraints are linear
+
+   real_t const_abs_tol = 1e-06;
+
    int prox_max_iter = 100;
-   real_t prox_abs_tol = 1e-06;
-   real_t prox_rel_tol = 1e-06;
+   mutable real_t prox_abs_tol0 = 1e-06;
+   mutable real_t prox_rel_tol0 = 1e-06;
    int nonlin_max_iter = 100;
    real_t nonlin_abs_tol = 1e-08;
    real_t nonlin_rel_tol = 1e-08;
@@ -598,6 +626,35 @@ protected:
    Array<int> total_offsets; // both primal and latent
    mutable PointwiseSolver pointwise_solver;
 };
+
+class CyclicLVPPSolver : public LVPPSolver
+{
+public:
+   CyclicLVPPSolver(RemapProblem &problem, const Array<int> &offsets,
+                    const Array<int> &b_offsets)
+      : LVPPSolver(problem, offsets, b_offsets)
+   { }
+
+   void Mult(const Vector &x, Vector &opt_x) const override
+   {
+   }
+protected:
+   real_t Project(const BlockVector &psi, const BlockVector &x_min, const BlockVector &x_max,
+                  const int i) const
+   {
+      real_t lambda;
+      x_tmp = psi;
+      MapLatent(x_tmp, x_min, x_max, Upsi_tmp, dUpsi_tmp);
+      Functional &constraint = static_cast<const StackedFunctional*>(problem.GetEqualityConstraints())->GetFunctional(i);
+      return lambda;
+   }
+
+   mutable BlockVector Upsi_tmp;
+   mutable BlockVector dUpsi_tmp;
+   mutable BlockVector x_tmp;
+
+};
+
 
 
 }
