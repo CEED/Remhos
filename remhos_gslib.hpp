@@ -165,6 +165,8 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
+   real_t atol        = 1e-08;
+   real_t rtol        = 1e-08;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
        hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 };

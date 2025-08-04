@@ -1,39 +1,64 @@
-
 #ifndef REMHOS_LVPP_HPP
 #define REMHOS_LVPP_HPP
-#include "config/config.hpp"
-#include "fem/fe_coll.hpp"
-#include "fem/qspace.hpp"
-#include "general/forall.hpp"
 #include "mfem.hpp"
-#include "mpi.h"
-#include "./remap.hpp"
+#include "remap.hpp"
 
 namespace mfem
 {
-
-inline real_t sigmoid(const real_t x)
+inline void MapLatent(const Vector &latent, const Vector &x_min,
+                      const Vector &x_max, Vector &primal)
 {
-   return x > 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
+   const int N = latent.Size();
+   const bool use_dev = latent.UseDevice() || x_min.UseDevice() ||
+                        x_max.UseDevice() || primal.UseDevice();
+   auto psi_ = latent.Read(use_dev);
+   auto xmin_ = x_min.Read(use_dev);
+   auto xmax_ = x_max.Read(use_dev);
+   auto primal_ = primal.Write(use_dev);
+   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
+   {
+      primal_[i] = sigmoid(psi_[i], xmin_[i], xmax_[i]);
+   });
 }
 
-inline real_t sigmoid(const real_t x, const real_t l, const real_t u)
+inline void MapLatent(const Vector &latent, const Vector &x_min,
+                      const Vector &x_max, Vector &primal, Vector &dprimal)
 {
-   real_t scale = (u - l);
-   return l + scale*sigmoid(x);
+   const int N = latent.Size();
+   const bool use_dev = latent.UseDevice() || x_min.UseDevice() ||
+                        x_max.UseDevice() || primal.UseDevice();
+   auto psi_ = latent.Read(use_dev);
+   auto xmin_ = x_min.Read(use_dev);
+   auto xmax_ = x_max.Read(use_dev);
+   auto primal_ = primal.Write(use_dev);
+   auto dprimal_ = dprimal.Write(use_dev);
+   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
+   {
+      primal_[i] = sigmoid(psi_[i], xmin_[i], xmax_[i]);
+   });
+   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
+   {
+      dprimal_[i] = der_sigmoid(psi_[i], xmin_[i], xmax_[i]);
+   });
 }
 
-inline real_t der_sigmoid(const real_t x)
+inline void MapPrimal(const Vector &primal, const Vector &x_min,
+                      const Vector &x_max, Vector &latent,
+                      const real_t maxval = 20.0)
 {
-   const real_t s = sigmoid(x);
-   return s * (1.0 - s);
+   const int N = primal.Size();
+   const bool use_dev = latent.UseDevice() || x_min.UseDevice() ||
+                        x_max.UseDevice() || primal.UseDevice();
+   auto primal_ = primal.Read(use_dev);
+   auto xmin_ = x_min.Read(use_dev);
+   auto xmax_ = x_max.Read(use_dev);
+   auto latent_ = latent.Write(use_dev);
+   mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE (int i)
+   {
+      latent_[i] = std::clamp(logit(primal_[i], xmin_[i], xmax_[i]), -maxval, maxval);
+   });
 }
 
-inline real_t der_sigmoid(const real_t x, const real_t l, const real_t u)
-{
-   real_t scale = (u - l);
-   return scale*der_sigmoid(x);
-}
 
 class MappedGridFunctionCoefficient : public GridFunctionCoefficient
 {
@@ -51,151 +76,6 @@ public:
    }
 };
 
-class RemapObjective : public Functional
-{
-public:
-   // Initialize the LVPPRemap Functional.
-   // space_idx[i] = -1 : quadrature function, >= 0 : finite element space index
-   // x_initial : initial values before remapping
-   RemapObjective(MPI_Comm comm, QuadratureSpace &qs,
-                  std::vector<ParFiniteElementSpace*> &fes,
-                  const Array<int> &space_idx,
-                  const BlockVector &x_initial)
-      : Functional(comm, x_initial.Size())
-      , qs(qs), fes(fes), qf(qs), gfs(fes.size())
-      , zero_cf(0.0)
-      , numVars(space_idx.Size()), space_idx(space_idx)
-      , x_initial(x_initial)
-   {
-      MFEM_VERIFY(space_idx.Max() < (int)fes.size() && space_idx.Min() >= -1,
-                  "Size mismatch between fes and space_idx")
-
-      // GridFunction initialization
-      for (int i=0; i<fes.size(); i++)
-      {
-         gfs[i] = std::make_unique<ParGridFunction>(fes[i]);
-      }
-
-      // Compute Block offsets for each variable
-      true_offsets.SetSize(0); true_offsets.Append(0);
-      for (int i=0; i<numVars; i++)
-      {
-         if (space_idx[i] < 0) { true_offsets.Append(qs.GetSize()); }
-         else { true_offsets.Append(fes[space_idx[i]]->GetTrueVSize()); }
-      }
-      true_offsets.PartialSum();
-   }
-
-   // Compute L2-objective, 0.5 * \sum_var ||x_var - x_initial_var||^2_{L2}
-   void Mult(const Vector &x, Vector &y) const override
-   {
-      BlockVector x_block(const_cast<Vector&>(x), true_offsets);
-      real_t result = 0.0;
-      for (int i=0; i<numVars; i++)
-      {
-         const int sid = space_idx[i];
-         if (sid < 0)
-         {
-            qf = x_block.GetBlock(i);
-            qf -= x_initial.GetBlock(i);
-            qf *= qf;
-            result += qf.Integrate(); // this will take care of parallel reduction
-         }
-         else
-         {
-            add(x_block.GetBlock(i), -1.0, x_initial.GetBlock(i),
-                gfs[sid]->GetTrueVector());
-            gfs[sid]->SetFromTrueVector();
-            real_t err = gfs[sid]->ComputeL2Error(zero_cf);
-            result += err * err;
-         }
-      }
-      y.SetSize(1);
-      y[0] = 0.5 * result;
-   }
-
-   // Compute true gradient in L2 sense
-   // Note that derivative is M*(x-x_initial), but we are using the true gradient.
-   void EvalGradient(const Vector &x, Vector &grad) const override
-   {
-      add(x, -1.0, x_initial, grad);
-   }
-
-   /// Hessian is identity. So, HessianMult simply returns the directio d.
-   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
-   {
-      hess = d;
-   }
-
-   QuadratureSpace &GetQuadratureSpace() const { return qs; }
-   std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const { return fes; }
-   Array<int> GetSpaceIdx() const { return space_idx; }
-
-
-protected:
-   QuadratureSpace &qs;
-   std::vector<ParFiniteElementSpace*> fes;
-   mutable QuadratureFunction qf;
-   mutable std::vector<std::unique_ptr<ParGridFunction>> gfs;
-   mutable ConstantCoefficient zero_cf;
-   const int numVars;
-   Array<int> space_idx;
-   Array<int> true_offsets;
-   const BlockVector &x_initial;
-private:
-};
-
-class RemapProblem : public ConstrainedOptimizationProblem
-{
-public:
-   RemapProblem(RemapObjective &objective,
-                const BlockVector &x_min,
-                const BlockVector &x_max,
-                StackedSharedFunctional &C)
-      : ConstrainedOptimizationProblem(objective, &C)
-      , x_min(x_min), x_max(x_max)
-   {}
-   void Mult(const Vector &x, Vector &y) const override
-   {
-      objective.Mult(x, y);
-      /// Do something with the constraints
-   }
-   void EvalGradient(const Vector &x, Vector &grad) const override
-   {
-      objective.EvalGradient(x, grad);
-      /// Do something with the constraints
-   }
-   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
-   {
-      objective.HessianMult(x, d, hess);
-      /// Do something with the constraints
-   }
-   const Vector &GetLowerBounds() const { return x_min; }
-   const Vector &GetUpperBounds() const { return x_max; }
-   QuadratureSpace &GetQuadratureSpace() const { return static_cast<RemapObjective&>(objective).GetQuadratureSpace(); }
-   std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const
-   {
-      return static_cast<RemapObjective&>(objective).GetFiniteElementSpaces();
-   }
-   Array<int> GetSpaceIdx() const { return static_cast<RemapObjective&>(objective).GetSpaceIdx(); }
-   // Compute KKT residual with grad = grad objective + <lambda, grad C>
-   real_t ComputeKKT(const BlockVector &x,
-                     const BlockVector &grad) const
-   {
-      real_t kkt = kkt_res(x, x_min, x_max, grad);
-      MPI_Allreduce(MPI_IN_PLACE, &kkt, 1, MPITypeMap<real_t>::mpi_type, MPI_SUM,
-                    GetComm());
-      HYPRE_BigInt n = x.Size();
-      MPI_Allreduce(MPI_IN_PLACE, &n, 1, MPITypeMap<HYPRE_BigInt>::mpi_type, MPI_SUM,
-                    GetComm());
-      return kkt / n;
-   }
-
-protected:
-   const BlockVector &x_min; // lower bounds
-   const BlockVector &x_max; // upper bounds
-};
-
 // Solve [alpha I_nn, I_nb; I_bn, -w I_bb]. As long as alpha > 0 and w >= 0, the system is well-posed.
 // Here, I is a rectangular identity matrix corresponding to the bounds.
 // That is, I_{bn}[i,j] = 1 when there is a bound for the i-th primal variable
@@ -204,22 +84,22 @@ class PointwiseSolver : public Operator
    Array<int> x_offsets, b_offsets;
    real_t alpha;
    const BlockVector *w;
-   Array<bool> has_bounds;
+   Array<bool> has_latent;
 public:
 
-   PointwiseSolver(const Array<int> x_offsets, const Array<int> b_offsets)
-      : Operator(x_offsets.Last() + b_offsets.Last())
-      , x_offsets(x_offsets), b_offsets(b_offsets)
-      , alpha(1.0), has_bounds(b_offsets.Size()-1)
+   PointwiseSolver(const Array<int> x_offsets, const Array<int> l_offsets)
+      : Operator(x_offsets.Last() + l_offsets.Last())
+      , x_offsets(x_offsets), b_offsets(l_offsets)
+      , alpha(1.0), has_latent(l_offsets.Size()-1)
    {
-      MFEM_VERIFY(x_offsets.Size() == b_offsets.Size(),
+      MFEM_VERIFY(x_offsets.Size() == l_offsets.Size(),
                   "PointwiseSolver: Size mismatch between x_offsets and b_offsets");
-      for (int i=0; i<b_offsets.Size()-1; i++)
+      for (int i=0; i<l_offsets.Size()-1; i++)
       {
-         has_bounds[i] = b_offsets[i+1] - b_offsets[i] > 0;
-         if (has_bounds[i])
+         has_latent[i] = (l_offsets[i+1] - l_offsets[i]) > 0;
+         if (has_latent[i])
          {
-            MFEM_VERIFY(b_offsets[i+1] - b_offsets[i] == x_offsets[i+1] - x_offsets[i],
+            MFEM_VERIFY(l_offsets[i+1] - l_offsets[i] == x_offsets[i+1] - x_offsets[i],
                         "PointwiseSolver: Size mismatch between bounds and primal variables");
          }
       }
@@ -250,11 +130,10 @@ public:
       // for each block
       for (int i_block=0; i_block<numBlocks; i_block++)
       {
-         if (!has_bounds[i_block]) // no bound
+         if (!has_latent[i_block]) // no bound
          {
             // alpha I = b
-            primal_x.GetBlock(i_block) = primal_b.GetBlock(i_block);
-            primal_x.GetBlock(i_block) /= alpha;
+            primal_x.GetBlock(i_block).Set(1.0 / alpha, primal_b.GetBlock(i_block));
             continue;
          }
 
@@ -294,7 +173,7 @@ public:
    // problem: Remap problem
    // offsets: block offsets for the primal variables
    // b_offsets: block offsets for the bounds
-   LVPPSolver(RemapProblem &problem, const Array<int> &offsets,
+   LVPPSolver(remap::RemapProblem &problem, const Array<int> &offsets,
               const Array<int> &b_offsets)
       : IterativeSolver(problem.GetComm())
       , problem(problem), offsets(offsets), b_offsets(b_offsets)
@@ -310,7 +189,7 @@ public:
       }
    }
 
-   LVPPSolver(RemapProblem &problem, const Array<int> &offsets)
+   LVPPSolver(remap::RemapProblem &problem, const Array<int> &offsets)
       : LVPPSolver(problem, offsets, offsets)
    {}
 
@@ -348,8 +227,14 @@ public:
       Functional &obj = problem.GetObjective();
       StackedSharedFunctional &C = static_cast<StackedSharedFunctional&>
                                    (*problem.GetEqualityConstraints());
-      // Create the Augmented Lagrangian functional
-      // J(x) + 0.5 mu * C(x)^T C(x) + <lambda, C(x)>
+      QuadratureSpace &qspace = problem.GetQuadratureSpace();
+      std::vector<ParFiniteElementSpace*> fespaces = problem.GetFiniteElementSpaces();
+      std::vector<std::unique_ptr<MassOperator>> mass_ops(fespaces.size() + 1);
+      for(int i=0; i<fespaces.size(); i++)
+      {
+         mass_ops[i] = std::make_unique<MassOperator>(*fespaces[i]);
+      }
+      mass_ops.back() = std::make_unique<MassOperator>(qspace);
 
       Array<int> space_idx = problem.GetSpaceIdx();
 
@@ -357,8 +242,13 @@ public:
                               b_offsets);
       const BlockVector x_min(const_cast<Vector&>(problem.GetLowerBounds()),
                               b_offsets);
-      Array<bool> has_bounds(0);
-      for (int i=0; i<x_max.NumBlocks(); i++) { has_bounds.Append(x_max.GetBlock(i).Size() > 0); }
+      MFEM_VERIFY(x_min.Size() == x_max.Size() && x_min.Size() == b_offsets.Last(),
+                  "Size mismatch between x_min, x_max and b_offsets");
+      Array<bool> has_bounds(x_max.NumBlocks());
+      for (int i=0; i<x_max.NumBlocks(); i++)
+      {
+         has_bounds[i] = x_max.GetBlock(i).Size() > 0;
+      }
 
       const int numPrimalDof = x.Size(); // primal ndof
       const int numLatentDof = x_max.Size();
@@ -394,9 +284,17 @@ public:
       BlockVector x_latent_k(b_offsets);
       BlockVector Upsi(b_offsets); // Upsi = sigmoid(x)
       BlockVector dUpsi(b_offsets); // dUpsi = der_sigmoid(x)
+      for (int i=0; i<numVars; i++)
+      {
+         if (!has_bounds[i]) { x_primal.GetBlock(i) = x_block.GetBlock(i); }
+         else
+         {
+            add(x_min.GetBlock(i), 1.0, x_max.GetBlock(i), x_primal.GetBlock(i));
+            x_primal.GetBlock(i) *= 0.5;
+         }
+      }
 
-      x_primal = x_block;
-      x_latent = 0.0;
+      MapPrimal(x_primal, x_min, x_max, x_latent, 20.0);
 
       // Values
       Vector obj_value(1);
@@ -408,11 +306,12 @@ public:
       DenseMatrix gradC(numTotalDof, numConst);
       gradC = 0.0;
       DenseMatrix gradC_primal(numPrimalDof, numConst);
+      C.GetGradientMatrix(x_primal, gradC_primal);
       Vector lambda(numConst);
-      lambda = C_x;
+      lambda = 0.0;
       Vector new_lambda(numConst);
       real_t last_min_Cx = infinity();
-      real_t mu = mu0;
+      real_t mu = 1.0 / gradC_primal.MaxMaxNorm();
 
       real_t kkt_target = abs_tol;
       real_t alpha;
@@ -426,6 +325,7 @@ public:
       {
          it_GN_all = 0;
          real_t kkt_AL_target = prox_abs_tol;
+         real_t kkt_prev = 0.0;
          // PG loop for AL Subproblem
          for (it_PG=0; it_PG<prox_max_iter; it_PG++)
          {
@@ -448,6 +348,11 @@ public:
             G_primal += gradF;
             // alpha F(x) + (grad C(x))*(lambda + mu * C(x))
             G_primal *= alpha;
+            for (int i=0; i<numVars; i++)
+            {
+               mass_ops[(space_idx[i] + mass_ops.size()) % mass_ops.size()]->Riesz(
+                  G_primal.GetBlock(i), res_primal.GetBlock(i));
+            }
 
             // [alpha F(x) + (grad C(x))*(lambda + mu*C(x)) + (psi - psi_k)]
             for (int i=0; i<numVars; i++)
@@ -505,20 +410,20 @@ public:
                      out << "    PG Converged in " << it_GN + 1
                          << " iterations, residual norm = " << succdiff_norm << std::endl;
                   }
+                  it_GN++;
                   break; // PG subproblem converged
                }
             } // end of PG subproblem loop
-            it_GN_all += it_GN + 1;
+            it_GN_all += it_GN;
             obj.Mult(x_primal, obj_value);
-            obj.GetGradient().Mult(x_primal, gradF);
 
             C.Mult(x_primal, C_x);
-            C.GetGradientMatrix(x_primal, gradC_primal);
-
             add(lambda, mu, C_x, new_lambda);
+
+            C.GetGradient(x_primal).Mult(new_lambda, G_primal);
+            obj.GetGradient().AddMult(x_primal, G_primal);
+
             last_min_Cx = std::min(C_x.Normlinf(), last_min_Cx);
-            gradC_primal.Mult(lambda, G_primal);
-            G_primal += gradF;
 
             real_t kkt_AL = problem.ComputeKKT(x_primal, G_primal);
             // If first iteration, setup the relative tolerance
@@ -542,7 +447,7 @@ public:
          real_t mu_prev = mu;
          if (C_x.Normlinf() > C_x_prev && C_x.Normlinf() > const_abs_tol)
          {
-            mu = mu*1.5;
+            mu = std::min(mu*1.05, 1e02);
          }
          C_x_prev = C_x.Normlinf();
 
@@ -550,10 +455,13 @@ public:
 
          if (print_level >= 1)
          {
-            out << "AL Iteration " << it_AL + 1 << " with mu = " << mu_prev << " (" << it_PG + 1 << " - " << it_GN_all
+            out << "AL Iteration " << it_AL + 1 << " with mu = " << mu_prev << " (" << it_PG
+                + 1 << " - " << it_GN_all
                 << "), KKT residual = " << kkt << std::endl;
-            out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = ";
-            for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << std::endl;
+            out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = "
+                << C_x.Normlinf() << " (";
+            for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << "\b)" <<
+                  std::endl;
          }
 
          // If first iteration, setup the relative tolerance.
@@ -601,6 +509,545 @@ protected:
    real_t nonlin_abs_tol = 1e-08;
    real_t nonlin_rel_tol = 1e-08;
 
+   remap::RemapProblem &problem; // The LVPP problem to solve
+
+   Array<int> offsets; // primal offsets
+   Array<int> b_offsets; // bound offsets
+   Array<int> total_offsets; // both primal and latent
+   mutable PointwiseSolver pointwise_solver;
+};
+
+// Proximal gradient functional
+// Only uses latent variable for now.
+// Mult will evaluate the functional without the Bregman divergence
+// EvalGradient will evaluate the gradient
+// alpha*J(U(x)) + x - x_k
+// where x_k should be set before the first call.
+class PGFunctional : public Functional
+{
+private:
+   const Functional &f;
+   const Vector &x_min, &x_max;
+   Vector *latent_k;
+   real_t alpha = 1.0;
+   mutable Vector primal;
+public:
+   PGFunctional(const Functional &f, const Vector &x_min,
+                const Vector &x_max)
+      : Functional(f.GetComm(), f.Width())
+      , f(f), x_min(x_min), x_max(x_max)
+      , primal(f.Width())
+   { }
+
+   void SetLatent(Vector &latent) { this->latent_k = &latent; }
+   void SetStepSize(real_t alpha) { this->alpha = alpha; }
+   void Mult(const Vector &x, Vector &y) const override
+   {
+      MapLatent(x, x_min, x_max, primal);
+      f.Mult(primal, y);
+   }
+   void EvalGradient(const Vector &latent, Vector &grad) const override
+   {
+      MFEM_VERIFY(latent_k != nullptr, "Latent vector is not set.");
+      MapLatent(latent, x_min, x_max, primal);
+      f.GetGradient().Mult(primal, grad);
+      grad *= alpha;
+      grad += latent;
+      grad -= *latent_k;
+   }
+};
+
+// LBFGS in the Mirror Descent Framework
+// The original BFGS method uses
+// the primal difference (s_k) and the object gradient difference (y_k).
+// Instead, we use the latent difference
+// s_k = psi_{k+1} - psi_k
+// Then the mirror descent update becomes
+// psi_{k+1} = psi_k + eta_k * d_k
+// where d_k is the usual L-BFGS search direction
+// eta_k is determined by the line search to satisfy the curvature condition
+// <s_k, y_k> > 0. See LineSearch() for details.
+class ProxLBFGS : public Optimizer
+{
+public:
+   ProxLBFGS(Functional &obj,
+             const Vector &x_min,
+             const Vector &x_max,
+             MultiL2RieszMap &riesz,
+             const int m = 10)
+      : Optimizer(obj.GetComm())
+      , x_min(x_min), x_max(x_max)
+      , g(obj.Width()), g_k(obj.Width())
+      , d(obj.Width())
+      , m(m)
+      , s(m), y(m), rho(m)
+      , riesz(riesz)
+   {
+      rho = 0.0;
+      Optimizer::SetOperator(obj);
+   }
+
+   void Mult(const Vector &latent_0, Vector &latent) const override
+   {
+      latent = latent_0;
+
+      current_primal.SetSize(latent.Size());
+      g.SetSize(latent.Size());
+      g_k.SetSize(latent.Size());
+
+      real_t tol = std::max(abs_tol, rel_tol * std::sqrt(Dot(g,g)));
+      PGFunctional pgf(*subproblem, x_min, x_max);
+
+      for (final_iter=0; final_iter<max_iter; final_iter++)
+      {
+         g_k = g;
+         g_k -= latent_0;
+         g_k += latent;
+         GetDirection(final_iter, g_k, d);
+         rho[final_iter % m] = LineSearch(latent_0, d, g_k,
+                                          latent, current_primal, g,
+                                          y[final_iter % m], s[final_iter % m]);
+         if (rho[final_iter % m] < 0)
+         {
+            if (print_level >= 0) { MFEM_WARNING("Line search failed in MirrorLBFGS. Ignore current iteration."); }
+            final_iter--;
+         }
+         real_t kkt_res = kkt(current_primal, g);
+         if (print_level >= 2) { out << "MirrorLBFGS Iteration " << final_iter + 1 << ": ||kkt||_L2 = " << kkt_res << std::endl; }
+         if (kkt_res < tol)
+         {
+            if (print_level >= 1) { out << "MirrorLBFGS converged in " << final_iter + 1 << " iterations, gradient norm = " << kkt_res << std::endl; }
+            return; // converged
+         }
+      }
+      final_iter--;
+      real_t kkt_res = kkt(current_primal, g);
+      if (print_level >= 0)
+      {
+         MFEM_WARNING("MirrorLBFGS failed to converge in " << max_iter
+                      << " iterations with gradient norm = " << kkt_res << ".");
+      }
+   }
+
+   void SetPrimalVector(Vector &x) const
+   {
+      current_primal.MakeRef(x, 0, x.Size());
+   }
+
+protected:
+
+   virtual real_t kkt(const Vector &x, const Vector &gradient) const
+   {
+      masked_grad = gradient;
+      for (int i=0; i<x.Size(); i++)
+      {
+         if (x[i] < x_min[i] + 1e-08 && masked_grad[i] > 0.0)
+         {
+            masked_grad[i] = 0.0; // zero out the gradient at the lower bound
+         }
+         if (x[i] > x_max[i] - 1e-08 && masked_grad[i] < 0.0)
+         {
+            masked_grad[i] = 0.0; // zero out the gradient at the lower bound
+         }
+      }
+      return std::sqrt(Dot(masked_grad, masked_grad));
+   }
+
+   // Simple Line search to ensure <sk, yk> > 0
+   // returns positive rho = 1 / <sk, yk> when successful
+   // returns negative rho when failed
+   virtual bool LineSearch(const Vector &latent_k,
+                           const Vector &direction_k,
+                           const Vector &gradient_k,
+                           Vector &latent,
+                           Vector &primal,
+                           Vector &gradient,
+                           Vector &yk,
+                           Vector &sk) const
+   {
+      real_t eta = 1.0; // initial step size
+
+      yk.SetSize(latent.Size());
+      sk.SetSize(latent.Size());
+      Vector obj_value(1);
+
+      MapLatent(latent, x_min, x_max, primal);
+      subproblem->Mult(primal, obj_value);
+      real_t obj_value0 = obj_value[0];
+
+      real_t dk_dot_sk;
+      bool success = false;
+      for (int i=0; i<30; i++) // until step size > 2^-10 \approx 1e-03
+      {
+         // psi = psik + eta*dk
+         add(latent_k, eta, direction_k, latent);
+         for (auto &v : latent) { v = std::min(std::max(v, -1e02), 1e02); }
+         // x = U(psi)
+         MapLatent(latent, x_min, x_max, primal);
+         // update the gradient
+         subproblem->Mult(primal, obj_value);
+         oper->Mult(primal, gradient);
+         // yk = g - gk;
+         subtract(gradient, gradient_k, yk);
+         subtract(latent, latent_k, sk);
+         // sk = psi - psi_k = eta*dk;
+         // angle = Dot(yk, sk)/|yk||sk| = Dot(yk, dk)/|yk||dk|.
+         // To check positivity condition, we only consider Dot(yk, dk)
+         dk_dot_sk = Dot(yk, sk);
+         if (dk_dot_sk > 0.0)
+         {
+            success = true;
+            break; // found a positive curvature condition
+         }
+         eta *= 0.5;
+      }
+      // if (!success)
+      // {
+      // if (print_level >= 0)
+      // {
+      //    MFEM_WARNING("Line search failed in MirrorLBFGS. "
+      //                 "Check the problem setup and the initial guess.");
+      // }
+      // }
+      // MFEM_VERIFY(dk_dot_yk > 0,
+      //             "MirrorLBFGS: Line search failed to find a positive curvature "
+      //             "condition <sk, yk> > 0. Check the problem setup and the initial guess.");
+      return 1.0 / dk_dot_sk; // rho = 1 / <sk, yk>
+   }
+
+   real_t Dot(const Vector &u, const Vector &v) const override
+   {
+      return riesz.InnerProduct(u, v);
+   }
+
+   // Get the search direction from the current gradient
+   // @param k: current iteration number
+   // @param g: current gradient (not derivative)
+   // @param d: output primal search direction
+   virtual void GetDirection(const int k, const Vector &gradient,
+                             Vector &direction) const
+   {
+      // https://en.wikipedia.org/wiki/Limited-memory_BFGS#Algorithm
+      direction = gradient;
+      Vector alpha(m);
+      for (int i = k - 1; i >= std::max(k - m, 0); i--)
+      {
+         const int idx = i % m;
+         // out << "i = " << i << ", idx = i % m = " << idx << std::endl;
+         // MFEM_VERIFY(s[idx].Size() == direction.Size() &&
+         //             y[idx].Size() == direction.Size(),
+         //             "MirrorLBFGS: s[" << idx << "] and y[" << idx
+         //             << "] must have the same size as the search direction at " << k
+         //             << ". Check the problem setup and the initial guess.");
+         // MFEM_VERIFY(s[idx].CheckFinite() == 0,
+         //             "MirrorLBFGS: s[" << idx << "] is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         // MFEM_VERIFY(y[idx].CheckFinite() == 0,
+         //             "MirrorLBFGS: y[" << idx << "] is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         alpha[idx] = rho[idx] * Dot(direction, s[idx]);
+         direction.Add(-alpha[idx], y[idx]);
+      }
+
+      if (k > 0)
+      {
+         const int idx = std::max(k - m, 0) % m;
+         const real_t gamma = Dot(s[idx], y[idx]) / Dot(y[idx], y[idx]);
+         // MFEM_VERIFY(CheckFinite(&gamma, 1) == 0,
+         //             "MirrorLBFGS: gamma is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         direction *= gamma;
+      }
+
+      for (int i = std::max(k - m, 0); i < k; i++)
+      {
+         const int idx = i % m;
+         // out << "i = " << i << ", idx = i % m = " << idx << std::endl;
+         // MFEM_VERIFY(s[idx].CheckFinite() == 0,
+         //             "MirrorLBFGS: s[" << idx << "] is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         // MFEM_VERIFY(y[idx].CheckFinite() == 0,
+         //             "MirrorLBFGS: y[" << idx << "] is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         // MFEM_VERIFY(CheckFinite(&rho[idx], 1) == 0,
+         //             "MirrorLBFGS: rho is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         real_t beta = rho[idx] * Dot(direction, y[idx]);
+         // real_t norm = Dot(direction, y[idx]);
+         // MFEM_VERIFY(CheckFinite(&norm, 1) == 0,
+         //             "MirrorLBFGS: norm is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         // MFEM_VERIFY(CheckFinite(&beta, 1) == 0,
+         //             "MirrorLBFGS: beta is not finite at " << k << ". "
+         //             << "Check the problem setup and the initial guess.");
+         direction.Add(alpha[idx] - beta, s[idx]);
+      }
+      direction.Neg();
+   }
+   const Vector &x_min; // lower bounds
+   const Vector &x_max;
+   mutable Vector current_primal;
+   mutable Vector latent_prev;
+   mutable Vector g;
+   mutable Vector g_k;
+   mutable Vector d;
+   mutable Vector masked_grad;
+   int m;
+   MultiL2RieszMap &riesz;
+
+   mutable std::vector<Vector> s;
+   mutable std::vector<Vector> y;
+   mutable Vector rho;
+};
+
+class LBFGSLVPPSolver : public IterativeSolver
+{
+public:
+   // Constructor for the LVPP solver
+   // problem: Remap problem
+   // offsets: block offsets for the primal variables
+   // b_offsets: block offsets for the bounds
+   LBFGSLVPPSolver(remap::RemapProblem &problem, const Array<int> &offsets,
+                   const Array<int> &b_offsets)
+      : IterativeSolver(problem.GetComm())
+      , problem(problem), offsets(offsets), b_offsets(b_offsets)
+      , pointwise_solver(offsets, b_offsets)
+   {
+      // input and output are primal variables
+      width = height = offsets.Last();
+
+      total_offsets = offsets;
+      for (int i=0; i<b_offsets.Size()-1; i++)
+      {
+         total_offsets.Append(b_offsets[i+1] + width);
+      }
+   }
+
+   LBFGSLVPPSolver(remap::RemapProblem &problem, const Array<int> &offsets)
+      : LBFGSLVPPSolver(problem, offsets, offsets)
+   {}
+
+   void IncludeConstraintHessian(bool use_hessian_approx)
+   {
+      this->use_hessian_approx = use_hessian_approx;
+   }
+
+   // Solves the LVPP problem
+   /*
+       It uses the Augmented Lagrangian method.
+       For each AL iteration, it solves the subproblem
+        min_x { L(x, lambda, mu) = F(x) + 0.5 mu * C(x)^T C(x) + <lambda, C(x)> }
+       where F is the objective functional,
+       C is the equality constraint operator,
+       lambda is the Lagrange multiplier vector (initialized to zero),
+       mu is the penalty parameter (initialized to 1.0).
+       After each AL iteration, lambda <- lambda + mu * C(x)
+
+       The subproblem is solved using LVPP method.
+
+       min_x L(x, lambda, mu) + 1/alpha * D(x, x_k)
+       where D is the Bregman distance operator,
+       x_k is the previous iteration.
+       Instead of D(x, x_k), we uses its dual form
+       D(x, x_k) = D^*(psi, psi_k)
+       where psi = sigmoid(x) with proper scaling.
+   */
+   void Mult(const Vector &x, Vector &y) const override
+   {
+      // Cast x to block vector.
+      const BlockVector x_block(const_cast<Vector&>(x), offsets);
+
+      // Get info from the problem
+      Functional &obj = problem.GetObjective();
+      StackedSharedFunctional &C = static_cast<StackedSharedFunctional&>
+                                   (*problem.GetEqualityConstraints());
+      MultiL2RieszMap riesz(problem.GetQuadratureSpace(),
+                            problem.GetFiniteElementSpaces(),
+                            problem.GetSpaceIdx());
+
+
+      Array<int> space_idx = problem.GetSpaceIdx();
+
+      const BlockVector x_max(const_cast<Vector&>(problem.GetUpperBounds()),
+                              b_offsets);
+      const BlockVector x_min(const_cast<Vector&>(problem.GetLowerBounds()),
+                              b_offsets);
+      MFEM_VERIFY(x_min.Size() == x_max.Size() && x_min.Size() == b_offsets.Last(),
+                  "Size mismatch between x_min, x_max and b_offsets");
+      Array<bool> has_bounds(x_max.NumBlocks());
+      for (int i=0; i<x_max.NumBlocks(); i++)
+      {
+         has_bounds[i] = x_max.GetBlock(i).Size() > 0;
+      }
+
+      const int numPrimalDof = x.Size(); // primal ndof
+      const int numLatentDof = x_max.Size();
+      const int numTotalDof = numPrimalDof + numLatentDof; // total ndof
+      const int numConst = C.Height(); // num of constraints
+      const int numVars = offsets.Size()-1;
+
+      MFEM_VERIFY(numVars == x_min.NumBlocks()
+                  && x.Size() == offsets.Last()
+                  && x_max.Size() == b_offsets.Last(),
+                  "Size mismatch between x, x_min, x_max and offsets, b_offsets");
+      MFEM_VERIFY(total_offsets.Size() == numVars*2 + 1,
+                  "Size mismatch between total_offsets and numVars");
+
+      // Create an auxiliary vector for the inner solve
+      BlockVector x_all(total_offsets);
+      BlockVector x_primal(x_all, offsets);
+      BlockVector x_latent(x_all, numPrimalDof, b_offsets);
+
+      BlockVector dx_all(total_offsets);
+      BlockVector dx_primal(dx_all, offsets);
+      BlockVector dx_latent(dx_all, numPrimalDof, b_offsets);
+
+      BlockVector G(total_offsets);
+      BlockVector G_primal(G, offsets);
+      BlockVector G_latent(G, numPrimalDof, b_offsets);
+
+      BlockVector res(total_offsets);
+      BlockVector res_primal(res, offsets);
+      BlockVector res_latent(res, numPrimalDof, b_offsets);
+
+      // Latent auxiliary vector
+      BlockVector x_latent_k(b_offsets);
+      BlockVector Upsi(b_offsets); // Upsi = sigmoid(x)
+      BlockVector dUpsi(b_offsets); // dUpsi = der_sigmoid(x)
+
+      AugLagrangianFunctional aug_lag(obj, C);
+      ProxLBFGS mlbfgs(aug_lag, x_min, x_max, riesz, 300);
+      mlbfgs.SetPrintLevel(print_level - 1);
+      mlbfgs.SetMaxIter(prox_max_iter);
+      mlbfgs.SetAbsTol(prox_abs_tol0);
+      mlbfgs.SetRelTol(prox_rel_tol0);
+      mlbfgs.SetPrimalVector(
+         x_primal); // x_primal will be updated when Mult() is called
+
+      for (int i=0; i<numVars; i++)
+      {
+         if (!has_bounds[i]) { x_primal.GetBlock(i) = x_block.GetBlock(i); }
+         else
+         {
+            add(x_min.GetBlock(i), 1.0, x_max.GetBlock(i), x_primal.GetBlock(i));
+            x_primal.GetBlock(i) *= 0.5;
+         }
+      }
+
+      x_latent = 0.0;
+
+      // Values
+      Vector obj_value(1);
+      Vector C_x(numConst); // C(x)
+      C.Mult(x_primal, C_x);
+      real_t C_x_prev = C_x.Normlinf();
+      // gradient. Will be used GN iteration
+      BlockVector gradF(offsets);
+      DenseMatrix gradC(numTotalDof, numConst);
+      gradC = 0.0;
+      DenseMatrix gradC_primal(numPrimalDof, numConst);
+      C.GetGradientMatrix(x_primal, gradC_primal);
+      Vector lambda(numConst);
+      lambda = 0.0;
+      Vector new_lambda(numConst);
+      real_t last_min_Cx = infinity();
+      real_t mu = 1.0 / gradC_primal.MaxMaxNorm();
+
+      real_t kkt_target = abs_tol;
+      real_t alpha;
+
+      int it_AL, it_PG, it_GN_all, it_GN;
+      // AL loop for Remap Problem
+      real_t kkt = prox_abs_tol0;
+      real_t prox_abs_tol = prox_abs_tol0;
+      real_t prox_rel_tol = prox_rel_tol0;
+      for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
+      {
+         it_GN_all = 0;
+         real_t kkt_AL_target = prox_abs_tol;
+         real_t kkt_prev = 0.0;
+         aug_lag.SetLambda(lambda); aug_lag.SetPenalty(mu);
+         for (int it_PG = 0; it_PG < prox_max_iter; it_PG++)
+         {
+            // PG loop for AL Subproblem
+            x_latent_k = x_latent;
+            mlbfgs.Mult(x_latent_k, x_latent); // update x_primal too
+         }
+
+         obj.Mult(x_primal, obj_value);
+         C.Mult(x_primal, C_x);
+
+         lambda.Add(mu, C_x);
+         real_t mu_prev = mu;
+
+         // if (C_x.Normlinf() > C_x_prev && C_x.Normlinf() > const_abs_tol)
+         // {
+         //    mu = std::min(mu*1.5, 1e02);
+         // }
+         C_x_prev = C_x.Normlinf();
+
+         C.GetGradient(x_primal).Mult(lambda, G_primal);
+         obj.GetGradient().AddMult(x_primal, G_primal);
+
+         kkt = problem.ComputeKKT(x_primal, G_primal);
+
+         if (print_level >= 1)
+         {
+            out << "AL Iteration " << it_AL + 1 << " with mu = " << mu_prev << " (" << it_PG
+                + 1 << " - " << it_GN_all
+                << "), KKT residual = " << kkt << std::endl;
+            out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = "
+                << C_x.Normlinf() << " (";
+            for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << "\b)" <<
+                  std::endl;
+         }
+
+         // If first iteration, setup the relative tolerance.
+         if (it_AL == 0) { kkt_target = std::max(kkt_target, kkt*rel_tol); }
+         if ((kkt < kkt_target && C_x.Normlinf() < const_abs_tol) && it_AL > 0)
+         {
+            if (print_level >= 0)
+            {
+               out << "Remap Problem converged in " << it_AL + 1
+                   << " iterations, KKT residual = " << kkt << std::endl;
+               out << "Objective value = " << obj_value[0] << ", " << "Constraint residual = ";
+               for (int i=0; i<numConst; i++) { out << C_x[i] << " "; } out << std::endl;
+            }
+            break; // Remap Problem solved
+         }
+      } // end of AL loop
+      y = x_primal;
+   }
+
+   void SetAbsTol(real_t tol) { abs_tol = tol; }
+   void SetRelTol(real_t tol) { rel_tol = tol; }
+
+   void SetConstAbsTol(real_t tol) { const_abs_tol = tol; }
+
+   void SetProxMaxIter(int n) { prox_max_iter = n; }
+   void SetProxAbsTol(real_t tol) { prox_abs_tol0 = tol; }
+   void SetProxRelTol(real_t tol) { prox_rel_tol0 = tol; }
+
+   void SetNonlinMaxIter(int n) { nonlin_max_iter = n; }
+   void SetNonlinAbsTol(real_t tol) { nonlin_abs_tol = tol; }
+   void SetNonlinRelTol(real_t tol) { nonlin_rel_tol = tol; }
+   void SetAlpha(real_t alpha) { this->alpha0 = alpha; }
+   void SetPenalty(real_t mu) { this->mu0 = mu; }
+protected:
+   // Inner solver parameters
+   real_t alpha0 = 1.0;
+   real_t mu0 = 1.0;
+   bool use_hessian_approx = false; // whether the constraints are linear
+
+   real_t const_abs_tol = 1e-06;
+
+   int prox_max_iter = 100;
+   mutable real_t prox_abs_tol0 = 1e-06;
+   mutable real_t prox_rel_tol0 = 1e-06;
+   int nonlin_max_iter = 100;
+   real_t nonlin_abs_tol = 1e-08;
+   real_t nonlin_rel_tol = 1e-08;
+
    void MapLatent(const BlockVector &psi, const BlockVector &xmin,
                   const BlockVector &xmax, BlockVector &Upsi, BlockVector &dUpsi) const
    {
@@ -619,43 +1066,13 @@ protected:
       });
    }
 
-   RemapProblem &problem; // The LVPP problem to solve
+   remap::RemapProblem &problem; // The LVPP problem to solve
 
    Array<int> offsets; // primal offsets
    Array<int> b_offsets; // bound offsets
    Array<int> total_offsets; // both primal and latent
    mutable PointwiseSolver pointwise_solver;
 };
-
-class CyclicLVPPSolver : public LVPPSolver
-{
-public:
-   CyclicLVPPSolver(RemapProblem &problem, const Array<int> &offsets,
-                    const Array<int> &b_offsets)
-      : LVPPSolver(problem, offsets, b_offsets)
-   { }
-
-   void Mult(const Vector &x, Vector &opt_x) const override
-   {
-   }
-protected:
-   real_t Project(const BlockVector &psi, const BlockVector &x_min, const BlockVector &x_max,
-                  const int i) const
-   {
-      real_t lambda;
-      x_tmp = psi;
-      MapLatent(x_tmp, x_min, x_max, Upsi_tmp, dUpsi_tmp);
-      Functional &constraint = static_cast<const StackedFunctional*>(problem.GetEqualityConstraints())->GetFunctional(i);
-      return lambda;
-   }
-
-   mutable BlockVector Upsi_tmp;
-   mutable BlockVector dUpsi_tmp;
-   mutable BlockVector x_tmp;
-
-};
-
-
 
 }
 

@@ -2,6 +2,7 @@
 #define MFEM_REMAP_HPP
 
 #include "mfem.hpp"
+#include "general/forall.hpp"
 #include "miniapps/autodiff/admfem.hpp"
 // Provide a make_unique implementation for C++11
 #if __cplusplus <= 201103L
@@ -24,6 +25,40 @@ std::unique_ptr<T> make_unique( Args&&... args )
 
 namespace mfem
 {
+inline real_t sigmoid(const real_t x)
+{
+   return x > 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
+}
+
+inline real_t sigmoid(const real_t x, const real_t l, const real_t u)
+{
+   real_t scale = (u - l);
+   return l + scale*sigmoid(x);
+}
+
+inline real_t logit(const real_t x)
+{
+   real_t x_clamped = std::min(std::max(x, 1e-10), 1.0 - 1e-10);
+   return std::log(x_clamped / (1.0 - x_clamped));
+}
+
+inline real_t logit(const real_t x, const real_t l, const real_t u)
+{
+   real_t scale = (u - l);
+   return scale < 1e-08 ? 0.0 : logit((x - l) / scale);
+}
+
+inline real_t der_sigmoid(const real_t x)
+{
+   const real_t s = sigmoid(x);
+   return s * (1.0 - s);
+}
+
+inline real_t der_sigmoid(const real_t x, const real_t l, const real_t u)
+{
+   real_t scale = (u - l);
+   return scale*der_sigmoid(x);
+}
 // Mask Gradient g using normal cone conditions:
 // g_i = min { g_i, 0 } if x_i < xmin_i - tol
 //       max { g_i, 0 } if x_i > xmax_i + tol
@@ -39,7 +74,14 @@ inline real_t kkt_res(const BlockVector &x,
       const Vector &xmin_block = xmin.GetBlock(iblock);
       const Vector &xmax_block = xmax.GetBlock(iblock);
       const Vector &g_block = g.GetBlock(iblock);
-      if (xmin_block.Size() == 0) { for (auto &gval : g_block) { res += abs(gval); } }
+      if (xmin_block.Size() == 0)
+      {
+         for (auto &gval : g_block)
+         {
+            res += std::min(abs(gval), 1.0);
+         }
+         continue;
+      }
       for (int i = 0; i < x_block.Size(); i++)
       {
          real_t gval = g_block[i];
@@ -903,6 +945,224 @@ inline void Woodbury(const Operator &Ainv, const real_t c,
    Woodbury(Ainv, c, Uptr, Vptr, b, x);
 }
 
+
+class MassOperator : public Operator
+{
+private:
+   mutable Vector aux, aux2;
+   std::unique_ptr<Operator> M;
+   std::unique_ptr<Operator> M_inv;
+   std::unique_ptr<Solver> M_prec;
+#ifdef MFEM_USE_MPI
+   Array<HYPRE_BigInt> cols;
+   MPI_Comm comm=MPI_COMM_NULL;
+#endif
+public:
+   MassOperator(QuadratureSpace &qspace)
+      : Operator(qspace.GetSize())
+   {
+      M = std::make_unique<SparseMatrix>(qspace.GetWeights());
+      static_cast<SparseMatrix&>(*M).Finalize();
+      Vector w_inv = qspace.GetWeights();
+      w_inv.Reciprocal();
+      M_inv = std::make_unique<SparseMatrix>(w_inv);
+      static_cast<SparseMatrix&>(*M_inv).Finalize();
+#ifdef MFEM_USE_MPI
+      ParMesh *pm = dynamic_cast<ParMesh*>(qspace.GetMesh());
+      if (pm)
+      {
+         comm = pm->GetComm();
+
+         std::unique_ptr<Operator> M_ser(std::move(M));
+         std::unique_ptr<Operator> M_inv_ser(std::move(M_inv));
+         Array<HYPRE_BigInt> *offsets[2] = { &cols };
+         Array<HYPRE_BigInt> * glb_cols(&cols);
+
+         HYPRE_BigInt n = qspace.GetSize();
+         pm->GenerateOffsets(1, &n, &glb_cols);
+         int * Jloc = static_cast<SparseMatrix&>(*M_ser).GetJ();
+         Array<HYPRE_BigInt> Jglb(M_ser->Width());
+         for (int i=0; i<n; i++) { Jglb[i] = Jloc[i] + cols[0]; }
+
+         M = std::make_unique<HypreParMatrix>(
+                comm, n, cols.Last(), cols.Last(),
+                static_cast<SparseMatrix&>(*M_ser).GetI(),
+                Jglb.GetData(),
+                static_cast<SparseMatrix&>(*M_ser).GetData(),
+                cols.GetData(), cols.GetData()); // constructor with 9 arguments
+         M_inv = std::make_unique<HypreParMatrix>(
+                    comm, n, cols.Last(), cols.Last(),
+                    static_cast<SparseMatrix&>(*M_inv_ser).GetI(),
+                    Jglb.GetData(),
+                    static_cast<SparseMatrix&>(*M_inv_ser).GetData(),
+                    cols.GetData(), cols.GetData()); // constructor with 9 arguments
+      }
+#endif
+   }
+
+   MassOperator(FiniteElementSpace &fespace)
+      : Operator(fespace.GetTrueVSize())
+   {
+      std::unique_ptr<BilinearForm> mass;
+      std::unique_ptr<BilinearForm> inv_mass;
+      BilinearFormIntegrator *mass_intg = nullptr;
+      BilinearFormIntegrator *inv_mass_intg = nullptr;
+      if (fespace.GetVDim() == 1)
+      {
+         mass_intg = new MassIntegrator();
+         if (fespace.IsDGSpace())
+         {
+            inv_mass_intg = new InverseIntegrator(new MassIntegrator());
+         }
+      }
+      else if (fespace.FEColl()->GetMapType(fespace.GetMesh()->Dimension()) ==
+               FiniteElement::MapType::VALUE)
+      {
+         mass_intg = new VectorMassIntegrator();
+         if (fespace.IsDGSpace())
+         {
+            inv_mass_intg = new InverseIntegrator(new VectorMassIntegrator());
+         }
+      }
+      else
+      {
+         mass_intg = new VectorFEMassIntegrator();
+         if (fespace.IsDGSpace())
+         {
+            inv_mass_intg = new InverseIntegrator(new VectorFEMassIntegrator());
+         }
+      }
+#ifdef MFEM_USE_MPI
+      ParFiniteElementSpace *pfes =
+         dynamic_cast<ParFiniteElementSpace*>(&fespace);
+      if (pfes)
+      {
+         comm = pfes->GetComm();
+         mass = std::make_unique<ParBilinearForm>(pfes);
+         mass->AddDomainIntegrator(mass_intg);
+         mass->Assemble();
+         mass->Finalize();
+         M.reset(static_cast<ParBilinearForm&>(*mass).ParallelAssemble());
+         if (pfes->IsDGSpace())
+         {
+            inv_mass = std::make_unique<ParBilinearForm>(pfes);
+            inv_mass->AddDomainIntegrator(inv_mass_intg);
+            inv_mass->Assemble();
+            inv_mass->Finalize();
+            M_inv.reset(static_cast<ParBilinearForm&>(*inv_mass).ParallelAssemble());
+         }
+         else
+         {
+            M_prec = std::make_unique<HypreBoomerAMG>(static_cast<HypreParMatrix&>(*M));
+            static_cast<HypreBoomerAMG&>(*M_prec).SetPrintLevel(0);
+
+            M_inv = std::make_unique<HyprePCG>(comm);
+            static_cast<HyprePCG&>(*M_inv).SetPrintLevel(0);
+            static_cast<HyprePCG&>(*M_inv).SetPreconditioner(
+               static_cast<HypreBoomerAMG&>(*M_prec));
+            static_cast<HyprePCG&>(*M_inv).SetOperator(
+               static_cast<HypreParMatrix&>(*M));
+            static_cast<HyprePCG&>(*M_inv).SetAbsTol(1e-10);
+            static_cast<HyprePCG&>(*M_inv).SetMaxIter(1e06);
+            static_cast<HyprePCG&>(*M_inv).iterative_mode = true;
+         }
+      }
+#endif
+      if (!mass) // either serial build or non-parallel space
+      {
+         mass = std::make_unique<BilinearForm>(&fespace);
+         mass->AddDomainIntegrator(mass_intg);
+         mass->Assemble();
+         mass->Finalize();
+         M.reset(mass->LoseMat());
+         if (fespace.IsDGSpace())
+         {
+            inv_mass = std::make_unique<BilinearForm>(&fespace);
+            inv_mass->AddDomainIntegrator(inv_mass_intg);
+            inv_mass->Assemble();
+            inv_mass->Finalize();
+            M_inv.reset(inv_mass->LoseMat());
+         }
+         else
+         {
+            M_prec = std::make_unique<GSSmoother>();
+            M_inv = std::make_unique<CGSolver>();
+            static_cast<CGSolver&>(*M_inv).SetPrintLevel(0);
+            static_cast<CGSolver&>(*M_inv).SetPreconditioner(static_cast<GSSmoother&>
+                  (*M_prec));
+            static_cast<CGSolver&>(*M_inv).SetOperator(static_cast<const SparseMatrix&>
+                  (*M));
+            static_cast<CGSolver&>(*M_inv).SetAbsTol(1e-10);
+            static_cast<CGSolver&>(*M_inv).SetRelTol(1e-10);
+            static_cast<CGSolver&>(*M_inv).SetMaxIter(1e06);
+         }
+      }
+
+
+   }
+   // y = M*x
+   void Mult(const Vector &x, Vector &y) const override
+   {
+      y.SetSize(height);
+      M->Mult(x, y);
+   }
+   // y = M^{-1}*x
+   void Riesz(const Vector &x, Vector &y) const
+   {
+      y.SetSize(height);
+      M_inv->Mult(x, y);
+   }
+   // M
+   Operator &GetGradient(const Vector &x) const override
+   {
+      return *M;
+   }
+   // z = M*(x-y)
+   void MultDiff(const Vector &x, const Vector &y, Vector &z) const
+   {
+      MPI_Barrier(comm);
+      aux = x;
+      aux -= y;
+      z = y;
+      z.SetSize(height);
+      M->Mult(aux, z);
+   }
+   // y^T*M*x
+   real_t InnerProduct(const Vector &x, const Vector &y) const
+   {
+      aux.SetSize(height);
+      M->Mult(x, aux);
+      real_t result = aux*y;
+#ifdef MFEM_USE_MPI
+      if (comm != MPI_COMM_NULL)
+      {
+         MPI_Allreduce(MPI_IN_PLACE, &result, 1, MPITypeMap<real_t>::mpi_type,
+                       MPI_SUM, comm);
+      }
+#endif
+      return result;
+   }
+   // ||(x-y)||_M^2 = sqrt((x-y)^T*M*(x-y))^2
+   real_t DistanceSquaredTo(const Vector &x, const Vector &y) const
+   {
+      MultDiff(x, y, aux2);
+      real_t result = aux2*aux;
+#ifdef MFEM_USE_MPI
+      if (comm != MPI_COMM_NULL)
+      {
+         MPI_Allreduce(MPI_IN_PLACE, &result, 1, MPITypeMap<real_t>::mpi_type,
+                       MPI_SUM, comm);
+      }
+#endif
+      return result;
+   }
+   // ||(x-y)||_M = sqrt((x-y)^T*M*(x-y))
+   real_t DistanceTo(const Vector &x, const Vector &y) const
+   {
+      return std::sqrt(DistanceSquaredTo(x, y));
+   }
+};
+
 class MultiL2RieszMap : public Operator
 {
 private:
@@ -917,8 +1177,8 @@ private:
    std::vector<std::unique_ptr<Operator>> projector;
 public:
    MultiL2RieszMap(QuadratureSpace &qspace,
-                    std::vector<ParFiniteElementSpace*> fes,
-                    const Array<int> space_idx)
+                   std::vector<ParFiniteElementSpace*> fes,
+                   const Array<int> space_idx)
       : qspace(qspace)
       , fespace(fes)
       , space_idx(space_idx)
@@ -929,23 +1189,24 @@ public:
    {
       for (int i=0; i<fespace.size(); i++)
       {
+         ParBilinearForm curr_mass(fespace[i]);
+         curr_mass.AddDomainIntegrator(new MassIntegrator());
+         curr_mass.Assemble();
+         curr_mass.Finalize();
+         mass[i].reset(curr_mass.ParallelAssemble());
          if (dynamic_cast<const L2_FECollection*>(fespace[i]->FEColl()))
          {
-            ParBilinearForm curr_mass(fespace[i]);
-            curr_mass.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator()));
-            curr_mass.Assemble();
-            curr_mass.Finalize();
-            projector[i].reset(curr_mass.ParallelAssemble());
+            ParBilinearForm curr_mass_inv(fespace[i]);
+            curr_mass_inv.AddDomainIntegrator(new InverseIntegrator(new MassIntegrator()));
+            curr_mass_inv.Assemble();
+            curr_mass_inv.Finalize();
+            projector[i].reset(curr_mass_inv.ParallelAssemble());
          }
          else if (fespace[i]->FEColl()->GetMapType(fes[i]->GetMesh()->Dimension()) ==
                   FiniteElement::VALUE)
          {
-            ParBilinearForm curr_mass(fespace[i]);
-            curr_mass.AddDomainIntegrator(new MassIntegrator());
-            curr_mass.Assemble();
-            curr_mass.Finalize();
-            mass[i].reset(curr_mass.ParallelAssemble());
-            mass_prec[i] = std::make_unique<HypreBoomerAMG>(static_cast<HypreParMatrix&>(*mass[i]));
+            mass_prec[i] = std::make_unique<HypreBoomerAMG>(static_cast<HypreParMatrix&>
+                           (*mass[i]));
             projector[i] = std::make_unique<HyprePCG>(fespace[i]->GetComm());
             HyprePCG *solver = static_cast<HyprePCG*>(projector[i].get());
             mass_prec[i]->SetPrintLevel(0);
@@ -971,6 +1232,7 @@ public:
       width = height = offsets.Last();
    }
 
+   // From Dual to Primal (mass inverse)
    void Mult(const Vector &x, Vector &y) const override
    {
       y.SetSize(height);
@@ -992,6 +1254,58 @@ public:
          }
       }
    }
+   // From Primal to Dual (mass)
+   void MultTranspose(const Vector &x, Vector &y) const override
+   {
+      y.SetSize(height);
+      BlockVector x_block(const_cast<Vector&>(x), offsets);
+      BlockVector y_block(y, offsets);
+
+      for (int i=0; i<num_vars; i++)
+      {
+         const int sid = space_idx[i];
+         if (sid < 0) // QuadratureFunction
+         {
+            // just copy the data
+            y_block.GetBlock(i) = x_block.GetBlock(i);
+            y_block.GetBlock(i) *= qspace.GetWeights();
+         }
+         else // FiniteElementSpace
+         {
+            mass[sid]->Mult(x_block.GetBlock(i), y_block.GetBlock(i));
+         }
+      }
+   }
+   // return u^T M v
+   real_t InnerProduct(const Vector &x, const Vector &y) const
+   {
+      BlockVector x_block(const_cast<Vector&>(x), offsets);
+      BlockVector y_block(const_cast<Vector&>(y), offsets);
+      real_t result = 0.0;
+      aux.resize(fespace.size() + 1);
+
+      for (int i=0; i<num_vars; i++)
+      {
+         const int sid = space_idx[i];
+         if (sid < 0) // QuadratureFunction
+         {
+            aux.back() = x_block.GetBlock(i);
+            aux.back() *= qspace.GetWeights();
+            result += aux.back() * y_block.GetBlock(i);
+         }
+         else // FiniteElementSpace
+         {
+            aux[sid].SetSize(fespace[sid]->GetTrueVSize());
+            mass[sid]->Mult(x_block.GetBlock(i), aux[sid]);
+            result += aux[sid]*y_block.GetBlock(i);
+         }
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &result, 1,
+                    MPITypeMap<real_t>::mpi_type, MPI_SUM, MPI_COMM_WORLD);
+      return result;
+   }
+private:
+   mutable std::vector<Vector> aux;
 };
 
 namespace remap
@@ -1119,7 +1433,7 @@ class RemapObjectiveFunctional : public Functional
 {
 public:
    RemapObjectiveFunctional(QuadratureSpace &qspace,
-                            std::vector<FiniteElementSpace*> fes,
+                            const std::vector<FiniteElementSpace*> &fes,
                             const Vector &target,
                             const Array<int> &space_idx)
       : Functional(target.Size())
@@ -1131,106 +1445,99 @@ public:
    {
       Initialize();
    }
-   Array<int> GetOffsets() const { return offsets; }
+   RemapObjectiveFunctional(QuadratureSpace &qspace,
+                            const std::vector<ParFiniteElementSpace*> &fes,
+                            const Vector &target,
+                            const Array<int> &space_idx)
+      : Functional(target.Size())
+      , qspace(qspace)
+      , target(target)
+      , space_idx(space_idx)
+      , num_vars(space_idx.Size())
+   {
+      fespace.resize(fes.size());
+      for (int i=0; i<fes.size(); i++) { fespace[i] = fes[i]; }
+      ParMesh *pm = dynamic_cast<ParMesh*>(qspace.GetMesh());
+      if (pm)
+      {
+         SetComm(pm->GetComm());
+      }
+      Initialize();
+   }
+   const Array<int> GetOffsets() const { return offsets; }
+   QuadratureSpace &GetQuadratureSpace() const { return qspace; }
+   const std::vector<FiniteElementSpace*> &GetFiniteElementSpaces() const { return fespace; }
+#ifdef MFEM_USE_MPI
+   const std::vector<ParFiniteElementSpace*> &GetParFiniteElementSpaces() const { return par_fespace; }
+#endif
 
+   const Array<int> &GetSpaceIdx() const { return space_idx; }
+
+   // return ||u - target||^2 / 2 (in L2-norm)
    void Mult(const Vector &x, Vector &y) const override
    {
       y.SetSize(1);
       y[0] = 0.0;
-      add(x, -1.0, target, *diff);
+      const BlockVector x_block(const_cast<Vector&>(x), offsets);
+      const BlockVector target_block(const_cast<Vector&>(target), offsets);
       for (int i=0; i<num_vars; i++)
       {
-         const int sid = space_idx[i];
-         if (sid < 0)
-         {
-            y[0] += InnerProduct(diff->GetBlock(i),qspace.GetWeights());
-         }
-         else
-         {
-            // apply mass
-            fe_mass[sid]->Mult(diff->GetBlock(i), fe_diff[sid]);
-            // inner product
-            y[0] += InnerProduct(diff->GetBlock(i), fe_diff[sid]);
-         }
-      }
-      if (IsParallel())
-      {
-#ifdef MFEM_USE_MPI
-         MPI_Allreduce(MPI_IN_PLACE, &y[0], 1, MPITypeMap<real_t>::mpi_type,
-                       MPI_SUM, GetComm());
-#endif
+         // wrap space index, so that qspace(==-1) get the last
+         const int sid = (space_idx[i] + mass.size()) % mass.size();
+         y[0] += mass[sid]->DistanceSquaredTo(x_block.GetBlock(i),
+                                              target_block.GetBlock(i));
       }
       y[0] *= 0.5;
    }
 
+   // return M * (x - target)
    void EvalGradient(const Vector &x, Vector &y) const override
    {
-      add(x, -1.0, target, y);
+      MFEM_VERIFY(x.Size() == width && offsets.Last() == width && target.Size() == width,
+                  "RemapObjectiveFunctional::EvalGradient(): y size does not match target size.");
+
+      y.SetSize(width);
+      const BlockVector x_block(const_cast<Vector&>(x), offsets);
+      const BlockVector target_block(const_cast<Vector&>(target), offsets);
+      BlockVector y_block(y, offsets);
+      for (int i=0; i<num_vars; i++)
+      {
+         // wrap space index, so that qspace(==-1) get the last
+         const int sid = (space_idx[i] + mass.size()) % mass.size();
+         mass[sid]->MultDiff(x_block.GetBlock(i), target_block.GetBlock(i),
+                             y_block.GetBlock(i));
+      }
    }
+
+   // return global block mass operator, M
+   Operator &GetHessian(const Vector &x) const override
+   {
+      if (hessian) { return *hessian; }
+      hessian = std::make_unique<BlockOperator>(offsets);
+      for (int i=0; i<num_vars; i++)
+      {
+         const int sid = space_idx[i];
+         hessian->SetBlock(i, i, mass[(sid+mass.size()) % mass.size()].get());
+      }
+      hessian->owns_blocks = false;
+      return *hessian;
+   }
+
 private:
    QuadratureSpace &qspace;
    std::vector<FiniteElementSpace*> fespace;
-   const Vector &target;
-   Array<int> space_idx;
-   const int num_vars;
-   std::vector<std::unique_ptr<Operator>> fe_mass;
-   Array<int> offsets;
-   mutable std::unique_ptr<BlockVector> diff;
-   mutable std::vector<Vector> fe_diff;
 #ifdef MFEM_USE_MPI
    std::vector<ParFiniteElementSpace*> par_fespace;
 #endif
+   const Vector &target;
+   Array<int> space_idx;
+   const int num_vars;
+   std::vector<std::unique_ptr<MassOperator>> mass;
+   Array<int> offsets;
+   mutable std::unique_ptr<BlockOperator> hessian;
 
    void Initialize()
    {
-#ifdef MFEM_USE_MPI
-      // Check FESpaces are parallel or serial
-      par_fespace.resize(0);
-      for (auto &fes : fespace)
-      {
-         par_fespace.push_back(dynamic_cast<ParFiniteElementSpace*>(fes));
-      }
-      if (par_fespace.size() > 0 && par_fespace[0] != nullptr)
-      {
-         SetComm(par_fespace[0]->GetComm());
-      }
-#endif
-
-      // for each FESpace, create a GridFunction and QuadratureLinearForm
-      fe_mass.resize(fespace.size());
-      for (int sid=0; sid<fespace.size(); sid++)
-      {
-         MFEM_VERIFY(fespace[sid] != nullptr,
-                     "CompsedFunctional::Initialize(): FiniteElementSpace pointer is null at index "
-                     << sid);
-         MFEM_VERIFY(fespace[sid]->GetVDim() == 1,
-                     "CompsedFunctional::Initialize(): FiniteElementSpace must be a scalar FESpace");
-         fe_diff.emplace_back(fespace[sid]->GetTrueVSize());
-         if (IsParallel())
-         {
-#ifdef MFEM_USE_MPI
-            MFEM_VERIFY(par_fespace[sid] != nullptr,
-                        "CompsedFunctional::Initialize(): ParFiniteElementSpace pointer is null at index "
-                        << sid);
-            ParBilinearForm curr_mass(par_fespace[sid]);
-            curr_mass.AddDomainIntegrator(new MassIntegrator());
-            curr_mass.Assemble();
-            curr_mass.Finalize();
-            fe_mass[sid].reset(curr_mass.ParallelAssemble());
-#endif
-         }
-         else
-         {
-#ifdef MFEM_USE_MPI
-            BilinearForm curr_mass(fespace[sid]);
-            curr_mass.AddDomainIntegrator(new MassIntegrator());
-            curr_mass.Assemble();
-            curr_mass.Finalize();
-            fe_mass[sid].reset(curr_mass.LoseMat());
-#endif
-         }
-      }
-
       // Count degrees of freedom for each variable
       offsets.SetSize(0);
       offsets.Append(0);
@@ -1244,114 +1551,39 @@ private:
          else
          {
             MFEM_VERIFY(sid < fespace.size(),
-                        "CompsedFunctional::Initialize(): FiniteElementSpace index out of range.");
+                        "RemapObjective::Initialize(): FiniteElementSpace index out of range.");
             offsets.Append(fespace[sid]->GetTrueVSize());
          }
       }
       offsets.PartialSum();
-      diff = std::make_unique<BlockVector>(offsets);
       width = offsets.Last();
-   }
-};
+      MFEM_VERIFY(width == target.Size(),
+                  "RemapObjective::Initialize(): Target vector size does not match the functional size.");
 
-class RemapObjective : public Functional
-{
-public:
-   // Initialize the LVPPRemap Functional.
-   // space_idx[i] = -1 : quadrature function, >= 0 : finite element space index
-   // x_initial : initial values before remapping
-   RemapObjective(MPI_Comm comm, QuadratureSpace &qs,
-                  std::vector<ParFiniteElementSpace*> &fes,
-                  const Array<int> &space_idx,
-                  const BlockVector &x_initial)
-      : Functional(comm, x_initial.Size())
-      , qs(qs), fes(fes), qf(qs), gfs(fes.size())
-      , zero_cf(0.0)
-      , numVars(space_idx.Size()), space_idx(space_idx)
-      , x_initial(x_initial)
-   {
-      MFEM_VERIFY(space_idx.Max() < (int)fes.size() && space_idx.Min() >= -1,
-                  "Size mismatch between fes and space_idx")
-
-      // GridFunction initialization
-      for (int i=0; i<fes.size(); i++)
+#ifdef MFEM_USE_MPI
+      par_fespace.resize(fespace.size());
+#endif
+      mass.resize(fespace.size() + 1);
+      for (int sid=0; sid<fespace.size(); sid++)
       {
-         gfs[i] = std::make_unique<ParGridFunction>(fes[i]);
+         MFEM_VERIFY(fespace[sid] != nullptr,
+                     "RemapObjective::Initialize(): FiniteElementSpace pointer is null at index "
+                     << sid);
+         MFEM_VERIFY(fespace[sid]->GetVDim() == 1,
+                     "RemapObjective::Initialize(): FiniteElementSpace must be a scalar FESpace");
+#ifdef MFEM_USE_MPI
+         par_fespace[sid] = dynamic_cast<ParFiniteElementSpace*>(fespace[sid]);
+#endif
+         mass[sid] = std::make_unique<MassOperator>(*fespace[sid]);
       }
-
-      // Compute Block offsets for each variable
-      true_offsets.SetSize(0); true_offsets.Append(0);
-      for (int i=0; i<numVars; i++)
-      {
-         if (space_idx[i] < 0) { true_offsets.Append(qs.GetSize()); }
-         else { true_offsets.Append(fes[space_idx[i]]->GetTrueVSize()); }
-      }
-      true_offsets.PartialSum();
+      mass.back() = std::make_unique<MassOperator>(qspace);
    }
-
-   // Compute L2-objective, 0.5 * \sum_var ||x_var - x_initial_var||^2_{L2}
-   void Mult(const Vector &x, Vector &y) const override
-   {
-      BlockVector x_block(const_cast<Vector&>(x), true_offsets);
-      real_t result = 0.0;
-      for (int i=0; i<numVars; i++)
-      {
-         const int sid = space_idx[i];
-         if (sid < 0)
-         {
-            qf = x_block.GetBlock(i);
-            qf -= x_initial.GetBlock(i);
-            qf *= qf;
-            result += qf.Integrate(); // this will take care of parallel reduction
-         }
-         else
-         {
-            add(x_block.GetBlock(i), -1.0, x_initial.GetBlock(i),
-                gfs[sid]->GetTrueVector());
-            gfs[sid]->SetFromTrueVector();
-            real_t err = gfs[sid]->ComputeL2Error(zero_cf);
-            result += err * err;
-         }
-      }
-      y.SetSize(1);
-      y[0] = 0.5 * result;
-   }
-
-   // Compute true gradient in L2 sense
-   // Note that derivative is M*(x-x_initial), but we are using the true gradient.
-   void EvalGradient(const Vector &x, Vector &grad) const override
-   {
-      add(x, -1.0, x_initial, grad);
-   }
-
-   /// Hessian is identity. So, HessianMult simply returns the directio d.
-   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
-   {
-      hess = d;
-   }
-
-   QuadratureSpace &GetQuadratureSpace() const { return qs; }
-   std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const { return fes; }
-   Array<int> GetSpaceIdx() const { return space_idx; }
-
-
-protected:
-   QuadratureSpace &qs;
-   std::vector<ParFiniteElementSpace*> fes;
-   mutable QuadratureFunction qf;
-   mutable std::vector<std::unique_ptr<ParGridFunction>> gfs;
-   mutable ConstantCoefficient zero_cf;
-   const int numVars;
-   Array<int> space_idx;
-   Array<int> true_offsets;
-   const BlockVector &x_initial;
-private:
 };
 
 class RemapProblem : public ConstrainedOptimizationProblem
 {
 public:
-   RemapProblem(RemapObjective &objective,
+   RemapProblem(remap::RemapObjectiveFunctional &objective,
                 const BlockVector &x_min,
                 const BlockVector &x_max,
                 StackedSharedFunctional &C)
@@ -1368,19 +1600,23 @@ public:
       objective.EvalGradient(x, grad);
       /// Do something with the constraints
    }
-   void HessianMult(const Vector &x, const Vector &d, Vector &hess) const override
+
+   // This will not be used because GetHessian() is overridden
+   // To use different Hessian, override GetHessian() back to Functional::GetHessian()
+   void HessianMult(const Vector &x, const Vector &d, Vector &Hd) const override
    {
-      objective.HessianMult(x, d, hess);
+      Hd.SetSize(x.Size());
+      objective.GetHessian(x).Mult(d, Hd);
       /// Do something with the constraints
    }
    const Vector &GetLowerBounds() const { return x_min; }
    const Vector &GetUpperBounds() const { return x_max; }
-   QuadratureSpace &GetQuadratureSpace() const { return static_cast<RemapObjective&>(objective).GetQuadratureSpace(); }
+   QuadratureSpace &GetQuadratureSpace() const { return static_cast<RemapObjectiveFunctional&>(objective).GetQuadratureSpace(); }
    std::vector<ParFiniteElementSpace*> GetFiniteElementSpaces() const
    {
-      return static_cast<RemapObjective&>(objective).GetFiniteElementSpaces();
+      return static_cast<RemapObjectiveFunctional&>(objective).GetParFiniteElementSpaces();
    }
-   Array<int> GetSpaceIdx() const { return static_cast<RemapObjective&>(objective).GetSpaceIdx(); }
+   Array<int> GetSpaceIdx() const { return static_cast<RemapObjectiveFunctional&>(objective).GetSpaceIdx(); }
    // Compute KKT residual with grad = grad objective + <lambda, grad C>
    real_t ComputeKKT(const BlockVector &x,
                      const BlockVector &grad) const
