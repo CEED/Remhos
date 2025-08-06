@@ -33,7 +33,8 @@ namespace mfem
 
 void InitializeQuadratureFunction(Coefficient &c,
                                   const Vector &pos_mesh,
-                                  QuadratureFunction &q)
+                                  QuadratureFunction &q,
+                                  const Array<bool> *active_quads)
 {
    auto qspace = dynamic_cast<QuadratureSpace *>(q.GetSpace());
    MFEM_VERIFY(qspace, "Broken QuadratureSpace.");
@@ -52,7 +53,14 @@ void InitializeQuadratureFunction(Coefficient &c,
       for (int q = 0; q < nip; q++)
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
-         q_data[e*nip + q] = c.Eval(Tr, ip);
+         if (active_quads && (*active_quads)[e * nip + q] == false)
+         {
+            q_data[e*nip + q] = 0.0;
+         }
+         else
+         {
+            q_data[e*nip + q] = c.Eval(Tr, ip);
+         }
       }
    }
 }
@@ -205,7 +213,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
                                 u_interpolated, NumDesVar,
                                 u_final_min_copy, u_final_max_copy,
                                 mass_0, numContraints, h1_seminorm, optProbInd, subprob);
-      ot_prob.setWeightedSpaceType( weightedSpace);
+      ot_prob.setWeightedSpaceType(weightedSpace);
 
       optsolver->SetOptimizationProblem(ot_prob);
       optsolver->SetMaxIter(max_iter);
@@ -257,7 +265,8 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
       opt_solver.IncludeConstraintHessian(false);
       opt_solver.SetPrintLevel(1);
 
-      opt_solver.SetMaxIter(1e06);
+      opt_solver.SetMaxIter(max_iter);
+
       opt_solver.SetRelTol(infinity());
       opt_solver.SetAbsTol(infinity());
 
@@ -872,6 +881,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
    Vector rho_min, rho_max;
    CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
+   UpdateRhoInterp(rho_interp, rho_max, rho_max);
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
    //    gf_min = rho_min, gf_max = rho_max;
@@ -884,6 +894,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    // }
    Vector e_min, e_max;
    CalcEBounds(e_interp, ind_max, e_min, e_max);
+   UpdateEInterp(e_interp, e_min, e_max);
+
    // {
    //    ParGridFunction gf_min(e), gf_max(e);
    //    gf_min = e_min, gf_max = e_max;
@@ -936,6 +948,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       x_max.GetBlock(3) = v_max;
    }
 
+   // Optimize.
    if (opt_type == 0)
    {
       ind_rho_e_v = ind_rho_e_v_interp;
@@ -999,7 +1012,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          x_minsub = x_min;
       }
 
-      OptimizationProblem * ot_prob = nullptr;
+      OptimizationProblem *ot_prob = nullptr;
 
       if (remap_v)
       {
@@ -1040,7 +1053,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       if (subprob)
       {
          optsolver->Mult(ind_rho_e_sub, y_out_sub);
-         y_out.SetSubVector(optProbInd,y_out_sub);
+         y_out.SetSubVector(optProbInd, y_out_sub);
       }
       else { optsolver->Mult(initial_design, y_out); }
 
@@ -1199,19 +1212,18 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    ParGridFunction e(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf);
    ParGridFunction v(&pfes_v_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
 
+   // Print conservation errors.
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr,
                                          nullptr);
    const double mass_f_opt   = Integrate(pos_final, &ind, &rho,    nullptr,
                                          nullptr);
    const double energy_f_opt = Integrate(pos_final, &ind, &rho,    &e, nullptr);
-
    Vector moment_f_opt(dim);
    for (int d = 0; d < dim; d++)
    {
       moment_f_opt(d) = Integrate(pos_final, &ind, &rho, nullptr, &v, d);
    }
    const double tot_energy_f_opt = Integrate(pos_final, &ind, &rho, &e, &v);
-
    if (Mpi::Root())
    {
       std::cout << "-------\n"
@@ -1273,11 +1285,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
 
-   // Print final objective value.
+   // Print final objective values.
    const double ind_obj_l2 = ObjectiveQF(ind_interp, ind),
                 rho_obj_l2 = ObjectiveQF(rho_interp, rho),
                 e_obj_L2 = ObjectiveGF(e_interp, e);
-
    if (myid == 0)
    {
       std::cout << "---\nObjective ind l2: " << ind_obj_l2 << std::endl;
@@ -1611,6 +1622,8 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
                                        const Vector &ind_max,
                                        Vector &rho_min, Vector &rho_max)
 {
+   const double eps = 1e-12;
+
    const int size_rho = rho_interp.Size(), NE = pmesh_init.GetNE();
    rho_min.SetSize(size_rho); rho_max.SetSize(size_rho);
 
@@ -1620,20 +1633,22 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
       const IntegrationRule &ir = qspace->GetElementIntRule(e);
       const int nqp = ir.GetNPoints();
 
-      // Min and max density in the new mesh element.
+      // Compute min and max density in the new mesh element.
       double el_min =   std::numeric_limits<double>::infinity(),
              el_max = - std::numeric_limits<double>::infinity();
       bool el_has_ind_value = false, el_has_ind_max = false;
       for (int q = 0; q < nqp; q++)
       {
-         // Bounds are taken only from points where material is present.
-         if (ind_interp(el_e_idx + q) > 1e-12)
+         // Bounds are taken only from points where the material was present
+         // initially. This is achieved by checking the interpolated values,
+         // which come from the values on the initial mesh.
+         if (ind_interp(el_e_idx + q) > eps)
          {
             el_has_ind_value = true;
             el_min = std::min(el_min, rho_interp(el_e_idx + q));
             el_max = std::max(el_max, rho_interp(el_e_idx + q));
          }
-         if (ind_max(el_e_idx + q) > 1e-12) { el_has_ind_max = true; }
+         if (ind_max(el_e_idx + q) > eps) { el_has_ind_max = true; }
       }
 
       // The new mesh element is completely empty -> we want zeros in it.
@@ -1643,20 +1658,37 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
          el_min = el_max = 0.0;
       }
 
+      // Set the bounds.
       for (int q = 0; q < nqp; q++)
       {
-         // Bounds are set only where the material will be present. This is a
-         // special case for QuadratureFunctions to get sub-element behavior.
+         // Bounds are set only where the material will be present. This is
+         // achieved by checking the ind_max values. This enables the
+         // propagation of density to newly active points in the new mesh.
+         // We can get subzonal behavior for the density when there is
+         // local variation in ind_max.
          if (ind_max(el_e_idx + q) > 1e-12)
          {
             rho_min(el_e_idx + q) = el_min;
             rho_max(el_e_idx + q) = el_max;
+
+            // Note that it's fine to be lower than the mininum, i.e., in
+            // elements where the ind function propages due to small diffusion.
+            MFEM_VERIFY(rho_interp(el_e_idx + q) < rho_max(el_e_idx + q) + eps,
+                        "Error: interpolated density is above upper bound: "
+                         << rho_interp(el_e_idx + q) << " "
+                         << rho_max(el_e_idx + q));
          }
          else
          {
             // No material at the DOF.
             rho_min(el_e_idx + q) = 0.0;
             rho_max(el_e_idx + q) = 0.0;
+
+            // No material, but has density - must be checked.
+            // In this case the interpolation will be out of bounds.
+            MFEM_VERIFY(fabs(rho_interp(el_e_idx + q)) < eps,
+                        "Nonzero density at an empty position: "
+                        << rho_interp(el_e_idx + q));
          }
       }
 
@@ -1664,10 +1696,25 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
    }
 }
 
+void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
+                                         Vector &rho_min, Vector &rho_max)
+{
+   const int s = rho_interp.Size();
+   for (int i = 0; i < s; i++)
+   {
+      if (rho_interp(i) < rho_min(i))
+      {
+         rho_interp(i) = 0.5 * (rho_min(i) + rho_max(i));
+      }
+   }
+}
+
 void InterpolationRemap::CalcEBounds(const ParGridFunction &e_interp,
                                      const Vector &ind_max,
                                      Vector &e_min, Vector &e_max)
 {
+   const double eps = 1e-12;
+
    const int size_e = e_interp.Size(), NE = pmesh_init.GetNE();
    const int s = size_e / NE;
    e_min.SetSize(size_e); e_max.SetSize(size_e);
@@ -1684,7 +1731,7 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_interp,
          if (ind_max(e*nqp + q) > 1e-12) { el_has_ind = true; break; }
       }
 
-      // Min and max energy in the new mesh element.
+      // Compute min and max density in the new mesh element.
       double el_min =   std::numeric_limits<double>::infinity(),
              el_max = - std::numeric_limits<double>::infinity();
       // The new mesh element is completely empty -> we want zeros in it.
@@ -1693,12 +1740,15 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_interp,
       {
          Vector e_interp_el;
          e_interp.GetElementDofValues(e, e_interp_el);
-         bool el_has_e_value = true;
+         bool el_has_e_value = false;
          for (int i = 0; i < s; i++)
          {
-            // Don't consider zeros for the bounds. The assumption is that those
-            // DOFs fall in initial mesh elements with no material.
-            if (fabs(e_interp_el(i)) > 1e-14)
+            // Bounds are taken only from points where the material was present
+            // initially. This is achieved by checking the interpolated values,
+            // which come from the values on the initial mesh. We assume that
+            // zero corresponds to no material. We can't check in indicator
+            // values, as those are not available at the energy DOF locations.
+            if (fabs(e_interp_el(i)) > eps)
             {
                el_has_e_value = true;
                el_min = std::min(el_min, e_interp_el(i));
@@ -1708,10 +1758,38 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_interp,
          MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
       }
 
+      // Set the bounds.
+      // When material is present, we set bounds at all energy DOFs.
       for (int i = 0; i < s; i++)
       {
          e_min(s * e + i) = el_min;
          e_max(s * e + i) = el_max;
+
+         // Note that it's fine to be lower than the mininum, i.e., in
+         // elements where the ind function propages due to small diffusion.
+         if (e_interp(s * e + i) > e_max(s * e + i) + eps && el_has_ind == true)
+         {
+            MFEM_ABORT("Error: interpolated energy is above upper bound: "
+                       << e_interp(s * e + i) << " " << e_max(s * e + i));
+
+            // Note that el_has_ind == true is needed, because we can get an
+            // element with no material, but with nonzero interpolated energy.
+            // This is due to the misfit between the locations of the inicator
+            // quad points and the energy DOFs.
+         }
+      }
+   }
+}
+
+void InterpolationRemap::UpdateEInterp(ParGridFunction &e_interp,
+                                       Vector &e_min, Vector &e_max)
+{
+   const int s = e_interp.Size();
+   for (int i = 0; i < s; i++)
+   {
+      if (e_interp(i) < e_min(i) || e_interp(i) > e_max(i))
+      {
+         e_interp(i) = 0.5 * (e_min(i) + e_max(i));
       }
    }
 }

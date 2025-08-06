@@ -177,7 +177,8 @@ int main(int argc, char *argv[])
    int vis_steps = 100;
    const char *device_config = "cpu";
    bool optRelevantSubset = false;
-   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpaceType = hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpaceType =
+       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 
    int precision = 8;
    cout.precision(precision);
@@ -289,6 +290,8 @@ int main(int argc, char *argv[])
 
    // When not using lua, exec mode is derived from problem number convention
    exec_mode = (problem_num < 10) ? 0 : 1;
+
+   const bool interpolation_remap = ((int)mono_type > 2);
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -862,7 +865,7 @@ int main(int argc, char *argv[])
    socketstream sout, vis_s, vis_us;
    char vishost[] = "localhost";
    int  visport   = 19916;
-   if (visualization)
+   if (visualization && interpolation_remap == false)
    {
       // Make sure all MPI ranks have sent their 'v' solution before initiating
       // another set of GLVis connections (one from each rank):
@@ -1069,13 +1072,16 @@ int main(int argc, char *argv[])
       ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
       v_0.SetTrueVector();
 
-      // Initialize only in the support of ind_0.
+      // Initialize the ind_0.
+      InitializeQuadratureFunction(u0, x0, ind_0);
+
+      // Initialize rho_0 and e_0 only in the support of ind_0.
       Array<bool> ind_0_bool_el, ind_0_bool_dofs;
-      ComputeBoolIndicators(pmesh.GetNE(), u, ind_0_bool_el, ind_0_bool_dofs);
+      ComputeBoolIndicators(pmesh.GetNE(), ind_0,
+                            ind_0_bool_el, ind_0_bool_dofs);
       BoolFunctionCoefficient rho_0_coeff(s0_function, ind_0_bool_el),
                               e_0_coeff(q0_function, ind_0_bool_el);
-      InitializeQuadratureFunction(u0, x0, ind_0);
-      InitializeQuadratureFunction(rho_0_coeff, x0, rho_0);
+      InitializeQuadratureFunction(rho_0_coeff, x0, rho_0, &ind_0_bool_dofs);
       e_0.ProjectCoefficient(e_0_coeff);
 
       // Initialize velocity everywhere.

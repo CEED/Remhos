@@ -24,7 +24,8 @@ namespace mfem
 
 void InitializeQuadratureFunction(Coefficient &c,
                                   const Vector &pos_mesh,
-                                  QuadratureFunction &q);
+                                  QuadratureFunction &q,
+                                  const Array<bool> *bool_quads = nullptr);
 
 void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
                            std::string info, int x, int y);
@@ -32,10 +33,10 @@ void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
 // How to choose the bounds for a given DOF on the final mesh.
 // ELEM_INIT:  find its corresponding elem on the initial mesh, take min / max.
 //             * piecewise constant initial solution -> no room to move.
-//             * DOFs inside the final elem can have varying bounds.
+//             * DOFs inside one final element can have varying bounds.
 // ELEM_FINAL: interpolate, go over its elem on the final mesh, take min / max.
 //             * might be restrictive - sees only some of the initial values.
-//             * DOFs inside the final elem have the same bounds.
+//             * DOFs inside one final element have the same bounds.
 // ELEM_BOTH:  take min / max over both ELEM_INIT and ELEM_FINAL bounds.
 //             * this is the most diffusive approach (widest bounds).
 enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
@@ -106,9 +107,15 @@ private:
                       const Vector &ind_max,
                       Vector &rho_min, Vector &rho_max);
 
+   void UpdateRhoInterp(QuadratureFunction &rho_interp,
+                        Vector &rho_min, Vector &rho_max);
+
    void CalcEBounds(const ParGridFunction &e_interp,
                     const Vector &ind_max,
                     Vector &e_min, Vector &e_max);
+
+   void UpdateEInterp(ParGridFunction &e_interp,
+                      Vector &e_min, Vector &e_max);
 
    void CalcVBounds(const ParGridFunction &v_interp,
                     Vector &v_min, Vector &v_max);
@@ -155,7 +162,8 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
-   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace = hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+   hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
+       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 };
 
 } // namespace mfem

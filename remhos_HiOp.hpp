@@ -582,18 +582,17 @@ private:
    mutable hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace_ = 
          hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 
-class EnergyGradIntegrator : public mfem::LinearFormIntegrator {
-public:
-  EnergyGradIntegrator(const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho);
-  ~EnergyGradIntegrator(){};
-  void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
-private:
+   class EnergyGradIntegrator : public mfem::LinearFormIntegrator
+   {
+   public:
+      EnergyGradIntegrator(const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho);
+      ~EnergyGradIntegrator(){};
+      void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
+   private:
 
-  const mfem::QuadratureFunction *ind_;
-  const mfem::QuadratureFunction *rho_;
-};
-
-
+      const mfem::QuadratureFunction *ind_;
+      const mfem::QuadratureFunction *rho_;
+   };
 
 public:
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
