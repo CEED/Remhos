@@ -102,6 +102,9 @@ private:
                        const Vector &pos_final,
                        Vector &g_min, Vector &g_max, BoundsType bounds_type);
 
+   void CleanEmptyZones(QuadratureFunction &ind_interp,
+                        Vector &ind_min, Vector &ind_max);
+
    void CalcRhoBounds(const QuadratureFunction &rho_interp,
                       const QuadratureFunction &ind_interp,
                       const Vector &ind_max,

@@ -877,8 +877,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    }
 
    // Compute min / max bounds.
+   // Also adjust interpolated values in some special cases.
    Vector ind_min, ind_max;
    CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
+   CleanEmptyZones(ind_interp, ind_min, ind_max);
    Vector rho_min, rho_max;
    CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
    UpdateRhoInterp(rho_interp, rho_max, rho_max);
@@ -1613,6 +1615,22 @@ void InterpolationRemap::CalcQuadBounds(const QuadratureFunction &qf_init,
          }
 
          el_e_idx += nqp;
+      }
+   }
+}
+
+void InterpolationRemap::CleanEmptyZones(QuadratureFunction &ind_interp,
+                                         Vector &ind_min, Vector &ind_max)
+{
+   const double eps = 1e-12;
+   const int s = ind_interp.Size();
+   for (int q = 0; q < s; q++)
+   {
+      if (ind_max(q) < eps)
+      {
+         ind_interp(q) = 0.0;
+         ind_min(q) = 0.0;
+         ind_max(q) = 0.0;
       }
    }
 }
