@@ -348,6 +348,11 @@ public:
       }
    }
 
+   virtual hiop::hiopInterfaceBase::WeightedSpaceType getWeightedSpaceType() const override
+   {
+      return hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean; 
+   }
+
 virtual double CalcObjective(const Vector &x) const
    {
       QuadratureFunction x_diff(&qspace); x_diff = 0.0;
