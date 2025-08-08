@@ -18,6 +18,7 @@
 #define MFEM_REMHOS_GSLIB
 
 #include "mfem.hpp"
+#include "remhos_bregman.hpp"
 
 namespace mfem
 {

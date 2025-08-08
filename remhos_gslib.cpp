@@ -18,6 +18,7 @@
 #include "remhos_tools.hpp"
 #include "remhos_HiOp.hpp"
 #include "remhos_lvpp.hpp"
+#include "remhos_bregman.hpp"
 
 #include <algorithm>
 
@@ -354,6 +355,31 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
       opt_solver.Mult(x_initial, u_final);
    }
+   else if (opt_type == 4)
+   {
+      Vector target_volume(1); target_volume[0] = mass_0;
+      ScalarLatentVolumeProjector projector(target_volume, pos_final,
+                                            *u_interpolated.ParFESpace(), u_final);
+      ParGridFunction psi(u_interpolated);
+      Vector search_l({infinity()}), search_r({-infinity()}), lambda(1);
+      for (int i=0; i<u_interpolated.Size(); i++)
+      {
+         psi[i] = logit(psi[i], u_final_min[i], u_final_max[i]);
+         search_l[0] = std::min(search_l[0], psi[i]);
+         search_r[0] = std::max(search_r[0], psi[i]);
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &search_l[0], 1, MFEM_MPI_REAL_T, MPI_MIN,
+                    pmesh_init.GetComm());
+      MPI_Allreduce(MPI_IN_PLACE, &search_r[0], 1, MFEM_MPI_REAL_T, MPI_MAX,
+                    pmesh_init.GetComm());
+      projector.SetVerbose(2);
+      projector.Apply(psi, u_final_min, u_final_max, 1.0, search_l, search_r,
+                      lambda, max_iter);
+      for (int i=0; i<psi.Size(); i++)
+      {
+         u_final[i] = sigmoid(psi[i], u_final_min[i], u_final_max[i]);
+      }
+   }
 
    // Report masses.
    ParGridFunction u_final_gf(&pfes_final);
@@ -615,6 +641,30 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
       // opt_solver.SetNonlinRelTol(1e-8);
 
       opt_solver.Mult(x_initial, u_final);
+   }
+   else if (opt_type == 4)
+   {
+      Vector target_volume(1); target_volume[0] = mass_0;
+      ScalarLatentVolumeProjector projector(target_volume, pos_final,
+                                            *u_interpolated.GetSpace(), u_interpolated);
+      QuadratureFunction psi(u_interpolated);
+      Vector search_l({infinity()}), search_r({-infinity()}), lambda(1);
+      for (int i=0; i<psi.Size(); i++)
+      {
+         psi[i] = logit(psi[i], u_min[i], u_max[i]);
+         search_l[0] = std::min(search_l[0], psi[i]);
+         search_r[0] = std::max(search_r[0], psi[i]);
+      }
+      MPI_Allreduce(MPI_IN_PLACE, &search_l[0], 1, MFEM_MPI_REAL_T, MPI_MIN,
+                    pmesh_init.GetComm());
+      MPI_Allreduce(MPI_IN_PLACE, &search_r[0], 1, MFEM_MPI_REAL_T, MPI_MAX,
+                    pmesh_init.GetComm());
+      projector.SetVerbose(2);
+      projector.Apply(psi, u_min, u_max, 1.0, search_l, search_r, lambda, max_iter);
+      for (int i=0; i<psi.Size(); i++)
+      {
+         u_final[i] = sigmoid(psi[i], u_min[i], u_max[i]);
+      }
    }
 
    // Report final masses.
@@ -1522,6 +1572,44 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          Vector v_final_TVector(x_final_TVector.GetBlock(3).GetData(),
                                 pfes_v_final.GetTrueVSize());
          vtmp.SetFromTrueDofs(v_final_TVector);
+      }
+   }
+   else if (opt_type == 4)
+   {
+      MFEM_VERIFY(remap_v==false, "NOT YET IMPLEMENTED.");
+      Vector ind_rho_e(ind_rho_e_v.GetData(), 2*size_qf + size_gf_e);
+      Vector target_volume(3);
+      target_volume[0] = volume_0;
+      target_volume[1] = mass_0;
+      target_volume[2] = energy_0;
+      IndRhoEVolumeProjectorCorrect projector(target_volume, pos_final,
+                                              *qspace, *pfes_e, ind_rho_e);
+
+      Vector psi(ind_rho_e);
+      out << "psi size: " << psi.Size() << endl;
+      out << "xmin size: " << x_min.Size() << endl;
+      out << "xmax size: " << x_max.Size() << endl;
+      int offset = 0;
+      for (int i=0; i<psi.Size(); i++)
+      {
+         psi[i] = logit(psi[i], x_min[i], x_max[i]);
+      }
+      L2_FECollection nodal_fec(pfes_e->GetOrder(0), pfes_e->GetParMesh()->Dimension());
+      ParFiniteElementSpace pfes_nodal(pfes_e->GetParMesh(), &nodal_fec);
+      ParGridFunction E_gf(pfes_e, ind_rho_e_v.GetData() + offset);
+      ParGridFunction lower_gf(&pfes_nodal, e_min);
+      ParGridFunction upper_gf(&pfes_nodal, e_max);
+      LogitCoefficient logit_coeff(E_gf, lower_gf, upper_gf);
+      ParGridFunction psi_gf(&pfes_nodal, psi.GetData() + offset);
+      psi_gf.ProjectCoefficient(logit_coeff);
+      projector.SetVerbose(1);
+      Vector search_l, search_r, lambda; // not used anymore..
+
+      projector.Apply(psi, x_min, x_max, 1e-01,
+                      search_l, search_r, lambda, 1e03);
+      for (int i=0; i<psi.Size(); i++)
+      {
+         psi[i] = sigmoid(psi[i], x_min[i], x_max[i]);
       }
    }
    else { MFEM_ABORT("not implemented!"); }

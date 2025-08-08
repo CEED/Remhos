@@ -182,14 +182,14 @@ public:
    LatentVolumeProjector(const Vector &targetVolume,
                          ParFiniteElementSpace &fes):vdim(targetVolume.Size()),
       targetVolume(targetVolume),
-      fespace(&fes), ptype(GF),
+      fespace(&fes),
       comm(dynamic_cast<ParFiniteElementSpace*>(&fes)->GetComm()),
-      verbose(0)
+      verbose(0), ptype(GF)
    { }
    LatentVolumeProjector(const Vector &targetVolume,
                          QuadratureSpaceBase &qspace):vdim(targetVolume.Size()),
       targetVolume(targetVolume), qspace(static_cast<QuadratureSpace*>(&qspace)),
-      comm(static_cast<ParMesh*>(qspace.GetMesh())->GetComm()), ptype(QF), verbose(0)
+      comm(static_cast<ParMesh*>(qspace.GetMesh())->GetComm()), verbose(0), ptype(QF)
    { }
    MPI_Comm GetComm() { return comm; }
    virtual void Apply(Vector &x, const Vector &lower, const Vector &upper,
@@ -418,7 +418,6 @@ public:
       offsets[2] = qspace.GetSize();
       offsets[3] = fes.GetVSize();
       offsets.PartialSum();
-      int qsize = qspace.GetSize();
       ind_qf.reset(new QuadratureFunction(this->qspace,
                                           primal.GetData() + offsets[0]));
       rho_qf.reset(new QuadratureFunction(this->qspace,
@@ -583,7 +582,6 @@ public:
               Vector &lambda, int max_iter) override
    {
       lambda.SetSize(3);
-      int qsize = this->qspace->GetSize();
 
       Vector x, lower, upper;
       for (int i=0; i<offsets.Size()-1; i++)
@@ -744,7 +742,6 @@ public:
       offsets[2] = qspace.GetSize();
       offsets[3] = fes.GetVSize();
       offsets.PartialSum();
-      int qsize = qspace.GetSize();
       ind_qf.reset(new QuadratureFunction(this->qspace,
                                           primal.GetData() + offsets[0]));
       rho_qf.reset(new QuadratureFunction(this->qspace,
@@ -1000,8 +997,6 @@ public:
                       const Vector &upper,
                       Vector &latent)
    {
-      int qsize = this->qspace->GetSize();
-      int vsize = this->fespace->GetVSize();
       Vector latent_init(latent.Size());
       latent_init = latent;
 
@@ -1080,7 +1075,6 @@ public:
    {
       Vector x_all_init(x_all.Size());
       x_all_init = x_all;
-      int qsize = this->qspace->GetSize();
       lambda.SetSize(3);
       lambda = 0.0;
       real_t mass_err = mfem::infinity();
@@ -1138,8 +1132,8 @@ class BoxMirrorDescent
 private:
 protected:
    DifferentiableObjective &obj;
-   const Vector &lower, &upper;
    Vector &primal;
+   const Vector &lower, &upper;
    Vector grad, xnew;
    LatentVolumeProjector *projector;
    int max_iter;

@@ -4,24 +4,7 @@
 #include "mfem.hpp"
 #include "general/forall.hpp"
 #include "miniapps/autodiff/admfem.hpp"
-// Provide a make_unique implementation for C++11
-#if __cplusplus <= 201103L
-#include <memory>
-#include <utility>
-
-
-// define make_unique for C++11
-namespace std
-{
-template<typename T, typename... Args>
-std::unique_ptr<T> make_unique( Args&&... args )
-{
-   return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-}
-#endif // __cplusplus <= 201103L
-
-
+#include "linalg/functional.hpp"
 
 namespace mfem
 {
@@ -975,7 +958,6 @@ public:
 
          std::unique_ptr<Operator> M_ser(std::move(M));
          std::unique_ptr<Operator> M_inv_ser(std::move(M_inv));
-         Array<HYPRE_BigInt> *offsets[2] = { &cols };
          Array<HYPRE_BigInt> * glb_cols(&cols);
 
          HYPRE_BigInt n = qspace.GetSize();
@@ -1636,6 +1618,22 @@ protected:
 };
 
 } // namespace remap
+
+class MappedGridFunctionCoefficient : public GridFunctionCoefficient
+{
+protected:
+   std::function<real_t(const real_t x, ElementTransformation &T, const IntegrationPoint &ip)>
+   F;
+public:
+   MappedGridFunctionCoefficient(GridFunction &gf,
+                                 std::function<real_t(const real_t x, ElementTransformation &T, const IntegrationPoint &ip)>
+                                 F)
+      : GridFunctionCoefficient(&gf), F(F) {}
+   real_t Eval(ElementTransformation &T, const IntegrationPoint &ip)
+   {
+      return F(GridFunctionCoefficient::Eval(T, ip), T, ip);
+   }
+};
 
 } // namespace mfem
 

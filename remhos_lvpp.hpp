@@ -60,21 +60,6 @@ inline void MapPrimal(const Vector &primal, const Vector &x_min,
 }
 
 
-class MappedGridFunctionCoefficient : public GridFunctionCoefficient
-{
-protected:
-   std::function<real_t(const real_t x, ElementTransformation &T, const IntegrationPoint &ip)>
-   F;
-public:
-   MappedGridFunctionCoefficient(GridFunction &gf,
-                                 std::function<real_t(const real_t x, ElementTransformation &T, const IntegrationPoint &ip)>
-                                 F)
-      : GridFunctionCoefficient(&gf), F(F) {}
-   real_t Eval(ElementTransformation &T, const IntegrationPoint &ip)
-   {
-      return F(GridFunctionCoefficient::Eval(T, ip), T, ip);
-   }
-};
 
 // Solve [alpha I_nn, I_nb; I_bn, -w I_bb]. As long as alpha > 0 and w >= 0, the system is well-posed.
 // Here, I is a rectangular identity matrix corresponding to the bounds.
@@ -310,7 +295,6 @@ public:
       Vector lambda(numConst);
       lambda = 0.0;
       Vector new_lambda(numConst);
-      real_t last_min_Cx = infinity();
       real_t mu = 1.0 / gradC_primal.MaxMaxNorm();
 
       real_t kkt_target = abs_tol;
@@ -321,11 +305,10 @@ public:
       real_t kkt = prox_abs_tol0;
       real_t prox_abs_tol = prox_abs_tol0;
       real_t prox_rel_tol = prox_rel_tol0;
-      for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
+      for (it_AL=0; it_AL<max_iter; it_AL++) // AL loop
       {
          it_GN_all = 0;
          real_t kkt_AL_target = prox_abs_tol;
-         real_t kkt_prev = 0.0;
          // PG loop for AL Subproblem
          for (it_PG=0; it_PG<prox_max_iter; it_PG++)
          {
@@ -422,8 +405,6 @@ public:
 
             C.GetGradient(x_primal).Mult(new_lambda, G_primal);
             obj.GetGradient().AddMult(x_primal, G_primal);
-
-            last_min_Cx = std::min(C_x.Normlinf(), last_min_Cx);
 
             real_t kkt_AL = problem.ComputeKKT(x_primal, G_primal);
             // If first iteration, setup the relative tolerance
@@ -580,8 +561,8 @@ public:
       , g(obj.Width()), g_k(obj.Width())
       , d(obj.Width())
       , m(m)
-      , s(m), y(m), rho(m)
       , riesz(riesz)
+      , s(m), y(m), rho(m)
    {
       rho = 0.0;
       Optimizer::SetOperator(obj);
@@ -656,7 +637,7 @@ protected:
    // Simple Line search to ensure <sk, yk> > 0
    // returns positive rho = 1 / <sk, yk> when successful
    // returns negative rho when failed
-   virtual bool LineSearch(const Vector &latent_k,
+   virtual real_t LineSearch(const Vector &latent_k,
                            const Vector &direction_k,
                            const Vector &gradient_k,
                            Vector &latent,
@@ -673,10 +654,8 @@ protected:
 
       MapLatent(latent, x_min, x_max, primal);
       subproblem->Mult(primal, obj_value);
-      real_t obj_value0 = obj_value[0];
 
       real_t dk_dot_sk;
-      bool success = false;
       for (int i=0; i<30; i++) // until step size > 2^-10 \approx 1e-03
       {
          // psi = psik + eta*dk
@@ -696,7 +675,6 @@ protected:
          dk_dot_sk = Dot(yk, sk);
          if (dk_dot_sk > 0.0)
          {
-            success = true;
             break; // found a positive curvature condition
          }
          eta *= 0.5;
@@ -940,7 +918,6 @@ public:
       Vector obj_value(1);
       Vector C_x(numConst); // C(x)
       C.Mult(x_primal, C_x);
-      real_t C_x_prev = C_x.Normlinf();
       // gradient. Will be used GN iteration
       BlockVector gradF(offsets);
       DenseMatrix gradC(numTotalDof, numConst);
@@ -950,24 +927,20 @@ public:
       Vector lambda(numConst);
       lambda = 0.0;
       Vector new_lambda(numConst);
-      real_t last_min_Cx = infinity();
       real_t mu = 1.0 / gradC_primal.MaxMaxNorm();
 
       real_t kkt_target = abs_tol;
-      real_t alpha;
 
-      int it_AL, it_PG, it_GN_all, it_GN;
+      int it_AL, it_PG, it_GN_all;
       // AL loop for Remap Problem
       real_t kkt = prox_abs_tol0;
-      real_t prox_abs_tol = prox_abs_tol0;
-      real_t prox_rel_tol = prox_rel_tol0;
-      for (int it_AL=0; it_AL<max_iter; it_AL++) // AL loop
+      // real_t prox_abs_tol = prox_abs_tol0;
+      // real_t prox_rel_tol = prox_rel_tol0;
+      for (it_AL=0; it_AL<max_iter; it_AL++) // AL loop
       {
          it_GN_all = 0;
-         real_t kkt_AL_target = prox_abs_tol;
-         real_t kkt_prev = 0.0;
          aug_lag.SetLambda(lambda); aug_lag.SetPenalty(mu);
-         for (int it_PG = 0; it_PG < prox_max_iter; it_PG++)
+         for (it_PG = 0; it_PG < prox_max_iter; it_PG++)
          {
             // PG loop for AL Subproblem
             x_latent_k = x_latent;
@@ -984,7 +957,7 @@ public:
          // {
          //    mu = std::min(mu*1.5, 1e02);
          // }
-         C_x_prev = C_x.Normlinf();
+         // C_x_prev = C_x.Normlinf();
 
          C.GetGradient(x_primal).Mult(lambda, G_primal);
          obj.GetGradient().AddMult(x_primal, G_primal);
