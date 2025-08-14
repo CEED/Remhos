@@ -36,6 +36,8 @@ public:
    {
       shared_constraints = dynamic_cast<StackedSharedFunctional*>(&constraints);
    }
+   void SetAbsTol(real_t tol) { this->tol = tol; }
+   void SetMaxIter(int max_iter) { this->max_iter = max_iter; }
 
    // Dykstra projection with Bregman divergence
    // At each iteration, we project onto the tangent plane of each constraint

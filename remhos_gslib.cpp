@@ -401,7 +401,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
       MassOperator mass(pfes_final);
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
-                        u_final_min, u_final_max);
+                        u_final_min, u_final_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -709,7 +709,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
       C.AddFunctional(vol_func);
       MassOperator mass(qspace_final);
       Dykstra projector(pmesh_final.GetComm(), C, mass,
-                        u_min, u_max);
+                        u_min, u_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -974,7 +974,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
       MassOperator mass(pfes_final);
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
-                        u_final_min, u_final_max);
+                        u_final_min, u_final_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -1798,7 +1798,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       mass.Append(mass_l2);
       if (remap_v) { for (int i=0; i<dim; i++) { mass.Append(mass_h1); } }
       Dykstra projector(pmesh_final.GetComm(), C, mass,
-                        x_min_final, x_max_final);
+                        x_min_final, x_max_final, atol, max_iter);
       projector.Project(x_initial);
       BlockVector x_final_LVector(ind_rho_e_v, offset);
       for (int i=0; i<3; i++)
