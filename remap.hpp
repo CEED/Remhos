@@ -8,29 +8,34 @@
 
 namespace mfem
 {
+MFEM_HOST_DEVICE
 inline real_t sigmoid(const real_t x)
 {
    return x > 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
 }
 
+MFEM_HOST_DEVICE
 inline real_t sigmoid(const real_t x, const real_t l, const real_t u)
 {
-   real_t scale = (u - l);
+   const real_t scale = (u - l);
    return l + scale*sigmoid(x);
 }
 
+MFEM_HOST_DEVICE
 inline real_t logit(const real_t x)
 {
-   real_t x_clamped = std::min(std::max(x, 1e-10), 1.0 - 1e-10);
+   const real_t x_clamped = std::min(std::max(x, 1e-10), 1.0 - 1e-10);
    return std::log(x_clamped / (1.0 - x_clamped));
 }
 
+MFEM_HOST_DEVICE
 inline real_t logit(const real_t x, const real_t l, const real_t u)
 {
-   real_t scale = (u - l);
+   const real_t scale = (u - l);
    return scale < 1e-08 ? 0.0 : logit((x - l) / scale);
 }
 
+MFEM_HOST_DEVICE
 inline real_t der_sigmoid(const real_t x)
 {
    const real_t s = sigmoid(x);
@@ -941,6 +946,7 @@ private:
    MPI_Comm comm=MPI_COMM_NULL;
 #endif
 public:
+   MassOperator() = default;
    MassOperator(QuadratureSpace &qspace)
       : Operator(qspace.GetSize())
    {
@@ -1089,7 +1095,7 @@ public:
       M->Mult(x, y);
    }
    // y = M^{-1}*x
-   void Riesz(const Vector &x, Vector &y) const
+   virtual void Riesz(const Vector &x, Vector &y) const
    {
       y.SetSize(height);
       M_inv->Mult(x, y);
@@ -1100,7 +1106,7 @@ public:
       return *M;
    }
    // z = M*(x-y)
-   void MultDiff(const Vector &x, const Vector &y, Vector &z) const
+   virtual void MultDiff(const Vector &x, const Vector &y, Vector &z) const
    {
       MPI_Barrier(comm);
       aux = x;
@@ -1110,7 +1116,7 @@ public:
       M->Mult(aux, z);
    }
    // y^T*M*x
-   real_t InnerProduct(const Vector &x, const Vector &y) const
+   virtual real_t InnerProduct(const Vector &x, const Vector &y) const
    {
       aux.SetSize(height);
       M->Mult(x, aux);
@@ -1125,7 +1131,7 @@ public:
       return result;
    }
    // ||(x-y)||_M^2 = sqrt((x-y)^T*M*(x-y))^2
-   real_t DistanceSquaredTo(const Vector &x, const Vector &y) const
+   virtual real_t DistanceSquaredTo(const Vector &x, const Vector &y) const
    {
       MultDiff(x, y, aux2);
       real_t result = aux2*aux;
@@ -1139,7 +1145,99 @@ public:
       return result;
    }
    // ||(x-y)||_M = sqrt((x-y)^T*M*(x-y))
-   real_t DistanceTo(const Vector &x, const Vector &y) const
+   virtual real_t DistanceTo(const Vector &x, const Vector &y) const
+   {
+      return std::sqrt(DistanceSquaredTo(x, y));
+   }
+};
+class MultiMassOperator : public MassOperator
+{
+private:
+   Array<MassOperator*> mass;
+   Array<int> offsets;
+   mutable std::unique_ptr<BlockOperator> M;
+public:
+   MultiMassOperator(): MassOperator(), offsets{0} {}
+   void Append(MassOperator &m)
+   {
+      mass.Append(&m);
+      offsets.Append(offsets.Last() + m.Height());
+      height += m.Height();
+      width += m.Height();
+   }
+   // y = M*x
+   void Mult(const Vector &x, Vector &y) const override
+   {
+      const BlockVector x_block(x.GetData(), offsets);
+      y.SetSize(height);
+      BlockVector y_block(y.GetData(), offsets);
+      for (int i=0; i<mass.Size(); i++)
+      {
+         mass[i]->Mult(x_block.GetBlock(i), y_block.GetBlock(i));
+      }
+   }
+   // y = M^{-1}*x
+   void Riesz(const Vector &x, Vector &y) const override
+   {
+      const BlockVector x_block(x.GetData(), offsets);
+      y.SetSize(height);
+      BlockVector y_block(y.GetData(), offsets);
+      for (int i=0; i<mass.Size(); i++)
+      {
+         mass[i]->Riesz(x_block.GetBlock(i), y_block.GetBlock(i));
+      }
+   }
+   // M
+   Operator &GetGradient(const Vector &x) const override
+   {
+      M = std::make_unique<BlockOperator>(offsets);
+      for (int i=0; i<mass.Size(); i++)
+      {
+         M->SetBlock(i, i, mass[i]);
+      }
+      return *M;
+   }
+   // z = M*(x-y)
+   void MultDiff(const Vector &x, const Vector &y, Vector &z) const override
+   {
+      const BlockVector x_block(x.GetData(), offsets);
+      const BlockVector y_block(y.GetData(), offsets);
+      z.SetSize(height);
+      BlockVector z_block(z.GetData(), offsets);
+      for (int i=0; i<mass.Size(); i++)
+      {
+         mass[i]->MultDiff(x_block.GetBlock(i), y_block.GetBlock(i),
+                           z_block.GetBlock(i));
+      }
+   }
+   // y^T*M*x
+   real_t InnerProduct(const Vector &x, const Vector &y) const override
+   {
+      const BlockVector x_block(x.GetData(), offsets);
+      const BlockVector y_block(y.GetData(), offsets);
+      real_t result = 0.0;
+      for (int i=0; i<mass.Size(); i++)
+      {
+         result += mass[i]->InnerProduct(x_block.GetBlock(i),
+                                         y_block.GetBlock(i));
+      }
+      return result;
+   }
+   // ||(x-y)||_M^2 = sqrt((x-y)^T*M*(x-y))^2
+   real_t DistanceSquaredTo(const Vector &x, const Vector &y) const override
+   {
+      const BlockVector x_block(x.GetData(), offsets);
+      const BlockVector y_block(y.GetData(), offsets);
+      real_t result = 0.0;
+      for (int i=0; i<mass.Size(); i++)
+      {
+         result += mass[i]->DistanceSquaredTo(x_block.GetBlock(i),
+                                              y_block.GetBlock(i));
+      }
+      return result;
+   }
+   // ||(x-y)||_M = sqrt((x-y)^T*M*(x-y))
+   real_t DistanceTo(const Vector &x, const Vector &y) const override
    {
       return std::sqrt(DistanceSquaredTo(x, y));
    }

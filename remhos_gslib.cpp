@@ -19,6 +19,7 @@
 #include "remhos_HiOp.hpp"
 #include "remhos_lvpp.hpp"
 #include "remhos_bregman.hpp"
+#include "dykstra.hpp"
 
 #include <algorithm>
 
@@ -380,6 +381,30 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
          u_final[i] = sigmoid(psi[i], u_final_min[i], u_final_max[i]);
       }
    }
+   else if (opt_type == 5)
+   {
+      QuadratureSpace qspace_final(&pmesh_final, pfes_final.GetMaxElementOrder()+2);
+      std::vector<ParFiniteElementSpace*> fes({&pfes_final});
+
+      Array<int> space_idx({0});
+      Array<int> offsets({0, pfes_final.GetTrueVSize()});
+
+      BlockVector x_initial(u_interpolated.GetTrueVector(), offsets);
+
+      ComposedFunctional vol_func(remap::volume_f, remap::volume_df, qspace_final,
+                                  fes, space_idx);
+      vol_func.SetComm(pmesh_final.GetComm());
+      vol_func.SetTarget(mass_0);
+
+      StackedSharedFunctional C(offsets.Last());
+      C.AddFunctional(vol_func);
+
+      MassOperator mass(pfes_final);
+      Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
+                        u_final_min, u_final_max);
+      u_final = u_interpolated;
+      projector.Project(u_final);
+   }
 
    // Report masses.
    ParGridFunction u_final_gf(&pfes_final);
@@ -666,6 +691,28 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
          u_final[i] = sigmoid(psi[i], u_min[i], u_max[i]);
       }
    }
+   else if (opt_type == 5)
+   {
+      std::vector<ParFiniteElementSpace*> fes({});
+
+      Array<int> space_idx({-1});
+      Array<int> offsets({0, qspace_final.GetSize()});
+
+      BlockVector x_initial(u_interpolated, offsets);
+
+      ComposedFunctional vol_func(remap::volume_f, remap::volume_df, qspace_final,
+                                  fes, space_idx);
+      vol_func.SetComm(pmesh_final.GetComm());
+      vol_func.SetTarget(mass_0);
+
+      StackedSharedFunctional C(offsets.Last());
+      C.AddFunctional(vol_func);
+      MassOperator mass(qspace_final);
+      Dykstra projector(pmesh_final.GetComm(), C, mass,
+                        u_min, u_max);
+      u_final = u_interpolated;
+      projector.Project(u_final);
+   }
 
    // Report final masses.
    QuadratureFunction u_final_qf(qspace_final);
@@ -906,6 +953,30 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       opt_solver.SetNonlinRelTol(1e-10);
       opt_solver.Mult(x_initial, u_final.GetTrueVector());
       u_final.SetFromTrueVector();
+   }
+   else if (opt_type == 5)
+   {
+      QuadratureSpace qspace_final(&pmesh_final, pfes_final.GetMaxElementOrder()+2);
+      std::vector<ParFiniteElementSpace*> fes({&pfes_final});
+
+      Array<int> space_idx({0});
+      Array<int> offsets({0, pfes_final.GetTrueVSize()});
+
+      BlockVector x_initial(u_interpolated.GetTrueVector(), offsets);
+
+      ComposedFunctional vol_func(remap::volume_f, remap::volume_df, qspace_final,
+                                  fes, space_idx);
+      vol_func.SetComm(pmesh_final.GetComm());
+      vol_func.SetTarget(mass);
+
+      StackedSharedFunctional C(offsets.Last());
+      C.AddFunctional(vol_func);
+
+      MassOperator mass(pfes_final);
+      Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
+                        u_final_min, u_final_max);
+      u_final = u_interpolated;
+      projector.Project(u_final);
    }
    else { MFEM_ABORT("Optimization type not implemented"); }
 
@@ -1351,7 +1422,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
 
       // Objective function: 0.5 * || u - u_initial ||^2
-      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial, space_idx);
+      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
+            space_idx);
       // Constraint
       MultiL2RieszMap projector(qspace_final, fes, space_idx);
       std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
@@ -1495,7 +1567,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
 
       // Objective function: 0.5 * || u - u_initial ||^2
-      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial, space_idx);
+      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
+            space_idx);
       // Constraint
       MultiL2RieszMap projector(qspace_final, fes, space_idx);
       std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
@@ -1594,7 +1667,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       {
          psi[i] = logit(psi[i], x_min[i], x_max[i]);
       }
-      L2_FECollection nodal_fec(pfes_e->GetOrder(0), pfes_e->GetParMesh()->Dimension());
+      L2_FECollection nodal_fec(pfes_e->GetOrder(0),
+                                pfes_e->GetParMesh()->Dimension());
       ParFiniteElementSpace pfes_nodal(pfes_e->GetParMesh(), &nodal_fec);
       ParGridFunction E_gf(pfes_e, ind_rho_e_v.GetData() + offset);
       ParGridFunction lower_gf(&pfes_nodal, e_min);
@@ -1610,6 +1684,133 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       for (int i=0; i<psi.Size(); i++)
       {
          psi[i] = sigmoid(psi[i], x_min[i], x_max[i]);
+      }
+   }
+   else if (opt_type == 5)
+   {
+      std::vector<ParFiniteElementSpace*> fes({&pfes_e_final, &pfes_v_scalar_final});
+
+      Array<int> space_idx({-1, -1, 0});
+      Array<int> offsets({0,
+                          qspace_final.GetSize(),
+                          qspace_final.GetSize(),
+                          pfes_e_final.GetTrueVSize()});
+      Array<int> b_offsets(offsets);
+      Array<bool> has_bounds({true, true, true});
+      if (remap_v)
+      {
+         for (int i=0; i<dim; i++)
+         {
+            space_idx.Append(1);
+            offsets.Append(pfes_v_scalar_final.GetTrueVSize());
+            // // Bound constraint for v
+            b_offsets.Append(pfes_v_scalar_final.GetTrueVSize());
+            has_bounds.Append(true);
+            // No bound constraint for v
+            // b_offsets.Append(0);
+            // has_bounds.Append(false);
+         }
+      }
+      offsets.PartialSum();
+      b_offsets.PartialSum();
+      MFEM_VERIFY(dynamic_cast<const L2_FECollection*>(pfes_e_final.FEColl()) !=
+                  nullptr,
+                  "Expecting L2_FECollection for pfes_e_final.");
+
+      BlockVector x_initial(offsets);
+      BlockVector x_initial_LVec(ind_rho_e_v_interp, offset);
+      // Since all functions other than v satisfy L-vector == T-vector,
+      // we can use the L-vector for bounds.
+      BlockVector x_min_final_LVec(x_min.GetData(), offset);
+      BlockVector x_max_final_LVec(x_max.GetData(), offset);
+      BlockVector x_min_final(b_offsets);
+      BlockVector x_max_final(b_offsets);
+      for (int i=0; i<3; i++)
+      {
+         x_initial.GetBlock(i) = x_initial_LVec.GetBlock(i);
+         x_min_final.GetBlock(i) = x_min_final_LVec.GetBlock(i);
+         x_max_final.GetBlock(i) = x_max_final_LVec.GetBlock(i);
+      }
+      if (remap_v)
+      {
+         ParGridFunction vtmp(&pfes_v_scalar_final, (real_t*)nullptr);
+         const int n = pfes_v_scalar_final.GetVSize();
+         MFEM_VERIFY(n*dim == pfes_v_final.GetVSize(),
+                     "Expecting 3*n dofs for pfes_v_scalar_final.");
+         for (int i=0; i<dim; i++)
+         {
+            vtmp.MakeRef(&pfes_v_scalar_final, x_initial_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_initial.GetBlock(3+i));
+
+            if (!has_bounds[3 + i]) { continue; }
+            vtmp.MakeRef(&pfes_v_scalar_final, x_min_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_min_final.GetBlock(3+i));
+
+            vtmp.MakeRef(&pfes_v_scalar_final, x_max_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_max_final.GetBlock(3+i));
+         }
+      }
+
+      // Objective function: 0.5 * || u - u_initial ||^2
+      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
+            space_idx);
+      // Constraint
+      std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
+
+      funcs[0] = std::make_unique<ComposedFunctional>(
+                    remap::volume_f, remap::volume_df, qspace_final, fes, space_idx);
+      funcs[0]->SetTarget(volume_0);
+      funcs[1] = std::make_unique<ComposedFunctional>(
+                    remap::mass_f, remap::mass_df, qspace_final, fes, space_idx);
+      funcs[1]->SetTarget(mass_0);
+      if (!remap_v) // use potential
+      {
+         funcs[2] = std::make_unique<ComposedFunctional>(
+                       remap::potential_f, remap::potential_df, qspace_final, fes, space_idx);
+         funcs[2]->SetTarget(energy_0);
+      }
+      else
+      {
+         for (int i=0; i<dim; i++)
+         {
+            funcs[3+i] = std::make_unique<ComposedFunctional>(
+            [i](const Vector &x) { return remap::momentum_f(x, i); },
+            [i](const Vector &x, Vector &g) { remap::momentum_df(x, g, i); },
+            qspace_final, fes, space_idx);
+            funcs[3+i]->SetTarget(moment_0[i]);
+         }
+         funcs[2] = std::make_unique<ComposedFunctional>(
+                       remap::energy_f, remap::energy_df, qspace_final, fes, space_idx);
+         funcs[2]->SetTarget(tot_en_0);
+      }
+
+      StackedSharedFunctional C(offsets.Last());
+      for (auto &f : funcs)
+      {
+         f->SetComm(pmesh_final.GetComm());
+         C.AddFunctional(*f);
+      }
+      MassOperator mass_q(qspace_final), mass_l2(pfes_e_final),
+                   mass_h1(pfes_v_scalar_final);
+      MultiMassOperator mass;
+      mass.Append(mass_q);
+      mass.Append(mass_q);
+      mass.Append(mass_l2);
+      if (remap_v) { for (int i=0; i<dim; i++) { mass.Append(mass_h1); } }
+      Dykstra projector(pmesh_final.GetComm(), C, mass,
+                        x_min_final, x_max_final);
+      projector.Project(x_initial);
+      BlockVector x_final_LVector(ind_rho_e_v, offset);
+      for (int i=0; i<3; i++)
+      {
+         x_final_LVector.GetBlock(i) = x_initial.GetBlock(i);
+      }
+      if (remap_v)
+      {
+         ParGridFunction vtmp(&pfes_v_final, x_final_LVector.GetBlock(3));
+         Vector v_final_TVector(x_initial.GetBlock(3).GetData(),
+                                pfes_v_final.GetTrueVSize());
+         vtmp.SetFromTrueDofs(v_final_TVector);
       }
    }
    else { MFEM_ABORT("not implemented!"); }
@@ -2025,7 +2226,7 @@ void InterpolationRemap::CalcQuadBounds(const QuadratureFunction &qf_init,
 }
 
 void InterpolationRemap::CleanEmptyZones(QuadratureFunction &ind_interp,
-                                         Vector &ind_min, Vector &ind_max)
+      Vector &ind_min, Vector &ind_max)
 {
    const double eps = 1e-12;
    const int s = ind_interp.Size();
@@ -2098,8 +2299,8 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
             // elements where the ind function propages due to small diffusion.
             MFEM_VERIFY(rho_interp(el_e_idx + q) < rho_max(el_e_idx + q) + eps,
                         "Error: interpolated density is above upper bound: "
-                         << rho_interp(el_e_idx + q) << " "
-                         << rho_max(el_e_idx + q));
+                        << rho_interp(el_e_idx + q) << " "
+                        << rho_max(el_e_idx + q));
          }
          else
          {
@@ -2120,7 +2321,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 }
 
 void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
-                                         Vector &rho_min, Vector &rho_max)
+      Vector &rho_min, Vector &rho_max)
 {
    const int s = rho_interp.Size();
    for (int i = 0; i < s; i++)
