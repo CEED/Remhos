@@ -80,7 +80,8 @@ public:
       Vector psi_prev(psi);
       Vector psi_full_prev(psi);
       Vector x_full_prev(psi);
-      Vector direction(N);
+      Vector primal_dir(N);
+      Vector latent_dir(N);
       Vector merit_grad(N);
       Vector con_val(1);
       Vector con_sgn(num_con);
@@ -89,62 +90,85 @@ public:
       {
          psi_full_prev = psi;
          x_full_prev = projected_x;
-         // // Update residual before projection
-         // if (shared_constraints) { shared_constraints->Update(projected_x); }
-         // constraints.Mult(projected_x, con_res);
-         // // Baseline from the previous iteration. L1 norm.
-         // // We also compute the sign so that we can obtain the gradient direction
-         // real_t baseline = 0;
-         // for (int i=0; i<num_con; i++)
-         // {
-         //    con_sgn[i] = con_res[i] < 0 ? -1.0 : con_res[i] > 0 ? 1.0 : 0.0;
-         //    baseline += std::abs(con_res[i]);
-         // }
-         // constraints.GetGradient(projected_x).Mult(con_sgn, merit_grad);
+         // Update residual before projection
+         if (shared_constraints) { shared_constraints->Update(projected_x); }
+         constraints.Mult(projected_x, con_res);
+         // Baseline from the previous iteration. L1 norm.
+         // We also compute the sign so that we can obtain the gradient direction
+         real_t baseline = 0;
+         for (int i=0; i<num_con; i++)
+         {
+            con_sgn[i] = con_res[i] < 0 ? -1.0 : con_res[i] > 0 ? 1.0 : 0.0;
+            baseline += std::abs(con_res[i]);
+         }
+         constraints.GetGradient(projected_x).Mult(con_sgn, merit_grad);
          // Cyclic projection
          for (int i=0; i<num_con; i++)
          {
-            psi_prev = psi;
-            // Setup projection
+            // Get current set information
             Vector &qi = *q[i];
             Functional &con = constraints.GetFunctional(i);
 
-            // Projection target:
-            // c(x) + <grad c(x), x_proj - x> = 0
-            // -> <grad c(x), x_proj> = <grad c(x), x> - c(x)
-            if (shared_constraints) { shared_constraints->Update(projected_x); }
-            con.Mult(projected_x, con_val);
-            con.GetGradient().Mult(projected_x, deriv);
-            mass.Riesz(deriv, grad);
-            real_t targ = mass.InnerProduct(grad, projected_x) - con_val(0);
-
-            // Perturb psi with qi, and project
+            // Store previous
+            psi_prev = psi;
+            MapLatent(psi, xmin, xmax, projected_x); // update x
             psi += qi;
-            Project(con, psi, grad, targ, psi_aux, projected_x);
-            if (shared_constraints) { shared_constraints->Update(projected_x); }
-            real_t prev_conval = con_val[0];
-            con.Mult(projected_x, con_val);
-            if (Mpi::Root())
+            // apply a few iteration of tangential projection
+            for (int j=0; j<2; j++)
             {
-               out << "  " << i << "'th tangent: " << prev_conval << " -> " << con_val[0] <<
-                   std::endl;
+               // Projection target:
+               // c(x) + <grad c(x), x_proj - x> = 0
+               // -> <grad c(x), x_proj> = <grad c(x), x> - c(x)
+               if (shared_constraints) { shared_constraints->Update(projected_x); }
+               con.Mult(projected_x, con_val);
+               con.GetGradient().Mult(projected_x, deriv);
+               mass.Riesz(deriv, grad);
+               real_t targ = mass.InnerProduct(grad, projected_x) - con_val(0);
+
+               Project(con, psi, grad, targ, psi_aux, projected_x);
+               if (shared_constraints) { shared_constraints->Update(projected_x); }
+               con.Mult(projected_x, con_val);
+               if (std::abs(con_val[0])<tol) { break; }
             }
+            // if (Mpi::Root())
+            // {
+            //    out << "  " << i << "'th tangent: " << con_val[0] << std::endl;
+            // }
 
             // Update perturbation
             qi += psi_prev;
             qi -= psi;
          } // full cycle done
 
+         MapLatent(psi, xmin, xmax, projected_x);
+         if (shared_constraints) { shared_constraints->Update(projected_x); }
+         constraints.Mult(projected_x, con_res);
          // Start line search
-         // subtract(psi, psi_full_prev, direction);
+         // subtract(psi, psi_full_prev, latent_dir);
          // real_t step_size = 1.0;
          // for (int i=0; i<max_linesearch; i++)
          // {
+         //    add(psi_full_prev, step_size, latent_dir, psi);
+         //    MapLatent(psi, xmin, xmax, projected_x);
+         //    subtract(projected_x, x_full_prev, primal_dir);
+         //    if (shared_constraints) { shared_constraints->Update(projected_x); }
+         //    constraints.Mult(projected_x, con_res);
+         //    real_t gd = mass.InnerProduct(primal_dir, merit_grad);
+         //    if (con_res.Norml1() <= baseline + c1*gd && gd <= 0)
+         //    {
+         //       break;
+         //    }
          //    step_size *= 0.5;
+         //    if (i +1 == max_linesearch)
+         //    {
+         //       if (Mpi::Root())
+         //       {
+         //          MFEM_WARNING("Could not find search direction. Return");
+         //       }
+         //       return;
+         //    }
          // }
 
-         if (shared_constraints) { shared_constraints->Update(projected_x); }
-         constraints.Mult(projected_x, con_res);
          if (Mpi::Root())
          {
             out << "  Dykstra iteration " << iter << ": constraint violations = (";
@@ -166,12 +190,12 @@ public:
    }
 private:
 
-   void Project(const Functional &con, const Vector &psi, const Vector &grad,
+   void Project(const Functional &con, Vector &psi, const Vector &grad,
                 const real_t targ, Vector &psi_aux, Vector &projected_x)
    {
       MapLatent(psi, xmin, xmax, projected_x);
-      real_t b = 1e06;
-      real_t a = -1e06;
+      real_t b = 1e03;
+      real_t a = -1e03;
       real_t diff = b - a;
 
       // update projected_x,
@@ -248,6 +272,7 @@ private:
          // }
          if (std::abs(fc) < tol)
          {
+            psi.Add(c, grad);
             break;
          }
       }
