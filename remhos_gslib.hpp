@@ -69,6 +69,7 @@ private:
    double Mass(const Vector &pos, const ParGridFunction &g);
 
    real_t ObjectiveGF(const ParGridFunction &g_interp, const ParGridFunction &g);
+   real_t ObjectiveVecGF(const ParGridFunction &g_interp, const ParGridFunction &g);
    real_t ObjectiveQF(const Vector &g_interp, const Vector &g);
 
    // Computes volume / mass / internal energy / total energy:

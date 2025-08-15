@@ -769,7 +769,7 @@ public:
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&fespace_, x_interpolated.GetData() + 2*size_qf);
 
-      BlockVector ind_rho_e_grad(offset_, Device::GetMemoryType());
+      BlockVector ind_rho_e_grad(offset_);
 
       QuadratureFunction ind_0(&qspace_, x_initial.GetData());
       QuadratureFunction rho_0(&qspace_, x_initial.GetData() + size_qf);
@@ -940,7 +940,7 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&fespace_, x_interpolated.GetData() + 2*size_qf);
 
-      BlockVector ind_rho_e_grad(offset_, Device::GetMemoryType());
+      BlockVector ind_rho_e_grad(offset_);
       QuadratureFunction ind_grad(&qspace_); ind_grad= 0.0;
       QuadratureFunction rho_grad(&qspace_); rho_grad= 0.0;
       ParGridFunction    e_grad(&fespace_);  e_grad= 0.0;
@@ -1133,8 +1133,8 @@ private:
 
    Array<int> offset_;
 
-   real_t w_1 = 1e1;
-   real_t w_2 = 1e1;
+   real_t w_1 = 1e-2;
+   real_t w_2 = 1e-2;
    real_t w_3 = 1e1;
    real_t w_4 = 1e1;
 
@@ -1183,6 +1183,18 @@ private:
   int considerdDim_;
 };
 
+class VDiffIntegrator : public mfem::LinearFormIntegrator {
+public:
+  VDiffIntegrator(const mfem::ParGridFunction &v, const mfem::ParGridFunction &v_0,const mfem::QuadratureFunction &ind);
+  ~VDiffIntegrator(){};
+  void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
+private:
+
+  const mfem::ParGridFunction *v_;
+  const mfem::ParGridFunction *v_0_;
+  const mfem::QuadratureFunction *ind_;
+};
+
 
 
 public:
@@ -1218,7 +1230,7 @@ public:
       spatialDim = scalarfespace_.GetMesh()->SpaceDimension ();
 
       offset_[0] = 0;
-      offset_[1] = offset_[0] + size_qf ;
+      offset_[1] = offset_[0] + size_qf;
       offset_[2] = offset_[1] + size_qf;
       offset_[3] = offset_[2] + size_gf;
       offset_[4] = offset_[3] + size_gf_vec;
@@ -1236,6 +1248,7 @@ public:
 
    double CalcObjective(const Vector &x) const override
    {
+            //std::cout<<"---- calc obj -----"<<std::endl;
       Vector x_interpolated(offset_[4]);  
 
       if(subproblem)
@@ -1275,7 +1288,7 @@ public:
 
          pvdc1.Save();
 
-         // mfem_error("error_here");
+          //mfem_error("error_here");
 
       subtract( ind     , ind_0, ind_diff);
       subtract( rho     , rho_0, roh_diff);
@@ -1381,6 +1394,8 @@ public:
 
    void CalcObjectiveGrad(const Vector &x, Vector &grad) const  override
    {
+
+      //std::cout<<"---- calc obj grad -----"<<std::endl;
       Vector x_interpolated(offset_[4]);  
 
       if(subproblem)
@@ -1396,7 +1411,7 @@ public:
       QuadratureFunction ind(&qspace_, x_interpolated.GetData());
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&scalarfespace_, x_interpolated.GetData() + 2*size_qf);
-      ParGridFunction    velocity  (&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
+      ParGridFunction    velocity(&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
    
       QuadratureFunction ind_0(&qspace_, x_initial.GetData());
       QuadratureFunction rho_0(&qspace_, x_initial.GetData() + size_qf);
@@ -1413,7 +1428,7 @@ public:
       subtract( energy  , e_0  , e_diff);
       subtract( velocity, v_0  , v_diff);
 
-      BlockVector ind_rho_e_v_grad(offset_, Device::GetMemoryType());
+      BlockVector ind_rho_e_v_grad(offset_);
       ind_rho_e_v_grad = 0.0;
 
       //------------------------------------------------------------------------
@@ -1460,13 +1475,14 @@ public:
 
       ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
-      ParGridFunction    e_grad(&scalarfespace_);
+      ParGridFunction    e_grad(&scalarfespace_); e_grad = 0.0;
       ParGridFunction    v_grad(&vectorfespace_); v_grad = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
 
       auto *lfi_1 = new DomainLFIntegrator(e_diff_coeff);
-      auto *lfi_2 = new	VectorDomainLFIntegrator (v_diff_coeff);
+      //auto *lfi_2 = new	VectorDomainLFIntegrator (v_diff_coeff);
+      auto *lfi_2 = new VDiffIntegrator (velocity, v_0, ind);
 
       dQdeta.AddDomainIntegrator(lfi_1);
       dQdeta.Assemble();
@@ -1481,10 +1497,28 @@ public:
       e_grad   *= w_3;
       v_grad   *= w_4;
 
+      //std::cout<<"grad norms : "<<ind_diff.Norml2() <<" | "<<roh_diff.Norml2() <<" | "<<e_grad.Norml2() <<" | "<<v_grad.Norml2()<<std::endl;
+
       ind_rho_e_v_grad.GetBlock(0) = ind_diff;
       ind_rho_e_v_grad.GetBlock(1) = roh_diff;
       ind_rho_e_v_grad.GetBlock(2) = e_grad;
       ind_rho_e_v_grad.GetBlock(3) = v_grad;
+
+      // for(int Ik = 0; Ik<size_gf_vec; Ik++)
+      // {
+      //    ind_rho_e_v_grad[Ik + offset_[3]] = v_grad[Ik];
+      // }
+
+      ParaViewDataCollection pvdc1("IndRhoE_grad", qspace_.GetMesh());
+      pvdc1.SetDataFormat(VTKFormat::BINARY32);
+      pvdc1.SetCycle(0);
+      pvdc1.SetTime(1.0);
+      pvdc1.RegisterField("velocity", &velocity);
+      pvdc1.RegisterField("velocity_0", &v_0);
+      pvdc1.RegisterField("velgrad", &v_grad);
+      pvdc1.Save();
+
+      //v_grad.Print();
 
       if(subproblem)
       {
@@ -1493,6 +1527,11 @@ public:
       else
       {
          grad = ind_rho_e_v_grad;
+
+         // std::cout<<"grad norms1: "<<ind_rho_e_v_grad.GetBlock(0).Norml2() <<" | "<<ind_rho_e_v_grad.GetBlock(1).Norml2() <<" | "<<
+         //                             ind_rho_e_v_grad.GetBlock(2).Norml2() <<" | "<<ind_rho_e_v_grad.GetBlock(3).Norml2() <<std::endl;
+
+         // std::cout<<"grad norms : "<<ind_rho_e_v_grad.GetBlock(3).Norml2() <<" | "<<ind_rho_e_v_grad.Norml2() <<" | "<< grad.Norml2() <<std::endl;
       } 
    }
 
@@ -1585,7 +1624,7 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       ParGridFunction    vel  (&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
 
 
-      BlockVector ind_rho_e_v_grad(offset_, Device::GetMemoryType());
+      BlockVector ind_rho_e_v_grad(offset_);
       QuadratureFunction ind_grad(&qspace_); ind_grad= 0.0;
       QuadratureFunction rho_grad(&qspace_); rho_grad= 0.0;
       ParGridFunction    e_grad(&scalarfespace_);  e_grad= 0.0;
@@ -1664,6 +1703,7 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       if( ( spatialDim == 2 && ( constNumber == 2 || constNumber == 3 )) ||
           ( spatialDim == 3 && ( constNumber == 2 || constNumber == 3 || constNumber == 4 )))
       {
+
          int d = 0;
          if      (constNumber == 2) { d = 0; }
          else if (constNumber == 3) { d = 1; }
@@ -1765,7 +1805,8 @@ void CalcConstraint(const int constNumber,
 
          constVal[2+d] = momentum_s - targetMomentum[d];
 
-                  std::cout<<"Const "<< 3+d<<": " << constVal[2+d]<<std::endl;
+         std::cout<<"Const "<< 3+d<<": " << constVal[2+d]<<std::endl;
+         //std::cout<<"Moment in dim "<<d+1 <<" optimized: " << momentum_s<<std::endl;
       }
       else if( ( spatialDim == 2 && constNumber == 4) ||
                ( spatialDim == 3 && constNumber == 5))
@@ -1773,8 +1814,11 @@ void CalcConstraint(const int constNumber,
          double tot_energy = Integrate(pos_final,
                                      &ind, &rho, &energy, &vel);
 
+
+
          constVal[2+spatialDim] = tot_energy - targetEnergy;
-                           std::cout<<"Const "<< 3+spatialDim<<": " << constVal[2+spatialDim]<<std::endl;
+         std::cout<<"Const "<< 3+spatialDim<<": " << constVal[2+spatialDim]<<std::endl;
+         std::cout<<"Total energy optimized: " << tot_energy<<" targetEnergy: "<< targetEnergy<<std::endl;
       }
 
       else{mfem_error("Constraint index does not exist.");}

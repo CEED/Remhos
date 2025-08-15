@@ -966,9 +966,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 #endif
       }
 
-      Vector rho_target, e_target;
+      Vector rho_target, e_target, v_target;
       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
       GetTargetValues( e_interp, e_min, e_max, e_target );
+
 
       BlockVector initial_design(offset);
       initial_design.GetBlock(0) = ind_interp;
@@ -976,7 +977,19 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       initial_design.GetBlock(2) = e_target;
       if (remap_v)
       {
+         GetTargetValues( v_interp, v_min, v_max, v_target );
          initial_design.GetBlock(3) = v_interp;
+
+         ParGridFunction v_min_GF(&pfes_v_final, v_min.GetData());
+         ParGridFunction v_max_GF(&pfes_v_final, v_max.GetData());
+
+         ParaViewDataCollection pvdc1("IndRhoE_min_max", pfes_v_final.GetMesh());
+         pvdc1.SetDataFormat(VTKFormat::BINARY32);
+         pvdc1.SetCycle(0);
+         pvdc1.SetTime(1.0);
+         pvdc1.RegisterField("v_min", &v_min_GF);
+         pvdc1.RegisterField("v_max", &v_max_GF);
+         pvdc1.Save();
       }
 
       int NumDesVar = initial_design.Size();
@@ -1025,7 +1038,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                               initial_design,
                                               NumDesVar,
                                               x_minsub, x_maxsub,
-                                              volume_0, mass_0, moment_0, energy_0,
+                                              volume_0, mass_0, moment_0, tot_en_0,
                                               5, false, optProbInd, true, subprob);
 
          dynamic_cast<RemhosHydroHiOpProblem*>(ot_prob)->setWeightedSpaceType(
@@ -1286,16 +1299,31 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    CheckBounds(pmesh_init.GetMyRank(), rho, rho_min, rho_max);
    if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
+   if (remap_v)
+   {
+      if (Mpi::Root()) { std::cout << "*\nVelocity violations: \n"; }
+      CheckBounds(pmesh_init.GetMyRank(), v, v_min, v_max);
+   }
 
    // Print final objective values.
-   const double ind_obj_l2 = ObjectiveQF(ind_interp, ind),
+   double ind_obj_l2 = ObjectiveQF(ind_interp, ind),
                 rho_obj_l2 = ObjectiveQF(rho_interp, rho),
-                e_obj_L2 = ObjectiveGF(e_interp, e);
+                e_obj_L2 = ObjectiveGF(e_interp, e),
+                v_obj_L2;
+   if (remap_v)
+   {
+      v_obj_L2 = ObjectiveVecGF(v_interp, v);
+   }
+                
    if (myid == 0)
    {
       std::cout << "---\nObjective ind l2: " << ind_obj_l2 << std::endl;
       std::cout <<      "Objective rho l2: " << rho_obj_l2 << std::endl;
       std::cout <<      "Objective e   L2: " << e_obj_L2 << std::endl;
+      if (remap_v)
+      {
+         std::cout <<      "Objective v   L2: " << v_obj_L2 << std::endl;
+      }
    }
 }
 
@@ -1393,6 +1421,13 @@ real_t InterpolationRemap::ObjectiveGF(const ParGridFunction &g_interp,
                                        const ParGridFunction &g)
 {
    GridFunctionCoefficient ci(&g_interp);
+   return g.ComputeL2Error(ci);
+}
+
+real_t InterpolationRemap::ObjectiveVecGF(const ParGridFunction &g_interp,
+                                          const ParGridFunction &g)
+{
+   VectorGridFunctionCoefficient ci(&g_interp);
    return g.ComputeL2Error(ci);
 }
 
