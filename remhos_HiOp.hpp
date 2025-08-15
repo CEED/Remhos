@@ -353,7 +353,7 @@ public:
       return hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean; 
    }
 
-virtual double CalcObjective(const Vector &x) const
+virtual double CalcObjective(const Vector &x) const override
    {
       QuadratureFunction x_diff(&qspace); x_diff = 0.0;
       subtract( x, x_initial, x_diff);
@@ -407,7 +407,7 @@ virtual double CalcObjective(const Vector &x) const
       return normSq;
    }
 
-   virtual void CalcObjectiveGrad(const Vector &x, Vector &grad) const
+   virtual void CalcObjectiveGrad(const Vector &x, Vector &grad) const override
    {
       QuadratureFunction x_diff(&qspace); x_diff = 0.0;
       subtract( x, x_initial, x_diff);
@@ -452,7 +452,7 @@ virtual double CalcObjective(const Vector &x) const
       grad = x_diff;
    }
 
-   virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &grad) const
+   virtual void CalcConstraintGrad(const int constNumber, const Vector &x, Vector &grad) const override
    {
       if( constNumber == 0)
       {
@@ -494,7 +494,7 @@ virtual double CalcObjective(const Vector &x) const
 
    }
 
-   virtual void CalcConstraint(const int constNumber, const Vector &x, Vector &constVal) const
+   virtual void CalcConstraint(const int constNumber, const Vector &x, Vector &constVal) const override
    {
       if( constNumber == 0)
       {
