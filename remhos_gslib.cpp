@@ -1271,17 +1271,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       {
          GetTargetValues( v_interp, v_min, v_max, v_target );
          initial_design.GetBlock(3) = v_interp;
-
-         ParGridFunction v_min_GF(&pfes_v_final, v_min.GetData());
-         ParGridFunction v_max_GF(&pfes_v_final, v_max.GetData());
-
-         ParaViewDataCollection pvdc1("IndRhoE_min_max", pfes_v_final.GetMesh());
-         pvdc1.SetDataFormat(VTKFormat::BINARY32);
-         pvdc1.SetCycle(0);
-         pvdc1.SetTime(1.0);
-         pvdc1.RegisterField("v_min", &v_min_GF);
-         pvdc1.RegisterField("v_max", &v_max_GF);
-         pvdc1.Save();
       }
 
       int NumDesVar = initial_design.Size();
