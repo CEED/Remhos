@@ -1141,6 +1141,7 @@ int main(int argc, char *argv[])
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
       ParGridFunction e(&pfes, ind_rho_e.GetBlock(2).GetData());
+      ParGridFunction v(&pfes_v, ind_rho_e.GetBlock(3).GetData());
 
       // Visualize final values.
       if (visualization)
@@ -1168,6 +1169,7 @@ int main(int argc, char *argv[])
          // pvdc.RegisterQField("ind", &ind);
          // pvdc.RegisterQField("rho", &rho);
          pvdc1.RegisterField("energy", &e);
+         pvdc1.RegisterField("velocity", &v);
          pvdc1.Save();
          
       }

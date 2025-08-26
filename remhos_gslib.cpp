@@ -1021,7 +1021,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    // Extract initial data from the BlockVector.
    const int size_qf   = qspace->GetSize(),
              size_gf_e = pfes_e->GetVSize(),
-             size_gf_v = pfes_v->GetVSize();
+             size_gf_v = pfes_v->GetVSize(),
+             size_gf_v_true = pfes_v->GetTrueVSize();
    Vector *irev_ptr = const_cast<Vector *>(&ind_rho_e_v_0);
    QuadratureFunction ind_0(qspace, irev_ptr->GetData()),
                       rho_0(qspace, irev_ptr->GetData() + size_qf);
@@ -1217,6 +1218,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    }
 
    Array<int> offset(numBlocks);
+
    offset[0] = 0;
    offset[1] = offset[0] + size_qf;
    offset[2] = offset[1] + size_qf;
@@ -1257,24 +1259,52 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          MFEM_ABORT("MFEM is not built with HiOp support!");
 #endif
       }
+      Array<int> offset_true(numBlocks);
+      offset_true[0] = 0;
+      offset_true[1] = offset_true[0] + size_qf;
+      offset_true[2] = offset_true[1] + size_qf;
+      offset_true[3] = offset_true[2] + size_gf_e;
+      if (remap_v)
+      {
+         offset_true[4] = offset_true[3] + size_gf_v_true;
+      }
 
       Vector rho_target, e_target, v_target;
       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
       GetTargetValues( e_interp, e_min, e_max, e_target );
 
-
-      BlockVector initial_design(offset);
+      BlockVector initial_design(offset_true);
+      BlockVector design_min    (offset_true);
+      BlockVector design_max    (offset_true);
       initial_design.GetBlock(0) = ind_interp;
       initial_design.GetBlock(1) = rho_target;
       initial_design.GetBlock(2) = e_target;
+      design_min.GetBlock(0) = ind_min;
+      design_min.GetBlock(1) = rho_min;
+      design_min.GetBlock(2) = e_min;
+      design_max.GetBlock(0) = ind_max;
+      design_max.GetBlock(1) = rho_max;
+      design_max.GetBlock(2) = e_max;
       if (remap_v)
       {
-         GetTargetValues( v_interp, v_min, v_max, v_target );
-         initial_design.GetBlock(3) = v_interp;
+         ParGridFunction vtmp_min(&pfes_v_final, v_min);
+         ParGridFunction vtmp_max(&pfes_v_final, v_max);
+
+         v_interp.SetTrueVector();
+         vtmp_min.SetTrueVector();
+         vtmp_max.SetTrueVector();
+
+         mfem::Vector & true_v_interp = v_interp.GetTrueVector();
+         mfem::Vector & true_v_min    = vtmp_min.GetTrueVector();
+         mfem::Vector & true_v_max    = vtmp_max.GetTrueVector();
+
+         initial_design.GetBlock(3) = true_v_interp;
+         design_min    .GetBlock(3) = true_v_min;
+         design_max    .GetBlock(3) = true_v_max;
       }
 
       int NumDesVar = initial_design.Size();
-      Vector y_out(NumDesVar);
+      BlockVector y_out(offset_true);
 
       y_out = initial_design;
 
@@ -1288,14 +1318,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 
       if (subprob)
       {
-         NumDesVar = GetSizeOptimizationSubset(x_min,x_max);
-         GetOptimizationSubsetInd(x_min,x_max,optProbInd);
+         NumDesVar = GetSizeOptimizationSubset(design_min,design_max);
+         GetOptimizationSubsetInd(design_min,design_max,optProbInd);
          //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
          initial_design.GetSubVector(optProbInd,ind_rho_e_sub);
          y_out.GetSubVector(optProbInd,y_out_sub);
 
-         x_min.GetSubVector(optProbInd,minsub);
-         x_max.GetSubVector(optProbInd,maxsub);
+         design_min.GetSubVector(optProbInd,minsub);
+         design_max.GetSubVector(optProbInd,maxsub);
 
          x_maxsub.SetSize(NumDesVar);
          x_minsub.SetSize(NumDesVar);
@@ -1304,8 +1334,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       else
       {
-         x_maxsub = x_max;
-         x_minsub = x_min;
+         x_maxsub = design_max;
+         x_minsub = design_min;
       }
 
       OptimizationProblem *ot_prob = nullptr;
@@ -1353,7 +1383,23 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
       else { optsolver->Mult(initial_design, y_out); }
 
-      ind_rho_e_v = y_out;
+      BlockVector T_vector_design(offset_true);
+      BlockVector L_vector_design(offset);
+
+      T_vector_design = y_out;
+      L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
+      L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
+      L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);
+
+      if (remap_v)
+      {
+         ParGridFunction vel_final(&pfes_v_final);
+         Vector vel_true(T_vector_design.GetData() + 2*size_qf + size_gf_e, size_gf_v_true);
+         vel_final.SetFromTrueDofs(vel_true);
+         L_vector_design.GetBlock(3) = vel_final;
+      }
+
+      ind_rho_e_v = L_vector_design;
 
       delete optsolver;
       delete ot_prob;
@@ -2447,7 +2493,7 @@ void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
 {
    real_t max = v_interp.Max(), min = v_interp.Min();
    MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    v_min.SetSize(v_interp.Size());
    v_max.SetSize(v_interp.Size());
 

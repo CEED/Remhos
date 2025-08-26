@@ -1130,8 +1130,10 @@ private:
    const int size_qf;
    const int size_gf;
    const int size_gf_vec;
+   const int size_gf_vec_true;
 
    Array<int> offset_;
+   Array<int> offsetGP;
 
    real_t w_1 = 1e1;
    real_t w_2 = 1e1;
@@ -1144,9 +1146,17 @@ private:
    mutable ParBilinearForm * mass_form =nullptr;
 
    int spatialDim = 0;
+   int NE_ = 0;
+
+   Mesh * mesh_ = nullptr;
 
    mutable hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace_ = 
          hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+
+   QuadratureFunction ind_0;
+   QuadratureFunction rho_0;
+   ParGridFunction e_0;
+   //ParGridFunction v_0;
 
 class totalEnergyGradEIntegrator : public mfem::LinearFormIntegrator {
 public:
@@ -1219,7 +1229,8 @@ public:
         x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), scalarfespace_(scalarfespace), vectorfespace_(vectorfespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetMomentum(initalmomentum), targetEnergy(initalenergy), isL2_(isL2),
-        size_qf(qspace.GetSize()), size_gf(scalarfespace.GetVSize()), size_gf_vec(vectorfespace.GetVSize()), offset_(5), optProbInd(optProbInd_), subproblem(sub)
+        size_qf(qspace.GetSize()), size_gf(scalarfespace.GetVSize()), size_gf_vec(vectorfespace.GetVSize()),
+        size_gf_vec_true(vectorfespace.GetTrueVSize()), offset_(5), optProbInd(optProbInd_), subproblem(sub)
    {
       numConstraints = numConstraints_;
       SetEqualityConstraint(massvec);
@@ -1233,7 +1244,29 @@ public:
       offset_[1] = offset_[0] + size_qf;
       offset_[2] = offset_[1] + size_qf;
       offset_[3] = offset_[2] + size_gf;
-      offset_[4] = offset_[3] + size_gf_vec;
+      offset_[4] = offset_[3] + size_gf_vec_true;
+
+      mesh_ = qspace_.GetMesh();
+      NE_ = mesh_->GetNE();
+
+      offsetGP.SetSize(NE_+1);
+      offsetGP[0] = 0;
+
+      for (int e = 0; e < NE_; e++)
+      {            
+         const IntegrationRule &ir = qspace_.GetElementIntRule(e);
+         const int nqp = ir.GetNPoints();
+
+         offsetGP[e+1] = offsetGP[e] + nqp;
+      }
+
+      ind_0 = QuadratureFunction(&qspace_, x_initial.GetData());
+      rho_0 = QuadratureFunction(&qspace_, x_initial.GetData() + size_qf);
+      e_0.MakeRef(&scalarfespace_, x_initial.GetData() + 2*size_qf);
+      // v_0   = ParGridFunction(&vectorfespace_);
+
+      // Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      // v_0.SetFromTrueDofs(v_0_true);
    }
 
    void setWeightedSpaceType( hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace)
@@ -1263,17 +1296,19 @@ public:
       QuadratureFunction ind(&qspace_, x_interpolated.GetData());
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&scalarfespace_, x_interpolated.GetData() + 2*size_qf);
-      ParGridFunction    velocity  (&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
-   
-      QuadratureFunction ind_0(&qspace_, x_initial.GetData());
-      QuadratureFunction rho_0(&qspace_, x_initial.GetData() + size_qf);
-      ParGridFunction    e_0  (&scalarfespace_, x_initial.GetData() + 2*size_qf);
-      ParGridFunction    v_0  (&vectorfespace_, x_initial.GetData() + 2*size_qf + size_gf);
-
+      
       QuadratureFunction ind_diff(&qspace_);
       QuadratureFunction roh_diff(&qspace_);
       ParGridFunction    e_diff(&scalarfespace_);
       ParGridFunction    v_diff(&vectorfespace_);
+
+      ParGridFunction    velocity  (&vectorfespace_);
+      Vector vel_true(x_interpolated.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      velocity.SetFromTrueDofs(vel_true);
+
+      ParGridFunction v_0(&vectorfespace_);
+      Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      v_0.SetFromTrueDofs(v_0_true);
 
       subtract( ind     , ind_0, ind_diff);
       subtract( rho     , rho_0, roh_diff);
@@ -1289,26 +1324,12 @@ public:
       
       if(isL2_)
       {
-         auto mesh = qspace_.GetMesh();
-         const int NE = mesh->GetNE();
-
-         Array<int> offset(NE+1);
-         offset[0] = 0;
-
-         for (int e = 0; e < NE; e++)
+         for (int e = 0; e < NE_; e++)
          {
-            const IntegrationRule &ir = qspace_.GetElementIntRule(e);
-            const int nqp = ir.GetNPoints();
-
-            offset[e+1] = offset[e] + nqp;
-         }
-
-         for (int e = 0; e < NE; e++)
-         {
-            const int s_offset = offset[e];
+            const int s_offset = offsetGP[e];
 
             IsoparametricTransformation Tr;
-            mesh->GetElementTransformation(e, pos_final, &Tr);
+            mesh_->GetElementTransformation(e, pos_final, &Tr);
 
             const IntegrationRule &ir = qspace_.GetElementIntRule(e);
             const int nqp = ir.GetNPoints();
@@ -1335,48 +1356,9 @@ public:
       MPI_Allreduce(MPI_IN_PLACE, &normrohSq, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
 
-      ::mfem::ParGridFunction oneGridFunction(&scalarfespace_);
-      oneGridFunction = 1.0;
-      ::mfem::ParGridFunction oneGridFunctionVec(&vectorfespace_);
-      oneGridFunctionVec = 1.0;
-      //-------------------------------------------------------------------
-
-      //Energy L2 norm (0.5*(u_1-u_0)^2)
-      ParLinearForm dQdeta(&scalarfespace_);
-      GridFunctionCoefficient e_diff_coeff(&e_diff);
-      ProductCoefficient e_diff_coeffsquared(e_diff_coeff, e_diff_coeff);
-      ProductCoefficient half_e_diff_coeffsquared(0.5, e_diff_coeffsquared);
-
-      auto *lfi_1 = new DomainLFIntegrator(half_e_diff_coeffsquared);
-      dQdeta.AddDomainIntegrator(lfi_1);
-      dQdeta.Assemble();
-
-      normESq = dQdeta(oneGridFunction);
-
-      //normESq = Integrate_e_minus_e0(pos_final, &ind, &energy, &e_0);
-
-      //-------------------------------------------------------------------
-      // Velocity L2 norm (0.5*(u_1-u_0)^2)
-
-      // ParLinearForm dQdV(&scalarfespace_);
-      // VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
-
-      // InnerProductCoefficient v_diff_coeffsquared(v_diff_coeff, v_diff_coeff);
-      // ProductCoefficient half_v_diff_coeffsquared(0.5, v_diff_coeffsquared);
-
-      // auto *lfi_2 = new DomainLFIntegrator(half_v_diff_coeffsquared);      
-      // dQdV.AddDomainIntegrator(lfi_2);
-      // dQdV.Assemble();
-
-      //normVSq = dQdV(oneGridFunction);
+      normESq = Integrate_e_minus_e0(pos_final, &ind, &energy, &e_0);
 
       normVSq = Integrate_v_minus_v0(pos_final, &ind, &velocity, &v_0);
-
-      //-------------------------------------------------------------------
-      // std::cout<<"ind: "<< normindSq<<std::endl;
-      // std::cout<<"rho: "<< normrohSq<<std::endl;
-      // std::cout<<"e: "<< normESq<<std::endl;
-      // std::cout<<"v: "<< normVSq<<std::endl;
 
       return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq;
    }
@@ -1398,17 +1380,19 @@ public:
       QuadratureFunction ind(&qspace_, x_interpolated.GetData());
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&scalarfespace_, x_interpolated.GetData() + 2*size_qf);
-      ParGridFunction    velocity(&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
-   
-      QuadratureFunction ind_0(&qspace_, x_initial.GetData());
-      QuadratureFunction rho_0(&qspace_, x_initial.GetData() + size_qf);
-      ParGridFunction    e_0  (&scalarfespace_, x_initial.GetData() + 2*size_qf);
-      ParGridFunction    v_0  (&vectorfespace_, x_initial.GetData() + 2*size_qf + size_gf);
-
+     
       QuadratureFunction ind_diff(&qspace_);
       QuadratureFunction roh_diff(&qspace_);
       ParGridFunction    e_diff(&scalarfespace_);
       ParGridFunction    v_diff(&vectorfespace_);
+
+      ParGridFunction    velocity  (&vectorfespace_);
+      Vector vel_true(x_interpolated.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      velocity.SetFromTrueDofs(vel_true);
+
+      ParGridFunction v_0(&vectorfespace_);
+      Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      v_0.SetFromTrueDofs(v_0_true);
 
       subtract( ind     , ind_0, ind_diff);
       subtract( rho     , rho_0, roh_diff);
@@ -1422,26 +1406,12 @@ public:
 
       if(isL2_)
       {
-         auto mesh = qspace_.GetMesh();
-         const int NE = mesh->GetNE();
-
-         Array<int> offset(NE+1);
-         offset[0] = 0;
-
-         for (int e = 0; e < NE; e++)
+         for (int e = 0; e < NE_; e++)
          {
-            const IntegrationRule &ir = qspace_.GetElementIntRule(e);
-            const int nqp = ir.GetNPoints();
-
-            offset[e+1] = offset[e] + nqp;
-         }
-
-         for (int e = 0; e < NE; e++)
-         {
-            const int s_offset = offset[e];
+            const int s_offset = offsetGP[e];
 
             IsoparametricTransformation Tr;
-            mesh->GetElementTransformation(e, pos_final, &Tr);
+            mesh_->GetElementTransformation(e, pos_final, &Tr);
 
             const IntegrationRule &ir = qspace_.GetElementIntRule(e);
             const int nqp = ir.GetNPoints();
@@ -1463,7 +1433,7 @@ public:
       ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
       ParGridFunction    e_grad(&scalarfespace_); e_grad = 0.0;
-      ParGridFunction    v_grad(&vectorfespace_); v_grad = 0.0;
+      Vector v_grad_true(size_gf_vec_true); v_grad_true = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
 
@@ -1477,22 +1447,17 @@ public:
 
       dQdv.AddDomainIntegrator(lfi_2);
       dQdv.Assemble();
-      dQdv.ParallelAssemble(v_grad);
+      dQdv.ParallelAssemble(v_grad_true);
 
       ind_diff *= w_1;
       roh_diff *= w_2;
       e_grad   *= w_3;
-      v_grad   *= w_4;
+      v_grad_true   *= w_4;
 
       ind_rho_e_v_grad.GetBlock(0) = ind_diff;
       ind_rho_e_v_grad.GetBlock(1) = roh_diff;
       ind_rho_e_v_grad.GetBlock(2) = e_grad;
-      ind_rho_e_v_grad.GetBlock(3) = v_grad;
-
-      // for(int Ik = 0; Ik<size_gf_vec; Ik++)
-      // {
-      //    ind_rho_e_v_grad[Ik + offset_[3]] = v_grad[Ik];
-      // }
+      ind_rho_e_v_grad.GetBlock(3) = v_grad_true;
 
       if(subproblem)
       {
@@ -1524,26 +1489,12 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
 
       if(isL2_)
       {
-         auto mesh = qspace_.GetMesh();
-         const int NE = mesh->GetNE();
-
-         Array<int> offset(NE+1);
-         offset[0] = 0;
-
-         for (int e = 0; e < NE; e++)
+         for (int e = 0; e < NE_; e++)
          {
-            const IntegrationRule &ir = qspace_.GetElementIntRule(e);
-            const int nqp = ir.GetNPoints();
-
-            offset[e+1] = offset[e] + nqp;
-         }
-
-         for (int e = 0; e < NE; e++)
-         {
-            const int s_offset = offset[e];
+            const int s_offset = offsetGP[e];
 
             IsoparametricTransformation Tr;
-            mesh->GetElementTransformation(e, pos_final, &Tr);
+            mesh_->GetElementTransformation(e, pos_final, &Tr);
 
             const IntegrationRule &ir = qspace_.GetElementIntRule(e);
             const int nqp = ir.GetNPoints();
@@ -1570,6 +1521,8 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       mass_form->Finalize();
 
       M_[0] = mass_form->ParallelAssemble();
+
+      delete mass_form;
    }
 
    void CalcConstraintGrad(const int constNumber,
@@ -1590,36 +1543,24 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
       QuadratureFunction ind(&qspace_, x_interpolated.GetData());
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&scalarfespace_, x_interpolated.GetData() + 2*size_qf);
-      ParGridFunction    vel  (&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
-
+      
+      ParGridFunction    vel  (&vectorfespace_);
+      Vector vel_true(x_interpolated.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      vel.SetFromTrueDofs(vel_true);
 
       BlockVector ind_rho_e_v_grad(offset_);
       QuadratureFunction ind_grad(&qspace_); ind_grad= 0.0;
       QuadratureFunction rho_grad(&qspace_); rho_grad= 0.0;
       ParGridFunction    e_grad(&scalarfespace_);  e_grad= 0.0;
-      ParGridFunction    v_grad(&vectorfespace_);  v_grad= 0.0;
+      Vector v_grad_true(size_gf_vec_true); v_grad_true = 0.0;
 
       grad = 0.0;
 
-      auto mesh = qspace_.GetMesh();
-      const int NE = mesh->GetNE();
-
-      Array<int> offsetGP(NE+1);
-      offsetGP[0] = 0;
-
-      for (int e = 0; e < NE; e++)
-      {            
-         const IntegrationRule &ir = qspace_.GetElementIntRule(e);
-         const int nqp = ir.GetNPoints();
-
-         offsetGP[e+1] = offsetGP[e] + nqp;
-      }
-
       IsoparametricTransformation Tr;
 
-      for (int e = 0; e < NE; e++)
+      for (int e = 0; e < NE_; e++)
       {
-         mesh->GetElementTransformation(e, pos_final, &Tr);
+         mesh_->GetElementTransformation(e, pos_final, &Tr);
 
          const IntegrationRule &ir = qspace_.GetElementIntRule(e);
          const int nqp = ir.GetNPoints();
@@ -1684,8 +1625,7 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
 
          momentumGradVLF.AddDomainIntegrator(lfi_vel);
          momentumGradVLF.Assemble();
-         momentumGradVLF.ParallelAssemble(v_grad);
-
+         momentumGradVLF.ParallelAssemble(v_grad_true);
       }
       else if( ( spatialDim == 2 && constNumber == 4) ||
                ( spatialDim == 3 && constNumber == 5))
@@ -1706,13 +1646,13 @@ virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<
 
          energyGradVLF.AddDomainIntegrator(lfi_vel);
          energyGradVLF.Assemble();
-         energyGradVLF.ParallelAssemble(v_grad);
+         energyGradVLF.ParallelAssemble(v_grad_true);
       }
 
       ind_rho_e_v_grad.GetBlock(0) = ind_grad;
       ind_rho_e_v_grad.GetBlock(1) = rho_grad;
       ind_rho_e_v_grad.GetBlock(2) = e_grad;
-      ind_rho_e_v_grad.GetBlock(3) = v_grad;
+      ind_rho_e_v_grad.GetBlock(3) = v_grad_true;
 
       if(subproblem)
       {
@@ -1742,8 +1682,11 @@ void CalcConstraint(const int constNumber,
       QuadratureFunction ind(&qspace_, x_interpolated.GetData());
       QuadratureFunction rho(&qspace_, x_interpolated.GetData() + size_qf);
       ParGridFunction    energy  (&scalarfespace_, x_interpolated.GetData() + 2*size_qf);
-      ParGridFunction    vel  (&vectorfespace_, x_interpolated.GetData() + 2*size_qf + size_gf);
-   
+     
+      ParGridFunction    vel  (&vectorfespace_);
+      Vector vel_true(x_interpolated.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      vel.SetFromTrueDofs(vel_true);
+
       if( constNumber == 0 )
       {
          double vol_s = Integrate(pos_final, &ind, nullptr, nullptr, nullptr);
@@ -1927,10 +1870,9 @@ double Integrate_e_minus_e0(const Vector &pos,
       Vector ind_vals(nqp);
       Vector e_vals(nqp);
       Vector e_vals_0(nqp);
-      
+     
       e->GetValues(Tr, ir, e_vals);
       e_0->GetValues(Tr, ir, e_vals_0);
-
       e_vals -=e_vals_0;
 
       for (int q = 0; q < nqp; q++)
