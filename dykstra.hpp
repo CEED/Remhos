@@ -210,6 +210,10 @@ private:
          MapLatent(psi_aux, xmin, xmax, projected_x);
          return mass.InnerProduct(grad, projected_x) - targ;
       };
+      if (fabs(eval(0.0)) < tol)
+      {
+         return;
+      }
 
       real_t fa = eval(a);
       real_t fb = eval(b);
