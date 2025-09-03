@@ -30,14 +30,13 @@ namespace mfem
 
 void InitializeQuadratureFunction(Coefficient &c,
                                   const Vector &pos_mesh,
-                                  QuadratureFunction &q,
+                                  QuadratureFunction &qf,
                                   const Array<bool> *active_quads)
 {
-   auto qspace = dynamic_cast<QuadratureSpace *>(q.GetSpace());
+   auto qspace = dynamic_cast<QuadratureSpace *>(qf.GetSpace());
    MFEM_VERIFY(qspace, "Broken QuadratureSpace.");
 
    const int NE  = qspace->GetMesh()->GetNE();
-   real_t *q_data = q.GetData();
    for (int e = 0; e < NE; e++)
    {
       const IntegrationRule &ir = qspace->GetElementIntRule(e);
@@ -52,12 +51,35 @@ void InitializeQuadratureFunction(Coefficient &c,
          const IntegrationPoint &ip = ir.IntPoint(q);
          if (active_quads && (*active_quads)[e * nip + q] == false)
          {
-            q_data[e*nip + q] = 0.0;
+            qf(e*nip + q) = 0.0;
          }
          else
          {
-            q_data[e*nip + q] = c.Eval(Tr, ip);
+            qf(e*nip + q) = c.Eval(Tr, ip);
          }
+      }
+   }
+}
+
+void ComputePressureQF(const QuadratureFunction &rho,
+                       const ParGridFunction &energy,
+                       QuadratureFunction &p)
+{
+   auto qspace = dynamic_cast<QuadratureSpace *>(p.GetSpace());
+   MFEM_VERIFY(qspace, "Broken QuadratureSpace.");
+
+   const int NE  = qspace->GetMesh()->GetNE();
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nip = ir.GetNPoints();
+      IsoparametricTransformation Tr;
+      energy.ParFESpace()->GetElementTransformation(e, &Tr);
+      for (int q = 0; q < nip; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         p(e*nip + q) = rho(e*nip + q) * energy.GetValue(Tr, ip);
       }
    }
 }
@@ -1004,6 +1026,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 }
 
 void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
+                                    const QuadratureFunction &p_0,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
                                     Vector &ind_rho_e_v, int opt_type)
@@ -1048,6 +1071,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    MFEM_VERIFY(rho_0.Size() == rho_0_lor.Size(), "Size mismatch rho LOR.");
    ind_0_lor = ind_0;
    rho_0_lor = rho_0;
+   // Pressure function (not part of the solution state).
+   ParGridFunction p_0_lor;
+   p_0_lor.SetSpace(&pfes_lor);
+   MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
+   p_0_lor = p_0;
 
    // Visualize the initial LOR GridFunctions.
    if (visualization)
@@ -1057,6 +1085,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                      0, 500, 400, 400);
       VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR",
                      400, 500, 400, 400);
+      socketstream sock_p;
+      VisualizeField(sock_p, "localhost", 19916, p_0_lor, "p_0 LOR",
+                     800, 500, 400, 400);
    }
 
    // Interpolate into ind_rho_e_v_interp.
@@ -1064,12 +1095,15 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    real_t *irev_data = ind_rho_e_v_interp.GetData();
    QuadratureFunction ind_interp(&qspace_final, irev_data),
                       rho_interp(&qspace_final, irev_data + size_qf);
+   QuadratureFunction p_interp(&qspace_final);
    ParGridFunction e_interp(&pfes_e_final, irev_data + 2*size_qf),
                    v_interp(&pfes_v_final, irev_data + 2*size_qf + size_gf_e);
    FindPointsGSLIB finder(pmesh_init.GetComm());
+   finder.SetL2AvgType(FindPointsGSLIB::NONE);
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
    finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
+   finder.Interpolate(pos_quad_final, p_0_lor,   p_interp);
    finder.Setup(pmesh_init);
    finder.Interpolate(pos_dof_e_final, e_0, e_interp);
    Vector v_interp_vals(pos_dof_v_final.Size());
@@ -1095,6 +1129,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       }
    }
    finder.FreeData();
+
+   VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
 
    // Report conservation errors of ire_final.
    const double volume_0 = Integrate(pos_init,
@@ -1176,7 +1212,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    CleanEmptyZones(ind_interp, ind_min, ind_max);
    Vector rho_min, rho_max;
    CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
-   UpdateRhoInterp(rho_interp, rho_max, rho_max);
+   UpdateRhoInterp(rho_interp, rho_min, rho_max);
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
    //    gf_min = rho_min, gf_max = rho_max;
@@ -1192,7 +1228,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    UpdateEInterp(e_interp, e_min, e_max);
 
    // {
-   //    ParGridFunction gf_min(e), gf_max(e);
+   //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
    //    gf_min = e_min, gf_max = e_max;
 
    //    socketstream vis_min, vis_max;
@@ -1201,13 +1237,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    //    vis_min.precision(8);
    //    vis_max.precision(8);
 
-   //    *x = pos_final;
    //    VisualizeField(vis_min, vishost, visport, gf_min, "e min",
    //                   0, 500, 300, 300);
    //    VisualizeField(vis_max, vishost, visport, gf_max, "e max",
    //                   300, 500, 300, 300);
-   //    *x = pos_init;
-   //    MFEM_ABORT("e bounds");
+   //    //MFEM_ABORT("e bounds");
    // }
    Vector v_min, v_max;
    int numBlocks = 4;
@@ -2396,7 +2430,7 @@ void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
    const int s = rho_interp.Size();
    for (int i = 0; i < s; i++)
    {
-      if (rho_interp(i) < rho_min(i))
+      if (rho_interp(i) + 1e-12 < rho_min(i))
       {
          rho_interp(i) = 0.5 * (rho_min(i) + rho_max(i));
       }
@@ -2481,6 +2515,8 @@ void InterpolationRemap::UpdateEInterp(ParGridFunction &e_interp,
    const int s = e_interp.Size();
    for (int i = 0; i < s; i++)
    {
+      // This is used to get the "extensions", as the interpolated values
+      // are zero at those parts of a new element where there was no material.
       if (e_interp(i) < e_min(i) || e_interp(i) > e_max(i))
       {
          e_interp(i) = 0.5 * (e_min(i) + e_max(i));

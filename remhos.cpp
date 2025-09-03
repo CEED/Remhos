@@ -1088,22 +1088,25 @@ int main(int argc, char *argv[])
       VectorFunctionCoefficient v_0_coeff(dim, v0_function);
       v_0.ProjectCoefficient(v_0_coeff);
 
+      // Compute initial pressure.
+      QuadratureFunction p_0(&qspace);
+      ComputePressureQF(rho_0, e_0, p_0);
+
       // Visualize initial values.
       if (visualization)
       {
-         VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 500);
-         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 500);
-
+         VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 0);
+         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 0);
          socketstream sock_e;
          VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
-                        800, 500, 400, 400);
-
+                        800, 0, 400, 400);
          if (remap_v)
          {
             socketstream sock_v;
             VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
-                           1200, 500, 400, 400, "", true);
+                           1200, 0, 400, 400, "", true);
          }
+         VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1200, 0);
 
          ParaViewDataCollection pvdc("IndRhoE_before_opt", &pmesh);
          pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1135,13 +1138,17 @@ int main(int argc, char *argv[])
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, ind_0_bool_el, x_final,
-                              ind_rho_e, optimization_type);
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_0, ind_0_bool_el,
+                              x_final, ind_rho_e, optimization_type);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
       ParGridFunction e(&pfes, ind_rho_e.GetBlock(2).GetData());
       ParGridFunction v(&pfes_v, ind_rho_e.GetBlock(3).GetData());
+
+      // Compute final pressure.
+      QuadratureFunction p(&qspace);
+      ComputePressureQF(rho, e, p);
 
       // Visualize final values.
       if (visualization)
@@ -1151,6 +1158,13 @@ int main(int argc, char *argv[])
          VisQuadratureFunction(pmesh, rho, "rho QF", 400, 500);
          socketstream sock_f;
          VisualizeField(sock_f, "localhost", 19916, e, "e GF", 800, 500, 400, 400);
+         if (remap_v)
+         {
+            socketstream sock_v;
+            VisualizeField(sock_v, "localhost", 19916, v, "v GF",
+                           1200, 500, 400, 400, "", true);
+         }
+         VisQuadratureFunction(pmesh, p, "p QF", 1200, 500);
 
          ParaViewDataCollection pvdc("IndRhoE_after_opt", &pmesh);
          pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1161,7 +1175,6 @@ int main(int argc, char *argv[])
          //pvdc.RegisterField("energy", &e);
          pvdc.Save();
 
-
          ParaViewDataCollection pvdc1("IndRhoE_after_opt1", &pmesh);
          pvdc1.SetDataFormat(VTKFormat::BINARY32);
          pvdc1.SetCycle(0);
@@ -1171,7 +1184,6 @@ int main(int argc, char *argv[])
          pvdc1.RegisterField("energy", &e);
          pvdc1.RegisterField("velocity", &v);
          pvdc1.Save();
-         
       }
 
       return 0;
@@ -2102,6 +2114,13 @@ double u0_function(const Vector &x)
              X(1) > -0.5 - eps && X(1) < 0.5 + eps) { return 1.0; }
          else { return 0.0; }
       }
+      case 9:
+      {
+         const double eps = 1e-10;
+         if (X(0) > -0.75 - eps && X(0) < 0.75 + eps &&
+             X(1) > -0.75 - eps && X(1) < 0.75 + eps) { return 1.0; }
+         else { return 0.0; }
+      }
    }
    return 0.0;
 }
@@ -2121,10 +2140,11 @@ double s0_function(const Vector &x)
    {
       // Simple nonlinear function.
       case 14:
-      case 18: return 2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1));
+      case 18: return (2.0 + sin(2*M_PI * x(0)) * sin(2*M_PI * x(1)));
       // Constant.
       case 34:
       case 38: return 7.0;
+      case 39: return x(0) / (x(0)*x(0) + 0.1);
       default: MFEM_ABORT("s0 is not defined for this problem.");
    }
 }
@@ -2139,6 +2159,7 @@ double q0_function(const Vector &x)
       // Constant.
       case 34:
       case 38: return 10.0;
+      case 39: return x(0)*x(0) + 0.1;
       default: MFEM_ABORT("s0 is not defined for this problem.");
    }
 }
@@ -2150,7 +2171,8 @@ void v0_function(const Vector &x, Vector &v)
       case 14:
       case 18:
       case 34:
-      case 38: v(0) = x(0); v(1) = x(1); break;
+      case 38:
+      case 39: v(0) = x(0); v(1) = x(1); break;
       default: MFEM_ABORT("v0 is not defined for this problem.");
    }
 }

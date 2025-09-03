@@ -28,6 +28,10 @@ void InitializeQuadratureFunction(Coefficient &c,
                                   QuadratureFunction &q,
                                   const Array<bool> *bool_quads = nullptr);
 
+void ComputePressureQF(const QuadratureFunction &rho,
+                       const ParGridFunction &energy,
+                       QuadratureFunction &p);
+
 void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
                            std::string info, int x, int y);
 
@@ -159,6 +163,7 @@ public:
    // (indicator, density, specific internal energy) if remap_v = false,
    // for a single material (no coupling between materials).
    void RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
+                   const QuadratureFunction &p_0,
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
                    Vector &ind_rho_e_v, int opt_type);
