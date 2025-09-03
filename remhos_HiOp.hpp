@@ -579,8 +579,11 @@ private:
    real_t w_2 = 1e1;
    real_t w_3 = 1e1;
 
+   real_t w_p = 1e1;
+
    mfem::Array<int> optProbInd;
    bool subproblem = false;
+   bool pressureOpt = false;
 
    mutable ParBilinearForm * mass_form =nullptr;
 
@@ -599,6 +602,21 @@ private:
       const mfem::QuadratureFunction *rho_;
    };
 
+   class PressureDiffGradEIntegrator : public mfem::LinearFormIntegrator
+   {
+   public:
+      PressureDiffGradEIntegrator(mfem::QuadratureFunction &rho, mfem::QuadratureFunction &rho0,
+    mfem::ParGridFunction &e, mfem::ParGridFunction &e0);
+      ~PressureDiffGradEIntegrator(){};
+      void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
+   private:
+
+      mfem::QuadratureFunction *rho_;
+      mfem::QuadratureFunction *rho0_;
+      mfem::ParGridFunction    *e_;
+      mfem::ParGridFunction    *e0_;
+   };
+
 public:
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
                             ParFiniteElementSpace & fespace,
@@ -614,12 +632,14 @@ public:
                             const bool            & use_H1_semi,
                             const mfem::Array<int> & optProbInd_,
                             const bool            & isL2 = true,
-                            const bool            & sub =false)
+                            const bool            & sub =false,
+                            const bool            & pOpt = false)
       : OptimizationProblem(numDesVar, NULL, NULL),
         x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetEnergy(initalenergy), isL2_(isL2),
-        size_qf(qspace.GetSize()), size_gf(fespace.GetNDofs()), offset_(4), optProbInd(optProbInd_), subproblem(sub)
+        size_qf(qspace.GetSize()), size_gf(fespace.GetNDofs()), offset_(4), optProbInd(optProbInd_), subproblem(sub),
+        pressureOpt(pOpt)
    {
       numConstraints = numConstraints_;
       SetEqualityConstraint(massvec);
@@ -744,11 +764,17 @@ public:
       real_t val = dQdeta(oneGridFunction);
 
       //std::cout<<"ind: "<< normindSq<<" | rho: "<< normrohSq<<"| energy: "<<val <<std::endl;
-            std::cout<<"ind: "<< normindSq<<std::endl;
-      std::cout<<"rho: "<< normrohSq<<std::endl;
-      std::cout<<"e: "<< val<<std::endl;
+      // std::cout<<"ind: "<< normindSq<<std::endl;
+      // std::cout<<"rho: "<< normrohSq<<std::endl;
+      // std::cout<<"e: "<< val<<std::endl;
 
-      return w_1*normindSq + w_2*normrohSq +w_3* val;
+      real_t pDiffSq = 0.0;
+      if(pressureOpt)
+      {
+         pDiffSq = IntegratePressureDiff(pos_final, &rho_0, &rho, &e_0, &energy);
+      } 
+
+      return w_1*normindSq + w_2*normrohSq +w_3* val + w_p*pDiffSq;
    }
 
    void CalcObjectiveGrad(const Vector &x, Vector &grad) const  override
@@ -782,6 +808,8 @@ public:
       subtract( ind, ind_0, ind_diff);
       subtract( rho, rho_0, roh_diff);
       subtract( energy, e_0, e_diff);
+
+      QuadratureFunction pGradRho(&qspace_); pGradRho = 0.0;
 
       //------------------------------------------------------------------------
 
@@ -819,6 +847,19 @@ public:
 
                ind_diff[s_offset+q] *= w;
                roh_diff[s_offset+q] *= w;
+
+               if(pressureOpt)
+               {
+                  Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
+                  rho.GetValues(e, rho0_vals); 
+                  rho_0.GetValues(e, rho_vals);
+                  e_0.GetValues(Tr, ir, e0_vals);
+                  energy.GetValues(Tr, ir, e_vals);
+
+                  double pressureDiff = rho_vals(q) * e_vals(q) - rho0_vals(q) * e0_vals(q);
+
+                  pGradRho[s_offset+q] = w * pressureDiff * e_vals(q);
+               }
             }
          }
       }
@@ -827,6 +868,7 @@ public:
 
       ParLinearForm dQdeta(&fespace_);
       ParGridFunction    e_grad(&fespace_);
+      ParGridFunction    p_e_grad(&fespace_); p_e_grad = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
 
       auto *lfi_1 = new DomainLFIntegrator(e_diff_coeff);
@@ -838,6 +880,23 @@ public:
       ind_diff *= w_1;
       roh_diff *= w_2;
       e_grad   *= w_3;
+
+      if(pressureOpt)
+      {
+         ParLinearForm pressureGradELF(&fespace_);
+         mfem::LinearFormIntegrator *lfi_1 =
+             new mfem::RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator( rho, rho_0, energy, e_0);
+
+         pressureGradELF.AddDomainIntegrator(lfi_1);
+         pressureGradELF.Assemble();
+         pressureGradELF.ParallelAssemble(p_e_grad);
+
+         p_e_grad *= w_p;
+         pGradRho *= w_p;
+
+         e_grad += p_e_grad;
+         roh_diff += pGradRho;
+      }
 
       ind_rho_e_grad.GetBlock(0) = ind_diff;
       ind_rho_e_grad.GetBlock(1) = roh_diff;
@@ -1100,6 +1159,48 @@ double Integrate(const Vector &pos,
          Tr.SetIntPoint(&ip);
          integral += Tr.Weight() * ip.weight *
                      q1_vals(q) * q2_vals(q) * g1_vals(q);
+      }
+   }
+   MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,
+                 MPI_COMM_WORLD);
+   return integral;
+}
+
+double IntegratePressureDiff(const Vector &pos,
+                           const QuadratureFunction *rho0_,
+                           const QuadratureFunction *rho_,
+                           const ParGridFunction *e0_,
+                           const ParGridFunction *e_) const
+{
+   MFEM_VERIFY(rho_ && rho0_ && e0_ && e_, "All function must be specified.");
+
+   const QuadratureSpace *qspace = nullptr;
+   if (rho_) { qspace = dynamic_cast<const QuadratureSpace *>(rho_->GetSpace()); }
+
+   auto mesh = qspace->GetMesh();
+   const int NE = mesh->GetNE();
+   double integral = 0.0;
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nqp = ir.GetNPoints();
+
+      // Transformation w.r.t. the given mesh positions.
+      IsoparametricTransformation Tr;
+      mesh->GetElementTransformation(e, pos, &Tr);
+
+      Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
+      rho0_->GetValues(e, rho0_vals); 
+      rho_->GetValues(e, rho_vals);
+      e0_->GetValues(Tr, ir, e0_vals);
+      e_->GetValues(Tr, ir, e_vals);
+
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         double pressureDiff = rho_vals(q) * e_vals(q) - rho0_vals(q) * e0_vals(q);
+         integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
    MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,

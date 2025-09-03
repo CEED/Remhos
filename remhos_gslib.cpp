@@ -1364,7 +1364,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                                 NumDesVar,
                                                 x_minsub, x_maxsub,
                                                 volume_0, mass_0, energy_0,
-                                                3, false, optProbInd, true, subprob);
+                                                3, false, optProbInd, true,
+                                                subprob, false);
 
          dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
             weightedSpace);

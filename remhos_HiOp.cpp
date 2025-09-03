@@ -289,6 +289,52 @@ void RemhosHydroHiOpProblem::VDiffIntegrator::AssembleRHSElementVect(
   }
 }
 
+RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::PressureDiffGradEIntegrator(
+    mfem::QuadratureFunction &rho, mfem::QuadratureFunction &rho0,
+    mfem::ParGridFunction &e, mfem::ParGridFunction &e0)
+  : rho_(&rho), rho0_(&rho0), e_(&e), e0_(&e0)
+  {}
+
+void RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::AssembleRHSElementVect(
+  const FiniteElement &el, ElementTransformation &T, Vector &elvect)
+{
+  // grab sizes
+  int dof = el.GetDof();
+  int dim = el.GetDim();
+  int eleIndex = T.ElementNo;
+
+  // initialize storage
+  Vector N(dof);
+
+  // output vector
+  elvect.SetSize(dof*dim);
+  elvect = 0.0;
+
+  const IntegrationRule *ir = &(rho_->GetSpace()->GetIntRule(eleIndex));
+  const int nqp = ir->GetNPoints();
+
+  Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
+  rho0_->GetValues(eleIndex, rho0_vals); 
+  rho_->GetValues(eleIndex, rho_vals);
+  e0_->GetValues(T, *ir, e0_vals);
+  e_->GetValues(T, *ir, e_vals);
+
+  // loop over integration points
+  for (int i = 0; i < ir->GetNPoints(); i++)
+  {
+    // set current integration point
+    const IntegrationPoint &ip = ir->IntPoint(i);
+    T.SetIntPoint(&ip);
+
+    // evaluate gaussian integration weight
+    double w = ip.weight * T.Weight();
+    double pressureDiff = rho_vals(i) * e_vals(i) - rho0_vals(i) * e0_vals(i);
+    el.CalcShape(ip, N);
+
+    elvect.Add( w * pressureDiff * rho_vals[i], N);
+  }
+}
+
 
 
 } // namespace mfem
