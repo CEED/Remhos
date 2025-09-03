@@ -131,6 +131,11 @@ private:
    void GetTargetValues(const Vector &interp,
                     const Vector &min, const Vector &max, Vector &target);
 
+   void ComputePressure(const Vector &pos,
+                           const QuadratureFunction &rho_,
+                           const ParGridFunction &e_,
+                           QuadratureFunction &pressure);
+
 public:
    InterpolationRemap(ParMesh &m)
        : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),

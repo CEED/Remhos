@@ -1365,7 +1365,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                                 x_minsub, x_maxsub,
                                                 volume_0, mass_0, energy_0,
                                                 3, false, optProbInd, true,
-                                                subprob, false);
+                                                subprob, true);
 
          dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
             weightedSpace);
@@ -1386,6 +1386,20 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 
       BlockVector T_vector_design(offset_true);
       BlockVector L_vector_design(offset);
+
+      {
+         QuadratureFunction rho_opt(&qspace_final, T_vector_design.GetBlock(1).GetData());
+         QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
+         ParGridFunction    e_opt  (&pfes_e_final, T_vector_design.GetBlock(2).GetData());
+         ComputePressure( pos_final, rho_opt, e_opt, pressure_opt);
+
+         ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
+         pvdc.SetDataFormat(VTKFormat::BINARY32);
+         pvdc.SetCycle(0);
+         pvdc.SetTime(1.0);
+         pvdc.RegisterQField("pressure", &pressure_opt);
+         pvdc.Save();
+      }
 
       T_vector_design = y_out;
       L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
@@ -2552,6 +2566,43 @@ void InterpolationRemap::CheckBounds(int myid, const Vector &v,
                 << "Max error:    " << err_max
                 << " (max function value is " << m << ")\n";
    }
+}
+
+void InterpolationRemap::ComputePressure(const Vector &pos,
+                           const QuadratureFunction &rho_,
+                           const ParGridFunction &e_,
+                           QuadratureFunction &pressure)
+{
+   const QuadratureSpace *qspace = dynamic_cast<const QuadratureSpace *>(rho_.GetSpace());
+
+   auto mesh = qspace->GetMesh();
+   const int NE = mesh->GetNE();
+
+   int counter = 0;
+
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nqp = ir.GetNPoints();
+
+      // Transformation w.r.t. the given mesh positions.
+      IsoparametricTransformation Tr;
+      mesh->GetElementTransformation(e, pos, &Tr);
+
+      Vector rho_vals(nqp), e_vals(nqp);
+      rho_.GetValues(e, rho_vals);
+      e_.GetValues(Tr, ir, e_vals);
+
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         pressure[counter] = rho_vals(q) * e_vals(q);
+         counter++;
+      }
+   }
+
+
 }
 
 } // namespace mfem
