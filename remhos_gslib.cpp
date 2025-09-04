@@ -1387,6 +1387,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
       BlockVector T_vector_design(offset_true);
       BlockVector L_vector_design(offset);
 
+      T_vector_design = y_out;
+
       {
          QuadratureFunction rho_opt(&qspace_final, T_vector_design.GetBlock(1).GetData());
          QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
@@ -1401,7 +1403,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          pvdc.Save();
       }
 
-      T_vector_design = y_out;
+
       L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
       L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
       L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);

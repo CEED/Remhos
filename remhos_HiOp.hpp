@@ -576,8 +576,8 @@ private:
    Array<int> offset_;
 
    real_t w_1 = 1e1;
-   real_t w_2 = 1e1;
-   real_t w_3 = 1e1;
+   real_t w_2 = 0e1;
+   real_t w_3 = 0e1;
 
    real_t w_p = 1e1;
 
