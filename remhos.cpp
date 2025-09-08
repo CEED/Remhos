@@ -953,12 +953,13 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
-      interpolator.subprob   = optRelevantSubset;      
-      interpolator.weightedSpace   = weightedSpaceType;
+      interpolator.subprob       = optRelevantSubset;
+      interpolator.weightedSpace = weightedSpaceType;
       ParGridFunction u_gf(&pfes);
 
       if (project_analytic)
       {
+         interpolator.atol = 1e-12;
          interpolator.Remap(u0_function, u0_total_mass(),
                             x_final, u_gf, optimization_type);
       }

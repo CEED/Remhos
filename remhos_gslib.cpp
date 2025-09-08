@@ -95,6 +95,7 @@ void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
    sol_sock << "window_geometry " << x << " " << y << " 400 400\n";
    sol_sock << "keys rmj\n";
    sol_sock.send();
+   sol_sock.close();
 }
 
 void InterpolationRemap::Remap(const ParGridFunction &u_init,
@@ -149,8 +150,8 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
    // Compute min / max bounds.
    Vector u_final_min, u_final_max;
-   CalcDOFBounds(u_init, pfes_final, pos_final,
-                 u_final_min, u_final_max, false);
+   CalcDOFBounds(u_init, u_interpolated, pfes_final, pos_final,
+                 u_final_min, u_final_max, ELEM_INIT);
 
    if (visualization)
    {
@@ -817,14 +818,15 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
    // It seems better to take it on the initial mesh, I guess the uniform
    // spacing gives more uniform bounds, and things converge better.
    Vector u_final_min, u_final_max;
-   ParGridFunction func_gf(&pfes_init);
    FunctionCoefficient coeff(func);
-   func_gf.ProjectCoefficient(coeff);
-   CalcDOFBounds(func_gf, pfes_final, pos_final,
-                 u_final_min, u_final_max, true);
+   ParFiniteElementSpace pfes_init_GL(&pmesh_init, &fec_GL);
+   ParGridFunction func_GL(&pfes_init_GL); func_GL.ProjectCoefficient(coeff);
+   ParGridFunction func_gf(&pfes_init);    func_gf.ProjectGridFunction(func_GL);
+   CalcDOFBounds(func_gf, u_interpolated, pfes_final, pos_final,
+                 u_final_min, u_final_max, ELEM_FINAL);
    if (visualization)
    {
-      ParGridFunction gf_min(func_gf), gf_max(func_gf);
+      ParGridFunction gf_min(u_interpolated), gf_max(u_interpolated);
       gf_min = u_final_min, gf_max = u_final_max;
 
       socketstream vis_min, vis_max;
@@ -2183,52 +2185,45 @@ double InterpolationRemap::Integrate(const Vector &pos,
 #define EMPTY_VALUE -1.0
 
 void InterpolationRemap::CalcDOFBounds(const ParGridFunction &g_init,
+                                       const ParGridFunction &gf_interp,
                                        const ParFiniteElementSpace &pfes,
                                        const Vector &pos_final,
                                        Vector &g_min, Vector &g_max,
-                                       bool use_el_nbr, Array<bool> *active_el)
+                                       BoundsType bounds_type)
 {
-   if (active_el)
-   {
-      MFEM_VERIFY(use_el_nbr == true,
-                  "Bounds around inactive elements require use_el_nbr = true.");
-   }
-
    const int size_res = pfes.GetVSize(), NE = pmesh_init.GetNE();
    g_min.SetSize(size_res);
    g_max.SetSize(size_res);
+   g_min = gf_interp;
+   g_max = gf_interp;
 
-   // Form the min and max functions on every MPI task.
-   // All on the initial mesh.
-   L2_FECollection fec_L2(0, pmesh_init.Dimension());
-   ParFiniteElementSpace pfes_L2(&pmesh_init, &fec_L2);
-   ParGridFunction g_el_min(&pfes_L2), g_el_max(&pfes_L2);
-   for (int e = 0; e < NE; e++)
+   if (bounds_type == ELEM_INIT || bounds_type == ELEM_BOTH)
    {
-      if (active_el && (*active_el)[e] == false)
+      // Form the min and max functions on every MPI task.
+      // All on the initial mesh.
+      L2_FECollection fec_L2(0, pmesh_init.Dimension());
+      ParFiniteElementSpace pfes_L2(&pmesh_init, &fec_L2);
+      ParGridFunction g_el_min(&pfes_L2), g_el_max(&pfes_L2);
+      for (int e = 0; e < NE; e++)
       {
-         g_el_min(e) = EMPTY_VALUE;
-         g_el_max(e) = EMPTY_VALUE;
-         continue;
+         Vector g_init_vals;
+         g_init.GetElementDofValues(e, g_init_vals);
+         g_el_min(e) = g_init_vals.Min();
+         g_el_max(e) = g_init_vals.Max();
       }
 
-      Vector g_init_vals;
-      g_init.GetElementDofValues(e, g_init_vals);
-      g_el_min(e) = g_init_vals.Min();
-      g_el_max(e) = g_init_vals.Max();
+      Vector pos_nodes_final;
+      GetDOFPositions(pfes, pos_final, pos_nodes_final);
+
+      FindPointsGSLIB finder(pmesh_init.GetComm());
+      finder.Setup(pmesh_init);
+      finder.Interpolate(pos_nodes_final, g_el_min, g_min);
+      finder.Interpolate(pos_nodes_final, g_el_max, g_max);
+      finder.FreeData();
    }
 
-   Vector pos_nodes_final;
-   GetDOFPositions(pfes, pos_final, pos_nodes_final);
-
-   FindPointsGSLIB finder(pmesh_init.GetComm());
-   finder.Setup(pmesh_init);
-   finder.Interpolate(pos_nodes_final, g_el_min, g_min);
-   finder.Interpolate(pos_nodes_final, g_el_max, g_max);
-   finder.FreeData();
-
    // On the new mesh, take min/max over DOFs in the same element.
-   if (use_el_nbr)
+   if (bounds_type == ELEM_FINAL || bounds_type == ELEM_BOTH)
    {
       for (int e = 0; e < NE; e++)
       {
