@@ -1229,8 +1229,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    //    MFEM_ABORT("rho bounds");
    // }
    Vector e_min, e_max;
-   //CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_INIT);
-   CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_FINAL);
+   CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_INIT);
+   //CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_FINAL);
    UpdateEInterp(e_interp, e_min, e_max);
 
    // e_min = -1.0;

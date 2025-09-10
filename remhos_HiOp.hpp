@@ -580,9 +580,9 @@ private:
 
    real_t w_1 = 1e0;
    real_t w_2 = 1e0;
-   real_t w_3 = 0e0;
+   real_t w_3 = 1e0;
 
-   real_t w_p = 1e2;
+   real_t w_p = 1e4;
 
    mfem::Array<int> optProbInd;
    bool subproblem = false;
@@ -653,6 +653,12 @@ public:
       offset_[1] = offset_[0] + size_qf ;
       offset_[2] = offset_[1] + size_qf;
       offset_[3] = offset_[2] + size_gf;
+
+      if(pressureOpt)
+      {
+         w_3 = 0e0;
+      }
+         
    }
 
    void setWeightedSpaceType( hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace)
