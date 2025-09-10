@@ -1030,7 +1030,8 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
    }
 }
 
-void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
+void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
+                                    bool remap_v, bool p_control,
                                     const QuadratureFunction &p_0,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
@@ -1078,9 +1079,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    rho_0_lor = rho_0;
    // Pressure function (not part of the solution state).
    ParGridFunction p_0_lor;
-   p_0_lor.SetSpace(&pfes_lor);
-   MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
-   p_0_lor = p_0;
+   if (p_control)
+   {
+      p_0_lor.SetSpace(&pfes_lor);
+      MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
+      p_0_lor = p_0;
+   }
 
    // Visualize the initial LOR GridFunctions.
    if (visualization)
@@ -1090,9 +1094,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                      0, 500, 400, 400);
       VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR",
                      400, 500, 400, 400);
-      socketstream sock_p;
-      VisualizeField(sock_p, "localhost", 19916, p_0_lor, "p_0 LOR",
-                     800, 500, 400, 400);
+      if (p_control)
+      {
+         socketstream sock_p;
+         VisualizeField(sock_p, "localhost", 19916, p_0_lor, "p_0 LOR",
+                        800, 500, 400, 400);
+      }
    }
 
    // Interpolate into ind_rho_e_v_interp.
@@ -1108,7 +1115,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
    finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
-   finder.Interpolate(pos_quad_final, p_0_lor,   p_interp);
+   if (p_control) { finder.Interpolate(pos_quad_final, p_0_lor, p_interp); }
    finder.Setup(pmesh_init);
    finder.Interpolate(pos_dof_e_final, e_0, e_interp);
    Vector v_interp_vals(pos_dof_v_final.Size());
@@ -1135,7 +1142,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    }
    finder.FreeData();
 
-   VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
+   if (p_control)
+   {
+      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
+   }
 
    // Report conservation errors of ire_final.
    const double volume_0 = Integrate(pos_init,
@@ -1229,16 +1239,23 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    //    MFEM_ABORT("rho bounds");
    // }
    Vector e_min, e_max;
-   CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_INIT);
-   //CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_FINAL);
+   if (p_control)
+   {
+      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+                  e_min, e_max, ELEM_INIT);
+   }
+   else
+   {
+      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+                  e_min, e_max, ELEM_FINAL);
+   }
    UpdateEInterp(e_interp, e_min, e_max);
 
-   // e_min = -1.0;
-   // e_max = 55.0;
-
-   // rho_min = -1.0;
-   // rho_max = 10.0;
-
+   if (p_control)
+   {
+      rho_min -= 1e-3;
+      rho_max += 1e-3;
+   }
 
    // {
    //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
@@ -1389,6 +1406,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
 
       if (remap_v)
       {
+         MFEM_VERIFY(p_control == false, "Remap v + p not implemented.");
          ot_prob = new RemhosHydroHiOpProblem(qspace_final,
                                               pfes_e_final,
                                               pfes_v_final,
@@ -1413,7 +1431,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                                 x_minsub, x_maxsub,
                                                 volume_0, mass_0, energy_0,
                                                 3, false, optProbInd, true,
-                                                subprob, true);
+                                                subprob, p_control);
 
          dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
             weightedSpace);

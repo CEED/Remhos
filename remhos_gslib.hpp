@@ -170,7 +170,8 @@ public:
    // (indicator, density, specific internal energy, velocity) if remap_v or
    // (indicator, density, specific internal energy) if remap_v = false,
    // for a single material (no coupling between materials).
-   void RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
+   void RemapHydro(const Vector &ind_rho_e_v_0,
+                   bool remap_v, bool p_control,
                    const QuadratureFunction &p_0,
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
