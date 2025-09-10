@@ -232,6 +232,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
                                 u_interpolated, NumDesVar,
                                 u_final_min_copy, u_final_max_copy,
                                 mass_0, numContraints, h1_seminorm, optProbInd, subprob);
+
       ot_prob.setWeightedSpaceType(weightedSpace);
 
       optsolver->SetOptimizationProblem(ot_prob);
@@ -866,11 +867,13 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       RemhosHiOpProblem ot_prob(pfes_final, u_interpolated, u_final.Size(),
                                 u_final_min, u_final_max, mass,
                                 numContraints, h1_seminorm, optProbInd);
+
+      ot_prob.setWeightedSpaceType(weightedSpace);
       optsolver->SetOptimizationProblem(ot_prob);
 
       optsolver->SetMaxIter(max_iter);
-      optsolver->SetAbsTol(0.0);
-      optsolver->SetRelTol(1e-12);
+      optsolver->SetAbsTol(1e-12);
+      optsolver->SetRelTol(1e-14);
       optsolver->SetPrintLevel(3);
       optsolver->Mult(u_interpolated, y_out);
 
@@ -1227,6 +1230,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    CalcEBounds(e_interp, ind_max, e_min, e_max);
    UpdateEInterp(e_interp, e_min, e_max);
 
+   // e_min = -1.0;
+   // e_max = 55.0;
+
+   // rho_min = -1.0;
+   // rho_max = 10.0;
+
+
    // {
    //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
    //    gf_min = e_min, gf_max = e_max;
@@ -1395,6 +1405,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
                                                 pfes_e_final,
                                                 pos_final,
                                                 initial_design,
+                                                p_interp,
                                                 NumDesVar,
                                                 x_minsub, x_maxsub,
                                                 volume_0, mass_0, energy_0,
@@ -1433,8 +1444,18 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
          pvdc.SetDataFormat(VTKFormat::BINARY32);
          pvdc.SetCycle(0);
          pvdc.SetTime(1.0);
+         pvdc.RegisterQField("rho", &rho_opt);
          pvdc.RegisterQField("pressure", &pressure_opt);
+         pvdc.RegisterQField("pressure_interp", &p_interp);
          pvdc.Save();
+
+         ParaViewDataCollection pvdc1("IndRhoE_pressure_opt1", &pmesh_final);
+         pvdc1.SetDataFormat(VTKFormat::BINARY32);
+         pvdc1.SetCycle(0);
+         pvdc1.SetTime(1.0);
+
+         pvdc1.RegisterField("e", &e_opt);
+         pvdc1.Save();
       }
 
 
@@ -2635,7 +2656,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         pressure[counter] = rho_vals(q) * e_vals(q);
+         pressure[counter] = 0.4* rho_vals(q) * e_vals(q);
          counter++;
       }
    }

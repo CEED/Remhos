@@ -558,6 +558,7 @@ class RemhosIndRhoEHiOpProblem : public OptimizationProblem
 {
 private:
    const Vector x_initial;
+   mfem::QuadratureFunction p_initial_;
    const Vector &pos_final;
    QuadratureSpace & qspace_;
    ParFiniteElementSpace & fespace_;
@@ -575,11 +576,13 @@ private:
 
    Array<int> offset_;
 
-   real_t w_1 = 1e1;
-   real_t w_2 = 0e1;
-   real_t w_3 = 0e1;
+   
 
-   real_t w_p = 1e1;
+   real_t w_1 = 1e0;
+   real_t w_2 = 1e0;
+   real_t w_3 = 0e0;
+
+   real_t w_p = 1e2;
 
    mfem::Array<int> optProbInd;
    bool subproblem = false;
@@ -605,16 +608,14 @@ private:
    class PressureDiffGradEIntegrator : public mfem::LinearFormIntegrator
    {
    public:
-      PressureDiffGradEIntegrator(mfem::QuadratureFunction &rho, mfem::QuadratureFunction &rho0,
-    mfem::ParGridFunction &e, mfem::ParGridFunction &e0);
+      PressureDiffGradEIntegrator(mfem::QuadratureFunction &rho, const mfem::QuadratureFunction &p0, mfem::ParGridFunction &e);
       ~PressureDiffGradEIntegrator(){};
       void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
    private:
 
       mfem::QuadratureFunction *rho_;
-      mfem::QuadratureFunction *rho0_;
+      const mfem::QuadratureFunction *p_0_;
       mfem::ParGridFunction    *e_;
-      mfem::ParGridFunction    *e0_;
    };
 
 public:
@@ -622,6 +623,7 @@ public:
                             ParFiniteElementSpace & fespace,
                             const Vector          & pos_final_,
                             const Vector          & u_initial,
+                             mfem::QuadratureFunction & p_initial,
                             const int             & numDesVar,
                             const Vector          & xmin, 
                             const Vector          & xmax, 
@@ -635,7 +637,7 @@ public:
                             const bool            & sub =false,
                             const bool            & pOpt = false)
       : OptimizationProblem(numDesVar, NULL, NULL),
-        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), numDesVar_(numDesVar),
+        x_initial(u_initial), p_initial_(p_initial), pos_final(pos_final_), qspace_(qspace), fespace_(fespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetEnergy(initalenergy), isL2_(isL2),
         size_qf(qspace.GetSize()), size_gf(fespace.GetNDofs()), offset_(4), optProbInd(optProbInd_), subproblem(sub),
@@ -771,7 +773,7 @@ public:
       real_t pDiffSq = 0.0;
       if(pressureOpt)
       {
-         pDiffSq = IntegratePressureDiff(pos_final, &rho_0, &rho, &e_0, &energy);
+         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, &energy);
       } 
 
       return w_1*normindSq + w_2*normrohSq +w_3* val + w_p*pDiffSq;
@@ -850,15 +852,14 @@ public:
 
                if(pressureOpt)
                {
-                  Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
-                  rho.GetValues(e, rho0_vals); 
-                  rho_0.GetValues(e, rho_vals);
-                  e_0.GetValues(Tr, ir, e0_vals);
+                  Vector p0_vals(nqp), rho_vals(nqp), e_vals(nqp);
+                  rho.GetValues(e, rho_vals); 
+                  p_initial_.GetValues(e, p0_vals);
                   energy.GetValues(Tr, ir, e_vals);
 
-                  double pressureDiff = rho_vals(q) * e_vals(q) - rho0_vals(q) * e0_vals(q);
+                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
 
-                  pGradRho[s_offset+q] = w * pressureDiff * e_vals(q);
+                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
                }
             }
          }
@@ -885,7 +886,7 @@ public:
       {
          ParLinearForm pressureGradELF(&fespace_);
          mfem::LinearFormIntegrator *lfi_1 =
-             new mfem::RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator( rho, rho_0, energy, e_0);
+             new mfem::RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator( rho, p_initial_, energy);
 
          pressureGradELF.AddDomainIntegrator(lfi_1);
          pressureGradELF.Assemble();
@@ -901,6 +902,9 @@ public:
       ind_rho_e_grad.GetBlock(0) = ind_diff;
       ind_rho_e_grad.GetBlock(1) = roh_diff;
       ind_rho_e_grad.GetBlock(2) = e_grad;
+
+      //       ind_rho_e_grad.GetBlock(1) = pGradRho;
+      // ind_rho_e_grad.GetBlock(2) = p_e_grad;
 
       if(subproblem)
       {
@@ -1167,12 +1171,11 @@ double Integrate(const Vector &pos,
 }
 
 double IntegratePressureDiff(const Vector &pos,
-                           const QuadratureFunction *rho0_,
+                           const QuadratureFunction *p0_,
                            const QuadratureFunction *rho_,
-                           const ParGridFunction *e0_,
                            const ParGridFunction *e_) const
 {
-   MFEM_VERIFY(rho_ && rho0_ && e0_ && e_, "All function must be specified.");
+   MFEM_VERIFY(rho_ && p0_ && e_, "All function must be specified.");
 
    const QuadratureSpace *qspace = nullptr;
    if (rho_) { qspace = dynamic_cast<const QuadratureSpace *>(rho_->GetSpace()); }
@@ -1189,17 +1192,16 @@ double IntegratePressureDiff(const Vector &pos,
       IsoparametricTransformation Tr;
       mesh->GetElementTransformation(e, pos, &Tr);
 
-      Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
-      rho0_->GetValues(e, rho0_vals); 
+      Vector p0_vals(nqp), rho_vals(nqp), e_vals(nqp);
+      p0_->GetValues(e, p0_vals); 
       rho_->GetValues(e, rho_vals);
-      e0_->GetValues(Tr, ir, e0_vals);
       e_->GetValues(Tr, ir, e_vals);
 
       for (int q = 0; q < nqp; q++)
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         double pressureDiff = rho_vals(q) * e_vals(q) - rho0_vals(q) * e0_vals(q);
+         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
          integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }

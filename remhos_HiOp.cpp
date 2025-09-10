@@ -80,7 +80,7 @@ void RemhosIndRhoEHiOpProblem::EnergyGradIntegrator::AssembleRHSElementVect(
   Vector N(dof);
 
   // output vector
-  elvect.SetSize(dof*dim);
+  elvect.SetSize(dof);
   elvect = 0.0;
 
   const IntegrationRule *ir = &(ind_->GetSpace()->GetIntRule(eleIndex));
@@ -123,7 +123,7 @@ void RemhosHydroHiOpProblem::totalEnergyGradEIntegrator::AssembleRHSElementVect(
   Vector N(dof);
 
   // output vector
-  elvect.SetSize(dof*dim);
+  elvect.SetSize(dof);
   elvect = 0.0;
 
   const IntegrationRule *ir = &(ind_->GetSpace()->GetIntRule(eleIndex));
@@ -290,9 +290,8 @@ void RemhosHydroHiOpProblem::VDiffIntegrator::AssembleRHSElementVect(
 }
 
 RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::PressureDiffGradEIntegrator(
-    mfem::QuadratureFunction &rho, mfem::QuadratureFunction &rho0,
-    mfem::ParGridFunction &e, mfem::ParGridFunction &e0)
-  : rho_(&rho), rho0_(&rho0), e_(&e), e0_(&e0)
+    mfem::QuadratureFunction &rho, const mfem::QuadratureFunction &p0, mfem::ParGridFunction &e)
+  : rho_(&rho), p_0_(&p0), e_(&e)
   {}
 
 void RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::AssembleRHSElementVect(
@@ -307,16 +306,15 @@ void RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::AssembleRHSElementVe
   Vector N(dof);
 
   // output vector
-  elvect.SetSize(dof*dim);
+  elvect.SetSize(dof);
   elvect = 0.0;
 
   const IntegrationRule *ir = &(rho_->GetSpace()->GetIntRule(eleIndex));
   const int nqp = ir->GetNPoints();
 
-  Vector rho0_vals(nqp), rho_vals(nqp), e0_vals(nqp), e_vals(nqp);
-  rho0_->GetValues(eleIndex, rho0_vals); 
+  Vector p0_vals(nqp), rho_vals(nqp), e_vals(nqp);
+  p_0_->GetValues(eleIndex, p0_vals); 
   rho_->GetValues(eleIndex, rho_vals);
-  e0_->GetValues(T, *ir, e0_vals);
   e_->GetValues(T, *ir, e_vals);
 
   // loop over integration points
@@ -328,10 +326,12 @@ void RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::AssembleRHSElementVe
 
     // evaluate gaussian integration weight
     double w = ip.weight * T.Weight();
-    double pressureDiff = rho_vals(i) * e_vals(i) - rho0_vals(i) * e0_vals(i);
+    double pressureDiff = 0.4 * rho_vals(i) * e_vals(i) - p0_vals(i);
+
+    //std::cout<<pressureDiff<<std::endl;
     el.CalcShape(ip, N);
 
-    elvect.Add( w * pressureDiff * rho_vals[i], N);
+    elvect.Add( 0.4* w * pressureDiff * rho_vals[i], N);
   }
 }
 
