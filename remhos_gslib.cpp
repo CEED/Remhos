@@ -1226,7 +1226,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0, bool remap_v,
    //    MFEM_ABORT("rho bounds");
    // }
    Vector e_min, e_max;
-   CalcEBounds(e_interp, ind_max, e_min, e_max);
+   //CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_INIT);
+   CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max, e_min, e_max, ELEM_FINAL);
    UpdateEInterp(e_interp, e_min, e_max);
 
    // {
@@ -2432,15 +2433,51 @@ void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
    }
 }
 
-void InterpolationRemap::CalcEBounds(const ParGridFunction &e_interp,
+void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
+                                     Array<bool> &active_el_0,
+                                     const ParGridFunction &e_interp,
+                                     const Vector &pos_final,
                                      const Vector &ind_max,
-                                     Vector &e_min, Vector &e_max)
+                                     Vector &e_min, Vector &e_max,
+                                     BoundsType bounds_type)
 {
    const double eps = 1e-12;
 
    const int size_e = e_interp.Size(), NE = pmesh_init.GetNE();
    const int s = size_e / NE;
    e_min.SetSize(size_e); e_max.SetSize(size_e);
+   e_min = 0.0; e_max = 0.0;
+
+   if (bounds_type == ELEM_INIT)
+   {
+      // Form the min and max functions on every MPI task.
+      // All on the initial mesh.
+      L2_FECollection fec_L2(0, pmesh_init.Dimension());
+      ParFiniteElementSpace pfes_L2(&pmesh_init, &fec_L2);
+      ParGridFunction e_el_min(&pfes_L2), e_el_max(&pfes_L2);
+      for (int e = 0; e < NE; e++)
+      {
+         if (active_el_0[e] == false) { continue; }
+         Vector e_init_vals;
+         e_init.GetElementDofValues(e, e_init_vals);
+         e_el_min(e) = e_init_vals.Min();
+         e_el_max(e) = e_init_vals.Max();
+      }
+
+      Vector pos_nodes_final;
+      GetDOFPositions(*e_interp.ParFESpace(), pos_final, pos_nodes_final);
+
+      FindPointsGSLIB finder(pmesh_init.GetComm());
+      finder.Setup(pmesh_init);
+      finder.SetL2AvgType(FindPointsGSLIB::NONE);
+      finder.Interpolate(pos_nodes_final, e_el_min, e_min);
+      finder.Interpolate(pos_nodes_final, e_el_max, e_max);
+      finder.FreeData();
+
+      return;
+   }
+
+   if (bounds_type == ELEM_BOTH) { MFEM_ABORT("not implemented."); }
 
    for (int e = 0; e < NE; e++)
    {

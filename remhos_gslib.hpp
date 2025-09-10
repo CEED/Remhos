@@ -119,9 +119,12 @@ private:
    void UpdateRhoInterp(QuadratureFunction &rho_interp,
                         Vector &rho_min, Vector &rho_max);
 
-   void CalcEBounds(const ParGridFunction &e_interp,
+   void CalcEBounds(const ParGridFunction &e_init,
+                    Array<bool> &active_el_0,
+                    const ParGridFunction &e_interp,
+                    const Vector &pos_final,
                     const Vector &ind_max,
-                    Vector &e_min, Vector &e_max);
+                    Vector &e_min, Vector &e_max, BoundsType bounds_type);
 
    void UpdateEInterp(ParGridFunction &e_interp,
                       Vector &e_min, Vector &e_max);
@@ -172,7 +175,7 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
-   real_t atol        = 1e-08;
+   real_t atol        = 1e-10;
    real_t rtol        = 1e-08;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
        hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;

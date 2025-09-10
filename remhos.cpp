@@ -959,7 +959,6 @@ int main(int argc, char *argv[])
 
       if (project_analytic)
       {
-         interpolator.atol = 1e-12;
          interpolator.Remap(u0_function, u0_total_mass(),
                             x_final, u_gf, optimization_type);
       }
