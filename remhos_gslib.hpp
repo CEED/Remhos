@@ -96,10 +96,10 @@ private:
    // by pos_final. The bounds are determined by the values of g_init, which
    // is defined with respect on the initial mesh.
    void CalcDOFBounds(const ParGridFunction &g_init,
+                      const ParGridFunction &gf_interp,
                       const ParFiniteElementSpace &pfes,
                       const Vector &pos_final,
-                      Vector &g_min, Vector &g_max, bool use_el_nbr,
-                      Array<bool> *active_el = nullptr);
+                      Vector &g_min, Vector &g_max, BoundsType bounds_type);
    // Computes bounds for quadrature values, at the mesh positions given
    // by pos_final. The bounds are determined by the values of qf_init, which
    // is defined with respect on the initial mesh.
@@ -119,9 +119,12 @@ private:
    void UpdateRhoInterp(QuadratureFunction &rho_interp,
                         Vector &rho_min, Vector &rho_max);
 
-   void CalcEBounds(const ParGridFunction &e_interp,
+   void CalcEBounds(const ParGridFunction &e_init,
+                    Array<bool> &active_el_0,
+                    const ParGridFunction &e_interp,
+                    const Vector &pos_final,
                     const Vector &ind_max,
-                    Vector &e_min, Vector &e_max);
+                    Vector &e_min, Vector &e_max, BoundsType bounds_type);
 
    void UpdateEInterp(ParGridFunction &e_interp,
                       Vector &e_min, Vector &e_max);
@@ -177,7 +180,7 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
-   real_t atol        = 1e-08;
+   real_t atol        = 1e-10;
    real_t rtol        = 1e-08;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
        hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;

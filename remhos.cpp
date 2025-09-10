@@ -953,8 +953,8 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
-      interpolator.subprob   = optRelevantSubset;      
-      interpolator.weightedSpace   = weightedSpaceType;
+      interpolator.subprob       = optRelevantSubset;
+      interpolator.weightedSpace = weightedSpaceType;
       ParGridFunction u_gf(&pfes);
 
       if (project_analytic)
