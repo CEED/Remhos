@@ -579,7 +579,7 @@ private:
    real_t w_1 = 1e0;
    real_t w_2 = 1.0;
    real_t w_3 = 1.0;
-   real_t w_p = 1e4;
+   real_t w_p = 1e3;
 
    mfem::Array<int> optProbInd;
    bool subproblem = false;

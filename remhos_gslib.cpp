@@ -1253,8 +1253,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
    if (p_control)
    {
-      rho_min -= 1e-3;
-      rho_max += 1e-3;
+      rho_min -= 1e-2;
+      rho_max += 1e-2;
    }
 
    // {
