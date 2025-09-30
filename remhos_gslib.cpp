@@ -1117,6 +1117,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
    if (p_control) { finder.Interpolate(pos_quad_final, p_0_lor, p_interp); }
    finder.Setup(pmesh_init);
+   finder.SetL2AvgType(FindPointsGSLIB::NONE);
    finder.Interpolate(pos_dof_e_final, e_0, e_interp);
    Vector v_interp_vals(pos_dof_v_final.Size());
    finder.Interpolate(pos_dof_v_final, v_0, v_interp_vals);
