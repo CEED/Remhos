@@ -28,7 +28,7 @@ using namespace std;
 namespace mfem
 {
 
-void InitializeQuadratureFunction(Coefficient &c,
+void InitializeQuadratureFunction(int ind_id, Coefficient &c,
                                   const Vector &pos_mesh,
                                   QuadratureFunction &qf,
                                   const Array<bool> *active_quads)
@@ -49,13 +49,61 @@ void InitializeQuadratureFunction(Coefficient &c,
       for (int q = 0; q < nip; q++)
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
+         Vector coord(Tr.GetSpaceDim());
+         Tr.Transform(ip, coord);
          if (active_quads && (*active_quads)[e * nip + q] == false)
          {
             qf(e*nip + q) = 0.0;
          }
          else
          {
-            qf(e*nip + q) = c.Eval(Tr, ip);
+            if (ind_id == 0)
+            {
+               qf(e*nip + q) = c.Eval(Tr, ip);
+            }
+            else if (ind_id == 1 && coord(0) < 0.5)
+            {
+               qf(e*nip + q) = 1.0 - c.Eval(Tr, ip);
+            }
+            else if (ind_id == 2 && coord(0) > 0.5)
+            {
+               qf(e*nip + q) = 1.0 - c.Eval(Tr, ip);
+            }
+            else
+            {
+               qf(e*nip + q) = 0.0;
+            }
+         }
+      }
+   }
+}
+
+void InitializeRho(Coefficient &rho_coeff, const Vector &pos_mesh,
+                   QuadratureFunction &rho_qf, const Array<bool> &active_quads)
+{
+   auto qspace = dynamic_cast<QuadratureSpace *>(rho_qf.GetSpace());
+   MFEM_VERIFY(qspace, "Broken QuadratureSpace.");
+
+   const int NE  = qspace->GetMesh()->GetNE();
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nip = ir.GetNPoints();
+
+      // Transformation of the element with the pos_mesh coordinates.
+      IsoparametricTransformation Tr;
+      qspace->GetMesh()->GetElementTransformation(e, pos_mesh, &Tr);
+
+      for (int q = 0; q < nip; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         if (active_quads[e * nip + q] == false)
+         {
+            rho_qf(e*nip + q) = 0.0;
+         }
+         else
+         {
+            rho_qf(e*nip + q) = rho_coeff.Eval(Tr, ip);
          }
       }
    }

@@ -23,10 +23,12 @@
 namespace mfem
 {
 
-void InitializeQuadratureFunction(Coefficient &c,
+void InitializeQuadratureFunction(int ind_id, Coefficient &c,
                                   const Vector &pos_mesh,
                                   QuadratureFunction &q,
                                   const Array<bool> *bool_quads = nullptr);
+void InitializeRho(Coefficient &rho_coeff, const Vector &pos_mesh,
+                   QuadratureFunction &rho_qf, const Array<bool> &active_quads);
 
 void ComputePressureQF(const QuadratureFunction &rho,
                        const ParGridFunction &energy,

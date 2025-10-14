@@ -1004,7 +1004,7 @@ int main(int argc, char *argv[])
           IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
       QuadratureFunction u_qf(qspace);
-      InitializeQuadratureFunction(u0, x0, u_qf);
+      InitializeQuadratureFunction(0, u0, x0, u_qf);
 
       if (visualization)
       {
@@ -1054,6 +1054,8 @@ int main(int argc, char *argv[])
       H1_FECollection fec_v(order+1, dim, BasisType::GaussLobatto);
       ParFiniteElementSpace pfes_v(&pmesh, &fec_v, dim);
 
+      const int ind_cnt = 3;
+
       // Setup the BlockVector (ordered ind-rho-e-v).
       const int size_qf   = qspace.GetSize(),
                 size_gf_e = pfes.GetVSize(),
@@ -1064,71 +1066,79 @@ int main(int argc, char *argv[])
       offset[2] = offset[1] + size_qf;
       offset[3] = offset[2] + size_gf_e;
       offset[4] = offset[3] + size_gf_v;
-      BlockVector ind_rho_e_v_0(offset, Device::GetMemoryType());
+      std::vector<BlockVector> ind_rho_e_v_0(ind_cnt, BlockVector(offset));
 
-      QuadratureFunction ind_0(&qspace, ind_rho_e_v_0.GetBlock(0).GetData()),
-                         rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData());
-      ParGridFunction e_0(&pfes, ind_rho_e_v_0.GetBlock(2).GetData());
-      ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
-      v_0.SetTrueVector();
-
-      // Initialize the ind_0.
-      InitializeQuadratureFunction(u0, x0, ind_0);
-
-      // Initialize rho_0 and e_0 only in the support of ind_0.
-      Array<bool> ind_0_bool_el, ind_0_bool_dofs;
-      ComputeBoolIndicators(pmesh.GetNE(), ind_0,
-                            ind_0_bool_el, ind_0_bool_dofs);
-      BoolFunctionCoefficient rho_0_coeff(s0_function, ind_0_bool_el),
-                              e_0_coeff(q0_function, ind_0_bool_el);
-      InitializeQuadratureFunction(rho_0_coeff, x0, rho_0, &ind_0_bool_dofs);
-      e_0.ProjectCoefficient(e_0_coeff);
-
-      // Initialize velocity everywhere.
-      VectorFunctionCoefficient v_0_coeff(dim, v0_function);
-      v_0.ProjectCoefficient(v_0_coeff);
-
-      // Compute initial pressure.
+      Array<bool> ind_0_bool_dofs;
+      std::vector<Array<bool>> ind_0_bool_el(ind_cnt, Array<bool>());
       QuadratureFunction p_0(&qspace);
-      ComputePressureQF(rho_0, e_0, p_0);
-
-      // Visualize initial values.
-      if (visualization)
+      QuadratureFunction ind_sum_0(&qspace); ind_sum_0 = 0.0;
+      for (int k = 0; k < ind_cnt; k++)
       {
-         VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 0);
-         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 0);
-         socketstream sock_e;
-         VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
-                        800, 0, 400, 400);
-         if (remap_v)
+         QuadratureFunction ind_0(&qspace, ind_rho_e_v_0[k].GetBlock(0).GetData()),
+                            rho_0(&qspace, ind_rho_e_v_0[k].GetBlock(1).GetData());
+         ParGridFunction e_0(&pfes, ind_rho_e_v_0[k].GetBlock(2).GetData());
+         ParGridFunction v_0(&pfes_v, ind_rho_e_v_0[k].GetBlock(3).GetData());
+         v_0.SetTrueVector();
+
+         // Initialize the ind_0.
+         InitializeQuadratureFunction(k, u0, x0, ind_0);
+         ind_sum_0 += ind_0;
+
+         // Initialize rho_0 and e_0 only in the support of ind_0.
+         ComputeBoolIndicators(pmesh.GetNE(), ind_0,
+                               ind_0_bool_el[k], ind_0_bool_dofs);
+         BoolFunctionCoefficient rho_0_coeff(s0_function, ind_0_bool_el[k]),
+                                 e_0_coeff(q0_function, ind_0_bool_el[k]);
+         InitializeRho(rho_0_coeff, x0, rho_0, ind_0_bool_dofs);
+         e_0.ProjectCoefficient(e_0_coeff);
+
+         // Initialize velocity everywhere.
+         VectorFunctionCoefficient v_0_coeff(dim, v0_function);
+         v_0.ProjectCoefficient(v_0_coeff);
+
+         // Compute initial pressure.
+         ComputePressureQF(rho_0, e_0, p_0);
+
+         // Visualize initial values.
+         if (visualization)
          {
-            socketstream sock_v;
-            VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
-                           1200, 0, 400, 400, "", true);
+            VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 0);
+            VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 0);
+            socketstream sock_e;
+            VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
+                           800, 0, 400, 400);
+            if (remap_v)
+            {
+               socketstream sock_v;
+               VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
+                              1200, 0, 400, 400, "", true);
+            }
+            VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1200, 0);
+
+            ParaViewDataCollection pvdc("IndRhoE_before_opt", &pmesh);
+            pvdc.SetDataFormat(VTKFormat::BINARY32);
+            pvdc.SetCycle(0);
+            pvdc.SetTime(1.0);
+            pvdc.RegisterQField("ind", &ind_0);
+            pvdc.RegisterQField("rho", &rho_0);
+            // pvdc.RegisterField("energy", &e_0);
+            pvdc.Save();
+
+            ParaViewDataCollection pvdc1("IndRhoE_before_opt1", &pmesh);
+            pvdc1.SetDataFormat(VTKFormat::BINARY32);
+            pvdc1.SetCycle(0);
+            pvdc1.SetTime(1.0);
+            // pvdc.RegisterQField("ind", &ind);
+            // pvdc.RegisterQField("rho", &rho);
+            pvdc1.RegisterField("energy", &e_0);
+            pvdc1.Save();
          }
-         VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1200, 0);
-
-         ParaViewDataCollection pvdc("IndRhoE_before_opt", &pmesh);
-         pvdc.SetDataFormat(VTKFormat::BINARY32);
-         pvdc.SetCycle(0);
-         pvdc.SetTime(1.0);
-         pvdc.RegisterQField("ind", &ind_0);
-         pvdc.RegisterQField("rho", &rho_0);
-        // pvdc.RegisterField("energy", &e_0);
-         pvdc.Save();
-
-         ParaViewDataCollection pvdc1("IndRhoE_before_opt1", &pmesh);
-         pvdc1.SetDataFormat(VTKFormat::BINARY32);
-         pvdc1.SetCycle(0);
-         pvdc1.SetTime(1.0);
-         // pvdc.RegisterQField("ind", &ind);
-         // pvdc.RegisterQField("rho", &rho);
-         pvdc1.RegisterField("energy", &e_0);
-         pvdc1.Save();
       }
 
+      VisQuadratureFunction(pmesh, ind_sum_0, "ind_sum_0 QF", 0, 900);
+
       // Remap.
-      BlockVector ind_rho_e(offset);
+      std::vector<BlockVector> ind_rho_e(ind_cnt, BlockVector(offset));
       InterpolationRemap interpolator(pmesh);
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
@@ -1138,53 +1148,64 @@ int main(int argc, char *argv[])
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0, ind_0_bool_el,
-                              x_final, ind_rho_e, optimization_type);
-
-      QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
-                         rho(&qspace, ind_rho_e.GetBlock(1).GetData());
-      ParGridFunction e(&pfes, ind_rho_e.GetBlock(2).GetData());
-      ParGridFunction v(&pfes_v, ind_rho_e.GetBlock(3).GetData());
-
-      // Compute final pressure.
-      QuadratureFunction p(&qspace);
-      ComputePressureQF(rho, e, p);
-
-      // Visualize final values.
-      if (visualization)
+      QuadratureFunction ind_sum(&qspace); ind_sum = 0.0;
+      for (int k = 0; k < ind_cnt; k++)
       {
-         x = x_final;
-         VisQuadratureFunction(pmesh, ind, "ind QF", 0, 500);
-         VisQuadratureFunction(pmesh, rho, "rho QF", 400, 500);
-         socketstream sock_f;
-         VisualizeField(sock_f, "localhost", 19916, e, "e GF", 800, 500, 400, 400);
-         if (remap_v)
+         interpolator.RemapHydro(ind_rho_e_v_0[k], remap_v, false, p_0,
+                                 ind_0_bool_el[k],
+                                 x_final, ind_rho_e[k], optimization_type);
+
+         QuadratureFunction ind(&qspace, ind_rho_e[k].GetBlock(0).GetData()),
+                            rho(&qspace, ind_rho_e[k].GetBlock(1).GetData());
+         ParGridFunction e(&pfes, ind_rho_e[k].GetBlock(2).GetData());
+         ParGridFunction v(&pfes_v, ind_rho_e[k].GetBlock(3).GetData());
+
+         ind_sum += ind;
+
+         // Compute final pressure.
+         QuadratureFunction p(&qspace);
+         ComputePressureQF(rho, e, p);
+
+         // Visualize final values.
+         if (visualization)
          {
-            socketstream sock_v;
-            VisualizeField(sock_v, "localhost", 19916, v, "v GF",
-                           1200, 500, 400, 400, "", true);
+            x = x_final;
+            VisQuadratureFunction(pmesh, ind, "ind QF", 0, 500);
+            VisQuadratureFunction(pmesh, rho, "rho QF", 400, 500);
+            socketstream sock_f;
+            VisualizeField(sock_f, "localhost", 19916, e, "e GF", 800, 500, 400, 400);
+            if (remap_v)
+            {
+               socketstream sock_v;
+               VisualizeField(sock_v, "localhost", 19916, v, "v GF",
+                              1200, 500, 400, 400, "", true);
+            }
+            VisQuadratureFunction(pmesh, p, "p QF", 1200, 500);
+            x = x0;
+
+            ParaViewDataCollection pvdc("IndRhoE_after_opt", &pmesh);
+            pvdc.SetDataFormat(VTKFormat::BINARY32);
+            pvdc.SetCycle(0);
+            pvdc.SetTime(1.0);
+            pvdc.RegisterQField("ind", &ind);
+            pvdc.RegisterQField("rho", &rho);
+            //pvdc.RegisterField("energy", &e);
+            pvdc.Save();
+
+            ParaViewDataCollection pvdc1("IndRhoE_after_opt1", &pmesh);
+            pvdc1.SetDataFormat(VTKFormat::BINARY32);
+            pvdc1.SetCycle(0);
+            pvdc1.SetTime(1.0);
+            // pvdc.RegisterQField("ind", &ind);
+            // pvdc.RegisterQField("rho", &rho);
+            pvdc1.RegisterField("energy", &e);
+            pvdc1.RegisterField("velocity", &v);
+            pvdc1.Save();
          }
-         VisQuadratureFunction(pmesh, p, "p QF", 1200, 500);
-
-         ParaViewDataCollection pvdc("IndRhoE_after_opt", &pmesh);
-         pvdc.SetDataFormat(VTKFormat::BINARY32);
-         pvdc.SetCycle(0);
-         pvdc.SetTime(1.0);
-         pvdc.RegisterQField("ind", &ind);
-         pvdc.RegisterQField("rho", &rho);
-         //pvdc.RegisterField("energy", &e);
-         pvdc.Save();
-
-         ParaViewDataCollection pvdc1("IndRhoE_after_opt1", &pmesh);
-         pvdc1.SetDataFormat(VTKFormat::BINARY32);
-         pvdc1.SetCycle(0);
-         pvdc1.SetTime(1.0);
-         // pvdc.RegisterQField("ind", &ind);
-         // pvdc.RegisterQField("rho", &rho);
-         pvdc1.RegisterField("energy", &e);
-         pvdc1.RegisterField("velocity", &v);
-         pvdc1.Save();
       }
+
+      x = x_final;
+      VisQuadratureFunction(pmesh, ind_sum, "ind_sum QF", 400, 900);
 
       return 0;
    }
