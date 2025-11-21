@@ -122,6 +122,7 @@ private:
    void CalcEBounds(const ParGridFunction &e_init,
                     Array<bool> &active_el_0,
                     const ParGridFunction &e_interp,
+                    const QuadratureFunction &e_interp_qf,
                     const Vector &pos_final,
                     const Vector &ind_max,
                     Vector &e_min, Vector &e_max, BoundsType bounds_type);

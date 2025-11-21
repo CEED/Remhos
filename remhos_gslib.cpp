@@ -1119,6 +1119,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
    finder.Interpolate(pos_dof_e_final, e_0, e_interp);
+   // Energy is additionally interpolated at the quad points,
+   // to have spatial correspondence to the volume fractions.
+   QuadratureFunction e_interp_qf(&qspace_final);
+   finder.Interpolate(pos_quad_final, e_0, e_interp_qf);
+   // Interpolate and fix the H1 vector ordering.
    Vector v_interp_vals(pos_dof_v_final.Size());
    finder.Interpolate(pos_dof_v_final, v_0, v_interp_vals);
    {
@@ -1242,12 +1247,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    Vector e_min, e_max;
    if (p_control)
    {
-      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
                   e_min, e_max, ELEM_INIT);
    }
    else
    {
-      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
                   e_min, e_max, ELEM_FINAL);
    }
    UpdateEInterp(e_interp, e_min, e_max);
@@ -2493,6 +2498,7 @@ void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
 void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
                                      Array<bool> &active_el_0,
                                      const ParGridFunction &e_interp,
+                                     const QuadratureFunction &e_interp_qf,
                                      const Vector &pos_final,
                                      const Vector &ind_max,
                                      Vector &e_min, Vector &e_max,
@@ -2543,57 +2549,42 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
 
       // Check if the new mesh element has material.
       bool el_has_ind = false;
+      bool el_has_e_value = false;
       for (int q = 0; q < nqp; q++)
       {
-         if (ind_max(e*nqp + q) > 1e-12) { el_has_ind = true; break; }
+         if (ind_max(e*nqp + q) > 1e-12)           { el_has_ind = true; }
+         if (fabs(e_interp_qf(e*nqp + q)) > 1e-12) { el_has_e_value = true; }
       }
 
-      // Compute min and max density in the new mesh element.
+      // Compute min and max energy in the new mesh element.
       double el_min =   std::numeric_limits<double>::infinity(),
              el_max = - std::numeric_limits<double>::infinity();
       // The new mesh element is completely empty -> we want zeros in it.
       if (el_has_ind == false) { el_min = el_max = 0.0; }
       else
       {
-         Vector e_interp_el;
-         e_interp.GetElementDofValues(e, e_interp_el);
-         bool el_has_e_value = false;
-         for (int i = 0; i < s; i++)
+         MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
+
+         for (int q = 0; q < nqp; q++)
          {
             // Bounds are taken only from points where the material was present
             // initially. This is achieved by checking the interpolated values,
             // which come from the values on the initial mesh. We assume that
-            // zero corresponds to no material. We can't check in indicator
-            // values, as those are not available at the energy DOF locations.
-            if (fabs(e_interp_el(i)) > eps)
+            // zero corresponds to no material.
+            if (fabs(e_interp_qf(e*nqp + q)) > 1e-12)
             {
-               el_has_e_value = true;
-               el_min = std::min(el_min, e_interp_el(i));
-               el_max = std::max(el_max, e_interp_el(i));
+               el_min = std::min(el_min, e_interp_qf(e*nqp + q));
+               el_max = std::max(el_max, e_interp_qf(e*nqp + q));
             }
          }
-         MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
       }
 
-      // Set the bounds.
+      // Set the bounds at the DOFs.
       // When material is present, we set bounds at all energy DOFs.
       for (int i = 0; i < s; i++)
       {
          e_min(s * e + i) = el_min;
          e_max(s * e + i) = el_max;
-
-         // Note that it's fine to be lower than the mininum, i.e., in
-         // elements where the ind function propages due to small diffusion.
-         if (e_interp(s * e + i) > e_max(s * e + i) + eps && el_has_ind == true)
-         {
-            MFEM_ABORT("Error: interpolated energy is above upper bound: "
-                       << e_interp(s * e + i) << " " << e_max(s * e + i));
-
-            // Note that el_has_ind == true is needed, because we can get an
-            // element with no material, but with nonzero interpolated energy.
-            // This is due to the misfit between the locations of the inicator
-            // quad points and the energy DOFs.
-         }
       }
    }
 }
