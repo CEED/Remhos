@@ -456,7 +456,8 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
 void InterpolationRemap::Remap(const QuadratureFunction &u_init,
                                const Vector &pos_final,
-                               Vector &u_final, int opt_type)
+                               Vector &u_final, int opt_type,
+                               unsigned diffuse_order)
 {
    pmesh_final.SetNodes(pos_final);
    QuadratureSpace qspace_final(pmesh_final, u_init.GetIntRule(0));
@@ -464,9 +465,15 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    const int dim = pmesh_init.Dimension(), myid = pmesh_init.GetMyRank();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
 
+   // Used to define a temporaty L2 Bernstein function, for duffusion.
+   DG_FECollection fec(diffuse_order, dim, BasisType::Positive);
+   ParFiniteElementSpace pfes_final(&pmesh_final, &fec);
+
    // Generate list of points where u_initial will be interpolated.
    Vector pos_quad_final;
    GetQuadPositions(qspace_final, pos_final, pos_quad_final);
+   Vector pos_dof_final;
+   GetDOFPositions(pfes_final, pos_final, pos_dof_final);
 
    // Generate the Low-Order-Refined GridFunction for interpolation.
    const int order = u_init.GetIntRule(0).GetOrder() / 2;
@@ -487,15 +494,29 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    }
 
    // Interpolate u_initial.
-   const int quads_cnt = pos_quad_final.Size() / dim;
-   Vector interp_vals(quads_cnt);
+   const int quads_cnt = pos_quad_final.Size() / dim,
+             nodes_cnt = pos_dof_final.Size() / dim;
+   Vector interp_vals(quads_cnt), interp_dof_vals(nodes_cnt);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, u_0_lor, interp_vals);
+   if (diffuse_order > 0)
+   {
+      finder.Interpolate(pos_dof_final, u_0_lor, interp_dof_vals);
+   }
    finder.FreeData();
 
+   ParGridFunction tmp(&pfes_final);
+   tmp = interp_dof_vals;
+
    QuadratureFunction u_interpolated(qspace_final);
-   u_interpolated = interp_vals;
+   if (diffuse_order > 0)
+   {
+      // This causes some additional diffusion in the optimal solution.
+      u_interpolated.ProjectGridFunction(tmp);
+   }
+   else { u_interpolated = interp_vals; }
+
 
    // Report mass error.
    double mass_0 = Integrate(pos_init,  &u_init,

@@ -158,8 +158,10 @@ public:
               Vector &u_final, int opt_type);
 
    // Remap of a QuadratureFunction.
+   // diffuse_order = 0 is no diffusion (direct quadrature point interpolation).
+   // diffuse_order = 1 is most diffusive, higher orders are less.
    void Remap(const QuadratureFunction &u_init, const Vector &pos_final,
-              Vector &u_final, int opt_type);
+              Vector &u_final, int opt_type, unsigned diffuse_order = 0);
 
    // Remap of an analytic function.
    // Same as projecting the function to the final mesh.

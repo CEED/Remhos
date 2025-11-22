@@ -163,6 +163,7 @@ int main(int argc, char *argv[])
    int optimization_type = 0;
    bool h1_seminorm = false;
    int max_opt_iter = 100;
+   int diffuse_quad_order = 0;
    int bounds_type = 0;
    bool pa = false;
    bool next_gen_full = false;
@@ -236,6 +237,8 @@ int main(int argc, char *argv[])
                   "Use to optimize only relevant subset. min bound != max bound");
    args.AddOption(&max_opt_iter, "-mi", "--max-optimization-iterations",
                   "Maximum optimization iterations");
+   args.AddOption(&diffuse_quad_order, "-dqo", "--diffuse-quad-order",
+                  "How much to diffuse quadrature functions.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
@@ -1023,7 +1026,8 @@ int main(int argc, char *argv[])
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
       interpolator.SetQuadratureSpace(qspace);
-      interpolator.Remap(u_qf, x_final, uu_qf, optimization_type);
+      interpolator.Remap(u_qf, x_final, uu_qf,
+                         optimization_type, diffuse_quad_order);
 
       if (visualization)
       {
