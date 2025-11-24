@@ -1078,12 +1078,12 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
    }
 }
 
-void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
+void InterpolationRemap::RemapHydro(const std::vector<BlockVector> &ind_rho_e_v_0,
                                     bool remap_v, bool p_control,
                                     const QuadratureFunction &p_0,
-                                    Array<bool> &active_el_0,
+                                    std::vector<Array<bool>> &active_el_0,
                                     const Vector &pos_final,
-                                    Vector &ind_rho_e_v, int opt_type)
+                                    std::vector<BlockVector> &ind_rho_e_v, int opt_type)
 {
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
@@ -1100,11 +1100,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
              size_gf_e = pfes_e->GetVSize(),
              size_gf_v = pfes_v->GetVSize(),
              size_gf_v_true = pfes_v->GetTrueVSize();
-   Vector *irev_ptr = const_cast<Vector *>(&ind_rho_e_v_0);
-   QuadratureFunction ind_0(qspace, irev_ptr->GetData()),
-                      rho_0(qspace, irev_ptr->GetData() + size_qf);
-   ParGridFunction e_0(pfes_e, irev_ptr->GetData() + 2*size_qf),
-                   v_0(pfes_v, irev_ptr->GetData() + 2*size_qf + size_gf_e);
 
    // Generate list of points where ire_initial will be interpolated.
    Vector pos_quad_final, pos_dof_e_final, pos_dof_v_final;
@@ -1120,6 +1115,27 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                        BasisType::ClosedGL);
    L2_FECollection fec_lor(0, dim);
    ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
+
+   int numBlocks = 4;
+   if (remap_v){ numBlocks = 5; }
+
+   Array<int> offset(numBlocks);
+   offset[0] = 0;
+   offset[1] = offset[0] + size_qf;
+   offset[2] = offset[1] + size_qf;
+   offset[3] = offset[2] + size_gf_e;
+   if (remap_v){ offset[4] = offset[3] + size_gf_v; }
+
+   int ind_cnt = ind_rho_e_v_0.size();
+   for (int k = 0; k < ind_cnt; k++)
+   {
+
+   BlockVector *irev_ptr = const_cast<BlockVector *>(&ind_rho_e_v_0[k]);
+   QuadratureFunction ind_0(qspace, irev_ptr->GetData()),
+                      rho_0(qspace, irev_ptr->GetData() + size_qf);
+   ParGridFunction e_0(pfes_e, irev_ptr->GetData() + 2*size_qf),
+                   v_0(pfes_v, irev_ptr->GetData() + 2*size_qf + size_gf_e);
+
    ParGridFunction ind_0_lor(&pfes_lor), rho_0_lor(&pfes_lor);
    MFEM_VERIFY(ind_0.Size() == ind_0_lor.Size(), "Size mismatch ind LOR.");
    MFEM_VERIFY(rho_0.Size() == rho_0_lor.Size(), "Size mismatch rho LOR.");
@@ -1151,7 +1167,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
 
    // Interpolate into ind_rho_e_v_interp.
-   Vector ind_rho_e_v_interp(ind_rho_e_v.Size());
+   BlockVector ind_rho_e_v_interp(offset);
    real_t *irev_data = ind_rho_e_v_interp.GetData();
    QuadratureFunction ind_interp(&qspace_final, irev_data),
                       rho_interp(&qspace_final, irev_data + size_qf);
@@ -1277,25 +1293,16 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    Vector rho_min, rho_max;
    CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
    UpdateRhoInterp(rho_interp, rho_min, rho_max);
-   // {
-   //    QuadratureFunction gf_min(qspace), gf_max(qspace);
-   //    gf_min = rho_min, gf_max = rho_max;
 
-   //    VisQuadratureFunction(pmesh_final, ind_interp, "ind interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, rho_interp, "rho interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, gf_min, "rho_min QF", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, gf_max, "rho_max QF", 400, 500);
-   //    MFEM_ABORT("rho bounds");
-   // }
    Vector e_min, e_max;
    if (p_control)
    {
-      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+      CalcEBounds(e_0, active_el_0[k], e_interp, pos_final, ind_max,
                   e_min, e_max, ELEM_INIT);
    }
    else
    {
-      CalcEBounds(e_0, active_el_0, e_interp, pos_final, ind_max,
+      CalcEBounds(e_0, active_el_0[k], e_interp, pos_final, ind_max,
                   e_min, e_max, ELEM_FINAL);
    }
    UpdateEInterp(e_interp, e_min, e_max);
@@ -1306,39 +1313,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       rho_max += 1e-2;
    }
 
-   // {
-   //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
-   //    gf_min = e_min, gf_max = e_max;
-
-   //    socketstream vis_min, vis_max;
-   //    char vishost[] = "localhost";
-   //    int  visport   = 19916;
-   //    vis_min.precision(8);
-   //    vis_max.precision(8);
-
-   //    VisualizeField(vis_min, vishost, visport, gf_min, "e min",
-   //                   0, 500, 300, 300);
-   //    VisualizeField(vis_max, vishost, visport, gf_max, "e max",
-   //                   300, 500, 300, 300);
-   //    //MFEM_ABORT("e bounds");
-   // }
    Vector v_min, v_max;
-   int numBlocks = 4;
    if (remap_v)
    {
       CalcVBounds(v_interp, v_min, v_max);
-      numBlocks = 5;
-   }
-
-   Array<int> offset(numBlocks);
-
-   offset[0] = 0;
-   offset[1] = offset[0] + size_qf;
-   offset[2] = offset[1] + size_qf;
-   offset[3] = offset[2] + size_gf_e;
-   if (remap_v)
-   {
-      offset[4] = offset[3] + size_gf_v;
    }
 
    BlockVector x_min(offset);
@@ -1360,7 +1338,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    // Optimize.
    if (opt_type == 0)
    {
-      ind_rho_e_v = ind_rho_e_v_interp;
+      ind_rho_e_v[k] = ind_rho_e_v_interp;
    }
    else if (opt_type == 1)
    {
@@ -1433,7 +1411,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       {
          NumDesVar = GetSizeOptimizationSubset(design_min,design_max);
          GetOptimizationSubsetInd(design_min,design_max,optProbInd);
-         //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
+
          initial_design.GetSubVector(optProbInd,ind_rho_e_sub);
          y_out.GetSubVector(optProbInd,y_out_sub);
 
@@ -1541,7 +1519,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          L_vector_design.GetBlock(3) = vel_final;
       }
 
-      ind_rho_e_v = L_vector_design;
+      ind_rho_e_v[k] = L_vector_design;
 
       delete optsolver;
       delete ot_prob;
@@ -1678,7 +1656,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       BlockVector x_final_TVector(offsets);
       opt_solver.Mult(x_initial, x_final_TVector);
 
-      BlockVector x_final_LVector(ind_rho_e_v, offset);
+      BlockVector x_final_LVector(ind_rho_e_v[k], offset);
       for (int i=0; i<3; i++)
       {
          x_final_LVector.GetBlock(i) = x_final_TVector.GetBlock(i);
@@ -1824,7 +1802,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       BlockVector x_final_TVector(offsets);
       opt_solver.Mult(x_initial, x_final_TVector);
 
-      BlockVector x_final_LVector(ind_rho_e_v, offset);
+      BlockVector x_final_LVector(ind_rho_e_v[k], offset);
       for (int i=0; i<3; i++)
       {
          x_final_LVector.GetBlock(i) = x_final_TVector.GetBlock(i);
@@ -1840,7 +1818,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    else if (opt_type == 4)
    {
       MFEM_VERIFY(remap_v==false, "NOT YET IMPLEMENTED.");
-      Vector ind_rho_e(ind_rho_e_v.GetData(), 2*size_qf + size_gf_e);
+      Vector ind_rho_e(ind_rho_e_v[k].GetData(), 2*size_qf + size_gf_e);
       Vector target_volume(3);
       target_volume[0] = volume_0;
       target_volume[1] = mass_0;
@@ -1860,7 +1838,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       L2_FECollection nodal_fec(pfes_e->GetOrder(0),
                                 pfes_e->GetParMesh()->Dimension());
       ParFiniteElementSpace pfes_nodal(pfes_e->GetParMesh(), &nodal_fec);
-      ParGridFunction E_gf(pfes_e, ind_rho_e_v.GetData() + offset);
+      ParGridFunction E_gf(pfes_e, ind_rho_e_v[k].GetData() + offset);
       ParGridFunction lower_gf(&pfes_nodal, e_min);
       ParGridFunction upper_gf(&pfes_nodal, e_max);
       LogitCoefficient logit_coeff(E_gf, lower_gf, upper_gf);
@@ -1990,7 +1968,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       Dykstra projector(pmesh_final.GetComm(), C, mass,
                         x_min_final, x_max_final, atol, max_iter);
       projector.Project(x_initial);
-      BlockVector x_final_LVector(ind_rho_e_v, offset);
+      BlockVector x_final_LVector(ind_rho_e_v[k], offset);
       for (int i=0; i<3; i++)
       {
          x_final_LVector.GetBlock(i) = x_initial.GetBlock(i);
@@ -2005,10 +1983,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
    else { MFEM_ABORT("not implemented!"); }
 
-   QuadratureFunction ind(&qspace_final, ind_rho_e_v.GetData()),
-                      rho(&qspace_final, ind_rho_e_v.GetData() + size_qf);
-   ParGridFunction e(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf);
-   ParGridFunction v(&pfes_v_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
+   QuadratureFunction ind(&qspace_final, ind_rho_e_v[k].GetData()),
+                      rho(&qspace_final, ind_rho_e_v[k].GetData() + size_qf);
+   ParGridFunction e(&pfes_e_final, ind_rho_e_v[k].GetData() + 2*size_qf);
+   ParGridFunction v(&pfes_v_final, ind_rho_e_v[k].GetData() + 2*size_qf + size_gf_e);
 
    // Print conservation errors.
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr,
@@ -2108,6 +2086,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          std::cout <<      "Objective v   L2: " << v_obj_L2 << std::endl;
       }
    }
+}
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,

@@ -1149,12 +1149,13 @@ int main(int argc, char *argv[])
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
       QuadratureFunction ind_sum(&qspace); ind_sum = 0.0;
+
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0,
+                              ind_0_bool_el,
+                              x_final, ind_rho_e, optimization_type);
+
       for (int k = 0; k < ind_cnt; k++)
       {
-         interpolator.RemapHydro(ind_rho_e_v_0[k], remap_v, false, p_0,
-                                 ind_0_bool_el[k],
-                                 x_final, ind_rho_e[k], optimization_type);
-
          QuadratureFunction ind(&qspace, ind_rho_e[k].GetBlock(0).GetData()),
                             rho(&qspace, ind_rho_e[k].GetBlock(1).GetData());
          ParGridFunction e(&pfes, ind_rho_e[k].GetBlock(2).GetData());
