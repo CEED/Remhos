@@ -18,7 +18,6 @@
 #define MFEM_REMHOS_GSLIB
 
 #include "mfem.hpp"
-#include "remhos_bregman.hpp"
 
 namespace mfem
 {
@@ -74,7 +73,8 @@ private:
    double Mass(const Vector &pos, const ParGridFunction &g);
 
    real_t ObjectiveGF(const ParGridFunction &g_interp, const ParGridFunction &g);
-   real_t ObjectiveVecGF(const ParGridFunction &g_interp, const ParGridFunction &g);
+   real_t ObjectiveVecGF(const ParGridFunction &g_interp,
+                         const ParGridFunction &g);
    real_t ObjectiveQF(const Vector &g_interp, const Vector &g);
 
    // Computes volume / mass / internal energy / total energy:
@@ -137,17 +137,17 @@ private:
                     const Vector &v_min, const Vector &v_max);
 
    void GetTargetValues(const Vector &interp,
-                    const Vector &min, const Vector &max, Vector &target);
+                        const Vector &min, const Vector &max, Vector &target);
 
    void ComputePressure(const Vector &pos,
-                           const QuadratureFunction &rho_,
-                           const ParGridFunction &e_,
-                           QuadratureFunction &pressure);
+                        const QuadratureFunction &rho_,
+                        const ParGridFunction &e_,
+                        QuadratureFunction &pressure);
 
 public:
    InterpolationRemap(ParMesh &m)
-       : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),
-         pos_init(*pmesh_init.GetNodes()) { }
+      : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),
+        pos_init(*pmesh_init.GetNodes()) { }
 
    void SetQuadratureSpace(QuadratureSpace &qs) { qspace = &qs; }
    void SetEnergyFESpace(ParFiniteElementSpace &es) { pfes_e = &es; }
@@ -187,7 +187,7 @@ public:
    real_t atol        = 1e-10;
    real_t rtol        = 1e-08;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
-       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+      hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 };
 
 } // namespace mfem

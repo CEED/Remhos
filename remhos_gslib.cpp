@@ -18,7 +18,6 @@
 #include "remhos_tools.hpp"
 #include "remhos_HiOp.hpp"
 #include "remhos_lvpp.hpp"
-#include "remhos_bregman.hpp"
 
 #include <algorithm>
 
