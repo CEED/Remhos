@@ -1142,7 +1142,8 @@ int main(int argc, char *argv[])
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0, ind_0_bool_el,
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, diffuse_quad_order,
+                              p_0, ind_0_bool_el,
                               x_final, ind_rho_e, optimization_type);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),

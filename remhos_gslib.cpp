@@ -312,15 +312,9 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    const int dim = pmesh_init.Dimension(), myid = pmesh_init.GetMyRank();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
 
-   // Used to define a temporaty L2 Bernstein function, for duffusion.
-   DG_FECollection fec(diffuse_order, dim, BasisType::Positive);
-   ParFiniteElementSpace pfes_final(&pmesh_final, &fec);
-
    // Generate list of points where u_initial will be interpolated.
    Vector pos_quad_final;
    GetQuadPositions(qspace_final, pos_final, pos_quad_final);
-   Vector pos_dof_final;
-   GetDOFPositions(pfes_final, pos_final, pos_dof_final);
 
    // Generate the Low-Order-Refined GridFunction for interpolation.
    const int order = u_init.GetIntRule(0).GetOrder() / 2;
@@ -341,28 +335,26 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    }
 
    // Interpolate u_initial.
-   const int quads_cnt = pos_quad_final.Size() / dim,
-             nodes_cnt = pos_dof_final.Size() / dim;
-   Vector interp_vals(quads_cnt), interp_dof_vals(nodes_cnt);
+   const int quads_cnt = pos_quad_final.Size() / dim;
+   QuadratureFunction u_interpolated(qspace_final);
+   Vector interp_vals(quads_cnt);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
-   finder.Interpolate(pos_quad_final, u_0_lor, interp_vals);
+   finder.Interpolate(pos_quad_final, u_0_lor, u_interpolated);
    if (diffuse_order > 0)
    {
-      finder.Interpolate(pos_dof_final, u_0_lor, interp_dof_vals);
-   }
-   finder.FreeData();
+      // Used to define a temporary L2 Bernstein function, for duffusion.
+      DG_FECollection fec(diffuse_order, dim, BasisType::Positive);
+      ParFiniteElementSpace pfes_final(&pmesh_final, &fec);
+      ParGridFunction tmp(&pfes_final);
 
-   ParGridFunction tmp(&pfes_final);
-   tmp = interp_dof_vals;
-
-   QuadratureFunction u_interpolated(qspace_final);
-   if (diffuse_order > 0)
-   {
-      // This causes some additional diffusion in the optimal solution.
+      // Adds additional diffusion to the interpolation.
+      Vector pos_dof_final;
+      GetDOFPositions(pfes_final, pos_final, pos_dof_final);
+      finder.Interpolate(pos_dof_final, u_0_lor, tmp);
       u_interpolated.ProjectGridFunction(tmp);
    }
-   else { u_interpolated = interp_vals; }
+   finder.FreeData();
 
 
    // Report mass error.
@@ -654,6 +646,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
 void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     bool remap_v, bool p_control,
+                                    unsigned diffused_ind_order,
                                     const QuadratureFunction &p_0,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
@@ -724,26 +717,36 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       }
    }
 
+   //
    // Interpolate into ind_rho_e_v_interp.
+   //
    Vector ind_rho_e_v_interp(ind_rho_e_v.Size());
    real_t *irev_data = ind_rho_e_v_interp.GetData();
    QuadratureFunction ind_interp(&qspace_final, irev_data),
                       rho_interp(&qspace_final, irev_data + size_qf);
    QuadratureFunction p_interp(&qspace_final);
+   QuadratureFunction e_interp_qf(&qspace_final);
    ParGridFunction e_interp(&pfes_e_final, irev_data + 2*size_qf),
                    v_interp(&pfes_v_final, irev_data + 2*size_qf + size_gf_e);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
    finder.Setup(pmesh_lor);
+   // Interpolate ind at the quadrature positions.
    finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
+   // Interpolate rho at the quadrature positions.
    finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
-   if (p_control) { finder.Interpolate(pos_quad_final, p_0_lor, p_interp); }
+   // For control of p, interpolate p at the quadrature positions.
+   if (p_control)
+   {
+      finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
+   }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
+   // Interpolate e at the DOFs of the L2 space.
    finder.Interpolate(pos_dof_e_final, e_0, e_interp);
-   // Energy is additionally interpolated at the quad points,
+   // Energy is additionally interpolated at the quad positions,
    // to have spatial correspondence to the volume fractions.
-   QuadratureFunction e_interp_qf(&qspace_final);
    finder.Interpolate(pos_quad_final, e_0, e_interp_qf);
    // Interpolate and fix the H1 vector ordering.
    Vector v_interp_vals(pos_dof_v_final.Size());
@@ -770,12 +773,82 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
    finder.FreeData();
 
+   //
+   // Compute min / max bounds.
+   //
+   // Also adjust interpolated values in some special cases.
+   Vector ind_min, ind_max;
+   CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
+   CleanEmptyZones(ind_interp, ind_min, ind_max);
+   Vector rho_min, rho_max;
+   CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
+   UpdateRhoInterp(rho_interp, rho_min, rho_max);
    if (p_control)
    {
-      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
+      rho_min -= 1e-2;
+      rho_max += 1e-2;
+   }
+   // {
+   //    QuadratureFunction gf_min(qspace), gf_max(qspace);
+   //    gf_min = rho_min, gf_max = rho_max;
+
+   //    VisQuadratureFunction(pmesh_final, ind_interp, "ind interp", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, rho_interp, "rho interp", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, gf_min, "rho_min QF", 0, 500);
+   //    VisQuadratureFunction(pmesh_final, gf_max, "rho_max QF", 400, 500);
+   //    MFEM_ABORT("rho bounds");
+   // }
+   Vector e_min, e_max;
+   if (p_control)
+   {
+      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
+                  e_min, e_max, ELEM_INIT);
+   }
+   else
+   {
+      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
+                  e_min, e_max, ELEM_FINAL);
+   }
+   UpdateEInterp(e_interp, e_min, e_max);
+   // {
+   //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
+   //    gf_min = e_min, gf_max = e_max;
+
+   //    socketstream vis_min, vis_max;
+   //    char vishost[] = "localhost";
+   //    int  visport   = 19916;
+   //    vis_min.precision(8);
+   //    vis_max.precision(8);
+
+   //    VisualizeField(vis_min, vishost, visport, gf_min, "e min",
+   //                   0, 500, 300, 300);
+   //    VisualizeField(vis_max, vishost, visport, gf_max, "e max",
+   //                   300, 500, 300, 300);
+   //    //MFEM_ABORT("e bounds");
+   // }
+   Vector v_min, v_max;
+   if (remap_v) { CalcVBounds(v_interp, v_min, v_max); }
+   // Finally, diffuse the indicator.
+   // This does not affect the element bounds (using ELEM_FINAL).
+   // This does not affect the bounds of rho and e.
+   if (diffused_ind_order > 0)
+   {
+      // Temporary L2 Bernstein function, for duffusion of ind.
+      DG_FECollection fec(diffused_ind_order, dim, BasisType::Positive);
+      ParFiniteElementSpace pfes_ind_final(&pmesh_final, &fec);
+      ParGridFunction tmp(&pfes_ind_final);
+      Vector pos_dof_ind_final;
+      GetDOFPositions(pfes_ind_final, pos_final, pos_dof_ind_final);
+      finder.SetL2AvgType(FindPointsGSLIB::NONE);
+      finder.Setup(pmesh_lor);
+      finder.Interpolate(pos_dof_ind_final, ind_0_lor, tmp);
+      ind_interp.ProjectGridFunction(tmp);
+      CleanEmptyZones(ind_interp, ind_min, ind_max);
    }
 
-   // Report conservation errors of ire_final.
+   //
+   // Report conservation errors of ire_interp.
+   //
    const double volume_0 = Integrate(pos_init,
                                      &ind_0, nullptr, nullptr, nullptr);
    const double volume_f = Integrate(pos_final,
@@ -848,69 +921,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       }
    }
 
-   // Compute min / max bounds.
-   // Also adjust interpolated values in some special cases.
-   Vector ind_min, ind_max;
-   CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
-   CleanEmptyZones(ind_interp, ind_min, ind_max);
-   Vector rho_min, rho_max;
-   CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
-   UpdateRhoInterp(rho_interp, rho_min, rho_max);
-   // {
-   //    QuadratureFunction gf_min(qspace), gf_max(qspace);
-   //    gf_min = rho_min, gf_max = rho_max;
-
-   //    VisQuadratureFunction(pmesh_final, ind_interp, "ind interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, rho_interp, "rho interp", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, gf_min, "rho_min QF", 0, 500);
-   //    VisQuadratureFunction(pmesh_final, gf_max, "rho_max QF", 400, 500);
-   //    MFEM_ABORT("rho bounds");
-   // }
-   Vector e_min, e_max;
-   if (p_control)
-   {
-      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
-                  e_min, e_max, ELEM_INIT);
-   }
-   else
-   {
-      CalcEBounds(e_0, active_el_0, e_interp, e_interp_qf, pos_final, ind_max,
-                  e_min, e_max, ELEM_FINAL);
-   }
-   UpdateEInterp(e_interp, e_min, e_max);
-
-   if (p_control)
-   {
-      rho_min -= 1e-2;
-      rho_max += 1e-2;
-   }
-
-   // {
-   //    ParGridFunction gf_min(e_interp), gf_max(e_interp);
-   //    gf_min = e_min, gf_max = e_max;
-
-   //    socketstream vis_min, vis_max;
-   //    char vishost[] = "localhost";
-   //    int  visport   = 19916;
-   //    vis_min.precision(8);
-   //    vis_max.precision(8);
-
-   //    VisualizeField(vis_min, vishost, visport, gf_min, "e min",
-   //                   0, 500, 300, 300);
-   //    VisualizeField(vis_max, vishost, visport, gf_max, "e max",
-   //                   300, 500, 300, 300);
-   //    //MFEM_ABORT("e bounds");
-   // }
-   Vector v_min, v_max;
-   int numBlocks = 4;
-   if (remap_v)
-   {
-      CalcVBounds(v_interp, v_min, v_max);
-      numBlocks = 5;
-   }
-
+   // Construct BlockVectors for the min/max values of all fields.
+   const int numBlocks = (remap_v) ? 5 : 4;
    Array<int> offset(numBlocks);
-
    offset[0] = 0;
    offset[1] = offset[0] + size_qf;
    offset[2] = offset[1] + size_qf;
@@ -919,24 +932,20 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    {
       offset[4] = offset[3] + size_gf_v;
    }
-
    BlockVector x_min(offset);
    BlockVector x_max(offset);
-
    x_min.GetBlock(0) = ind_min;
    x_min.GetBlock(1) = rho_min;
    x_min.GetBlock(2) = e_min;
+   if (remap_v) { x_min.GetBlock(3) = v_min; }
    x_max.GetBlock(0) = ind_max;
    x_max.GetBlock(1) = rho_max;
    x_max.GetBlock(2) = e_max;
+   if (remap_v) { x_max.GetBlock(3) = v_max; }
 
-   if (remap_v)
-   {
-      x_min.GetBlock(3) = v_min;
-      x_max.GetBlock(3) = v_max;
-   }
-
+   //
    // Optimize.
+   //
    if (opt_type == 0)
    {
       ind_rho_e_v = ind_rho_e_v_interp;
@@ -1757,7 +1766,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
             MFEM_VERIFY(rho_interp(el_e_idx + q) < rho_max(el_e_idx + q) + eps,
                         "Error: interpolated density is above upper bound: "
                         << rho_interp(el_e_idx + q) << " "
-                        << rho_max(el_e_idx + q));
+                        << rho_max(el_e_idx + q) );
          }
          else
          {
@@ -1768,7 +1777,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
             // No material, but has density - must be checked.
             // In this case the interpolation will be out of bounds.
             MFEM_VERIFY(fabs(rho_interp(el_e_idx + q)) < eps,
-                        "Nonzero density at an empty position: "
+                        "Error: nonzero density at an empty position: "
                         << rho_interp(el_e_idx + q));
          }
       }
@@ -1778,14 +1787,24 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 }
 
 void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
-      Vector &rho_min, Vector &rho_max)
+                                         Vector &rho_min, Vector &rho_max)
 {
    const int s = rho_interp.Size();
    for (int i = 0; i < s; i++)
    {
+      // Happens when a new-mesh-element overlaps only part of the old indicator
+      // support. The material must diffuse in the whole new-mesh-element.
       if (rho_interp(i) + 1e-12 < rho_min(i))
       {
          rho_interp(i) = 0.5 * (rho_min(i) + rho_max(i));
+      }
+
+      // Happens when the ind interpolation is diffused. The Bernstein DOF
+      // locations don't see any material (so ind = 0), while some quadrature
+      // point sees material (rho > 0 as it's interpolated at the quad points).
+      if (rho_interp(i) - 1e-12 > rho_max(i) && rho_max(i) == 0.0)
+      {
+         rho_interp(i) = 0.0;
       }
    }
 }

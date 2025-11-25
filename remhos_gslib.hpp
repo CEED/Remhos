@@ -175,6 +175,7 @@ public:
    // for a single material (no coupling between materials).
    void RemapHydro(const Vector &ind_rho_e_v_0,
                    bool remap_v, bool p_control,
+                   unsigned diffused_ind_order,
                    const QuadratureFunction &p_0,
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
