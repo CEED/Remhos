@@ -888,15 +888,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                 << "Mass interpolated diff:     "
                 << fabs(mass_0 - mass_f) << endl
                 << "Mass interpolated diff %:   "
-                << fabs(mass_0 - mass_f) / mass_0 * 100
-                << endl << "*\n"
-                << "Intern energy initial:      " << energy_0 << std::endl
-                << "Intern energy interp:       " << energy_f << std::endl
-                << "Intern energy interp diff:  "
-                << fabs(energy_0 - energy_f) << endl
-                << "Intern energy interp diff %:"
-                << fabs(energy_0 - energy_f) / energy_0 * 100
-                << endl;
+                << fabs(mass_0 - mass_f) / mass_0 * 100 << endl;
       if (remap_v)
       {
          for (int d = 0; d < dim; d++)
@@ -907,17 +899,25 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                  << "Momentum " << d << " interp diff:   "
                  << fabs(moment_0(d) - moment_f(d)) << endl
                  << "Momentum " << d << " interp diff %: "
-                 << fabs(moment_0(d) - moment_f(d)) / moment_0(d) * 100
-                 << endl;
+                 << fabs(moment_0(d) - moment_f(d)) / moment_0(d) * 100 << endl;
          }
-         cout <<   "*\n"
-              << "Total energy initial:             " << tot_en_0 << std::endl
-              << "Total energy interpolated:        " << tot_en_f << std::endl
-              << "Total energy interpolated diff:   "
+         cout << "*\n"
+              << "Total energy initial:       " << tot_en_0 << std::endl
+              << "Total energy interp:        " << tot_en_f << std::endl
+              << "Total energy interp diff:   "
               << fabs(tot_en_0 - tot_en_f) << endl
-              << "Total energy interpolated diff %: "
-              << fabs(tot_en_0 - tot_en_f) / tot_en_0 * 100
-              << endl;
+              << "Total energy interp diff %: "
+              << fabs(tot_en_0 - tot_en_f) / tot_en_0 * 100 << endl;
+      }
+      else
+      {
+         std::cout << "*\n"
+                   << "Intern energy initial:      " << energy_0 << std::endl
+                   << "Intern energy interp:       " << energy_f << std::endl
+                   << "Intern energy interp diff:  "
+                   << fabs(energy_0 - energy_f) << endl
+                   << "Intern energy interp diff %:"
+                   << fabs(energy_0 - energy_f) / energy_0 * 100 << endl;
       }
    }
 
@@ -1305,13 +1305,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       {
          for (int d = 0; d < dim; d++)
          {
-            std::cout << "Moment in dim "<<d+1 <<" initial:            " << moment_0[d] <<
+            std::cout << "Moment in dim "<<d+1 <<" initial:          " << moment_0[d] <<
                       std::endl
-                      << "Moment in dim "<<d+1 <<" optimized:          " << moment_f_opt(
+                      << "Moment in dim "<<d+1 <<" optimized:        " << moment_f_opt(
                          d) << std::endl
-                      << "Moment in dim "<<d+1 <<" optimized diff:     "
+                      << "Moment in dim "<<d+1 <<" optimized diff:   "
                       << (moment_f_opt(d) - moment_0[d]) << endl
-                      << "Moment in dim "<<d+1 <<" optimized diff %:   "
+                      << "Moment in dim "<<d+1 <<" optimized diff %: "
                       << (moment_f_opt(d) - moment_0[d]) / moment_0[d] * 100
                       << endl << "*\n";
          }
