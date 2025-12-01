@@ -61,7 +61,7 @@ for method in "${methods[@]}"; do
   printf "."
 
   echo -e '\n'"- 2D ind_rho_e smooth" >> $file
-  run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 "$method
+  run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -dqo 2 "$method
   echo -e $run_line >> $file
   $run_line | grep -e 'Volume interpolated diff:' -e 'Volume optimized diff:' \
                    -e 'Mass interpolated diff:' -e 'Mass optimized diff:' \
