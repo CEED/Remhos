@@ -341,19 +341,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, u_0_lor, u_interpolated);
-   if (diffuse_order > 0)
-   {
-      // Used to define a temporary L2 Bernstein function, for duffusion.
-      DG_FECollection fec(diffuse_order, dim, BasisType::Positive);
-      ParFiniteElementSpace pfes_final(&pmesh_final, &fec);
-      ParGridFunction tmp(&pfes_final);
-
-      // Adds additional diffusion to the interpolation.
-      Vector pos_dof_final;
-      GetDOFPositions(pfes_final, pos_final, pos_dof_final);
-      finder.Interpolate(pos_dof_final, u_0_lor, tmp);
-      u_interpolated.ProjectGridFunction(tmp);
-   }
+   DiffuseIndicator(diffuse_order, u_interpolated);
    finder.FreeData();
 
 
@@ -833,16 +821,18 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    // This does not affect the bounds of rho and e.
    if (diffused_ind_order > 0)
    {
-      // Temporary L2 Bernstein function, for duffusion of ind.
-      DG_FECollection fec(diffused_ind_order, dim, BasisType::Positive);
-      ParFiniteElementSpace pfes_ind_final(&pmesh_final, &fec);
-      ParGridFunction tmp(&pfes_ind_final);
-      Vector pos_dof_ind_final;
-      GetDOFPositions(pfes_ind_final, pos_final, pos_dof_ind_final);
-      finder.SetL2AvgType(FindPointsGSLIB::NONE);
-      finder.Setup(pmesh_lor);
-      finder.Interpolate(pos_dof_ind_final, ind_0_lor, tmp);
-      ind_interp.ProjectGridFunction(tmp);
+      // // Temporary L2 Bernstein function, for duffusion of ind.
+      // DG_FECollection fec(diffused_ind_order, dim, BasisType::Positive);
+      // ParFiniteElementSpace pfes_ind_final(&pmesh_final, &fec);
+      // ParGridFunction tmp(&pfes_ind_final);
+      // Vector pos_dof_ind_final;
+      // GetDOFPositions(pfes_ind_final, pos_final, pos_dof_ind_final);
+      // finder.SetL2AvgType(FindPointsGSLIB::NONE);
+      // finder.Setup(pmesh_lor);
+      // finder.Interpolate(pos_dof_ind_final, ind_0_lor, tmp);
+      // ind_interp.ProjectGridFunction(tmp);
+
+      DiffuseIndicator(diffused_ind_order, ind_interp);
       CleanEmptyZones(ind_interp, ind_min, ind_max);
    }
 
@@ -2017,8 +2007,148 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
          counter++;
       }
    }
+}
 
+void InterpolationRemap::DiffuseIndicator(int diffused_ind_order,
+                                          QuadratureFunction &ind)
+{
+   if (diffused_ind_order <= 0) { return; }
 
+   const int NE = pmesh_final.GetNE(), dim = pmesh_final.Dimension();
+   // Temporary L2 Bernstein function, for duffusion of ind.
+   DG_FECollection fec(diffused_ind_order, dim, BasisType::Positive);
+   ParFiniteElementSpace pfes_ind_final(&pmesh_final, &fec);
+   ParGridFunction tmp(&pfes_ind_final);
+
+   const IntegrationRule &ir = qspace->GetIntRule(0);
+   MassIntegrator mass_integ(&ir);
+   const int ndof = pfes_ind_final.GetFE(0)->GetDof(),
+             nqp  = ir.GetNPoints();
+   DenseMatrix M(ndof);
+   Vector rhs(ndof), shape(ndof), ML(ndof),
+          u(ndof), u_ho(ndof), u_lo(ndof), beta(ndof), z(ndof);
+   for (int e = 0; e < NE; e++)
+   {
+      // Max and min of the FE solution u.
+      double u_max = ind(e*nqp), u_min = ind(e*nqp);
+      for (int q = 1; q < nqp; q++)
+      {
+         u_max = fmax(u_max, ind(e*nqp + q));
+         u_min = fmin(u_min, ind(e*nqp + q));
+      }
+
+      if (fabs(u_min - u_max) < 1e-12) { continue; }
+
+      // Mass matrix and diagonal.
+      ElementTransformation *T = pmesh_final.GetElementTransformation(e);
+      const FiniteElement *el = pfes_ind_final.GetFE(e);
+      mass_integ.AssembleElementMatrix(*el, *T, M);
+      M.GetRowSums(ML);
+
+      // RHS.
+      rhs = 0.0;
+      double rhs_max = 0.0, rhs_min = 0.0;
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         el->CalcShape(ip, shape);
+         T->SetIntPoint(&ip);
+         for (int i = 0; i < ndof; i++)
+         {
+            rhs(i) += ip.weight * T->Weight() * ind(e*nqp + q) * shape(i);
+         }
+         rhs_max += ip.weight * T->Weight() * u_max;
+         rhs_min += ip.weight * T->Weight() * u_min;
+      }
+
+      // HO solution.
+      DenseMatrixInverse M_inv(&M);
+      M_inv.Factor();
+      M_inv.Mult(rhs, u_ho);
+
+      // LO solution.
+      u_lo = rhs.Sum() / ML.Sum();
+
+      //
+      // FCT-project tricks.
+      //
+      for (int i = 0; i < ndof; i++)
+      {
+         beta(i) = ML(i);
+         z(i) = rhs(i) - ML(i) * u_lo(i);
+      }
+      beta /= beta.Sum();
+
+      DenseMatrix F(ndof);
+      for (int i = 1; i < ndof; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            F(i, j) = M(i, j) * (u_ho(i) - u_ho(j)) +
+                      (beta(j) * z(i) - beta(i) * z(j));
+         }
+      }
+
+      Vector gp(ndof), gm(ndof);
+      gp = 0.0;
+      gm = 0.0;
+      for (int i = 1; i < ndof; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j);
+            if (fij >= 0.0)
+            {
+               gp(i) += fij;
+               gm(j) -= fij;
+            }
+            else
+            {
+               gm(i) += fij;
+               gp(j) -= fij;
+            }
+         }
+      }
+
+      u = u_lo;
+
+      for (int i = 0; i < ndof; i++)
+      {
+         double rp = std::max(ML(i) * (u_max - u(i)), 0.0);
+         double rm = std::min(ML(i) * (u_min - u(i)), 0.0);
+         double sp = gp(i), sm = gm(i);
+
+         gp(i) = (rp < sp) ? rp / sp : 1.0;
+         gm(i) = (rm > sm) ? rm / sm : 1.0;
+      }
+
+      for (int i = 1; i < ndof; i++)
+      {
+         for (int j = 0; j < i; j++)
+         {
+            double fij = F(i, j), aij;
+
+            if (fij >= 0.0) { aij = std::min(gp(i), gm(j)); }
+            else            { aij = std::min(gm(i), gp(j)); }
+
+            fij *= aij;
+            u(i) += fij / ML(i);
+            u(j) -= fij / ML(j);
+         }
+      }
+
+      // Interpolate back into ind at quad points.
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         el->CalcShape(ip, shape);
+         ind(e*nqp + q) = 0.0;
+         for (int i = 0; i < ndof; i++)
+         {
+            ind(e*nqp + q) += u(i) * shape(i);
+         }
+      }
+   }
 }
 
 } // namespace mfem

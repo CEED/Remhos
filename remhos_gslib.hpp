@@ -144,6 +144,9 @@ private:
                         const ParGridFunction &e_,
                         QuadratureFunction &pressure);
 
+   // Diffuse the indicator in the mixed zones by L2 FCT-projection.
+   void DiffuseIndicator(int diffused_ind_order, QuadratureFunction &ind);
+
 public:
    InterpolationRemap(ParMesh &m)
       : myid(m.GetMyRank()), pmesh_init(m), pmesh_final(pmesh_init, true),
