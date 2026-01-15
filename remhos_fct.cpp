@@ -547,6 +547,7 @@ void ClipScaleSolver::CalcFCTProduct(const ParGridFunction &us, const Vector &m,
                                      const Array<bool> &active_el,
                                      const Array<bool> &active_dofs, Vector &d_us)
 {
+   MFEM_CONTRACT_VAR(d_us_LO);
    us.HostRead();
    s_min.HostReadWrite();
    s_max.HostReadWrite();
@@ -618,6 +619,7 @@ void ElementFCTProjection::CalcFCTSolution(const ParGridFunction &u,
                                            const Vector &u_max,
                                            Vector &du) const
 {
+   MFEM_CONTRACT_VAR(m);
    const int NE = pfes.GetMesh()->GetNE();
    const int s  = pfes.GetFE(0)->GetDof();
    int dof_id;
@@ -738,6 +740,7 @@ void ElementFCTProjection::CalcFCTProduct(const ParGridFunction &us,
                                           const Array<bool> &active_el,
                                           const Array<bool> &active_dofs, Vector &d_us)
 {
+   MFEM_CONTRACT_VAR(d_us_LO);
    us.HostRead();
    s_min.HostReadWrite();
    s_max.HostReadWrite();

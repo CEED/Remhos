@@ -39,6 +39,8 @@ public:
    virtual void CalcHOSolution(const Vector &u, Vector &du) const = 0;
 
    TimingData *timer = nullptr;
+
+   virtual void Update() = 0;
 };
 
 class CGHOSolver : public HOSolver
@@ -51,6 +53,8 @@ public:
               ParBilinearForm &Mbf, ParBilinearForm &Kbf);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+
+   virtual void Update() { MFEM_ABORT("Not yet implemented!"); }
 };
 
 class LocalInverseHOSolver : public HOSolver
@@ -65,6 +69,8 @@ public:
 
    void CalcHOSolution(const Vector &u, Vector &du) const override;
    ~LocalInverseHOSolver() { delete M_inv; }
+
+   virtual void Update();
 };
 
 class Assembly;
@@ -82,6 +88,8 @@ public:
                    Assembly &a);
 
    virtual void CalcHOSolution(const Vector &u, Vector &du) const;
+
+   virtual void Update() { MFEM_ABORT("Not yet implemented!"); }
 };
 
 } // namespace mfem

@@ -29,16 +29,24 @@
 //
 // Sample runs: see README.md, section 'Verification of Results'.
 
+#define MFEM_DEBUG_COLOR 154
+#include "debug.hpp"
+
 #include "mfem.hpp"
 #include <fstream>
 #include <iostream>
+#include "remhos.hpp"
 #include "remhos_ho.hpp"
 #include "remhos_lo.hpp"
+#include "remhos_ibc.hpp"
 #include "remhos_fct.hpp"
 #include "remhos_mono.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 #include "remhos_solvers.hpp"
+#include "remhos_adv.hpp"
+#include "remhos_amr.hpp"
+
 #include "fem/qinterp/eval.hpp"
 #include "fem/qinterp/det.hpp"
 #include "fem/qinterp/grad.hpp"
@@ -63,23 +71,20 @@
 #endif
 #endif
 
+
 using namespace std;
 using namespace mfem;
 
-enum class HOSolverType
-{ None, Neumann, CG, LocalInverse };
+enum class HOSolverType {None, Neumann, CG, LocalInverse};
+enum class FCTSolverType {None, FluxBased, ClipScale,
+                          NonlinearPenalty, FCTProject
+                         };
+enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
+                         ResDist, ResDistSubcell, MassBased
+                        };
+enum class MonolithicSolverType {None, ResDistMono, ResDistMonoSubcell};
 
-enum class LOSolverType
-{ None, DiscrUpwind, DiscrUpwindPrec, ResDist, ResDistSubcell, MassBased };
-
-enum class FCTSolverType
-{ None, FluxBased, ClipScale, NonlinearPenalty, FCTProject };
-
-enum class MonolithicSolverType
-{ None, ResDistMono, ResDistMonoSubcell };
-
-enum class TimeStepControl
-{ FixedTimeStep, LOBoundsError };
+enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
 // Choice for the problem setup. The fluid velocity, initial condition and
 // inflow boundary condition are chosen based on this parameter.
@@ -235,6 +240,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    const char *device_config = "cpu";
    bool gpu_aware_mpi = false;
    int dev_pool_size = 4;
+   bool amr = false;
+   int amr_estimator = amr::Estimator::L2ZZ;
+   double amr_ref_threshold = 2e-3;
+   double amr_deref_threshold = 1e-5;
+   int amr_max_level = 2; // only for JJt
+   int amr_nc_limit = 0;
+   double amr_dt_factor = 2.0;
 
    int precision = 8;
    cout.precision(precision);
@@ -298,6 +310,8 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
                   "                      2 - exact_quadratic.");
    args.AddOption(&t_final, "-tf", "--t-final",
                   "Final time; start time is 0.");
+   args.AddOption(&max_steps, "-ms", "--max-steps",
+                  "Maximum number of steps (negative means no restriction).");
    args.AddOption((int*)(&dt_control), "-dtc", "--dt-control",
                   "Time Step Control: 0 - Fixed time step, set with -dt,\n\t"
                   "                   1 - Bounds violation of the LO sltn.");
@@ -324,6 +338,22 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
                   "Visualize every n-th timestep.");
    args.AddOption(&dev_pool_size, "-pool", "--dev-pool-size",
                   "Size (in GB) for the umpire device pool");
+   args.AddOption(&amr, "-amr", "--enable-amr", "-no-amr", "--disable-amr",
+                  "Enable adaptive mesh refinement.");
+   args.AddOption(&amr_estimator, "-ae", "--amr-estimator",
+                  "AMR estimator: 0:ZZ, 1:L2ZZ, 2:JJt, 3:Custom");
+   args.AddOption(&amr_ref_threshold, "-ar", "--amr-ref-threshold",
+                  "AMR refinement threshold.");
+   args.AddOption(&amr_deref_threshold, "-ad", "--amr-deref-threshold",
+                  "AMR refinement threshold.");
+   args.AddOption(&amr_max_level, "-am", "--amr-max-level",
+                  "AMR max refined level "
+                  "(after the initial serial and parallel refinements)");
+   args.AddOption(&amr_nc_limit, "-al", "--amr-nc-limit",
+                  "AMR maximum level of hanging nodes, (0 = unlimited)");
+   args.AddOption(&amr_dt_factor, "-af", "--amr-time-step-factor",
+                  "Time step factor when adding an AMR depth level.");
+
    args.Parse();
    if (!args.Good())
    {
@@ -337,7 +367,8 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    const char * allocator_name = "remhos_device_alloc";
    size_t umpire_dev_pool_size = ((size_t) dev_pool_size) * 1024 * 1024 * 1024;
    size_t umpire_dev_block_size = 1024 * 1024;
-   rm.makeAllocator<umpire::strategy::QuickPool>(allocator_name, rm.getAllocator("DEVICE"), umpire_dev_pool_size, umpire_dev_block_size);
+   rm.makeAllocator<umpire::strategy::QuickPool>(allocator_name,
+                                                 rm.getAllocator("DEVICE"), umpire_dev_pool_size, umpire_dev_block_size);
 
 #ifdef HYPRE_USING_UMPIRE
    HYPRE_SetUmpireDevicePoolName(allocator_name);
@@ -350,13 +381,15 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 #endif // MFEM_USING_UMPIRE
 #endif // REMHOS_USE_DEVICE_UMPIRE
 
-//setup caliper config manager
+   //setup caliper config manager
 #ifdef USE_CALIPER
    setupCaliper();
 
    cali::ConfigManager calimgr;
    if (calimgr.error())
-       std::cerr << "caliper config error: " << calimgr.error_msg() << std::endl;
+   {
+      std::cerr << "caliper config error: " << calimgr.error_msg() << std::endl;
+   }
    calimgr.start();
    //adiak::init(nullptr);
    //adiak::cmdline();
@@ -420,6 +453,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    else if (problem_num < 20) { exec_mode = 1; }
    else { MFEM_ABORT("Unspecified execution mode."); }
 
+   // AMR sanity checks
+   // Re-evaluate amr_max_level after arguments have been parsed
+   if (amr)
+   {
+      MFEM_VERIFY(exec_mode == 0, "Only standard transport is supported.")
+   }
+
    Mesh mesh;
    Array<int> mpi_partitioning;
    if (strncmp(mesh_file, "default", 7) != 0)
@@ -436,6 +476,18 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
    dim = mesh.Dimension();
    mesh.GetBoundingBox(bb_min, bb_max, max(order, 1));
+   mesh->Finalize(true);
+
+   if (amr)
+   {
+      mesh->EnsureNCMesh();
+      amr_max_level += rs_levels + rp_levels;
+   }
+   const amr::Options amr_options = { amr_estimator,
+                                      order, mesh_order,
+                                      amr_max_level, amr_nc_limit,
+                                      amr_ref_threshold, amr_deref_threshold
+                                    };
 
    // Parallel partitioning of the mesh.
    // Refine the mesh further in parallel to increase the resolution.
@@ -493,13 +545,17 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
                          (pmesh.GetNodes()->FESpace()->FEColl()) != NULL;
    pmesh.SetCurvature(mesh_order, periodic);
 
+   if (amr) { pmesh.EnsureNCMesh(); }
+
    FiniteElementCollection *mesh_fec;
    if (periodic)
    {
+      dbg("\033[7mPeriodic => L2_FECollection");
       mesh_fec = new L2_FECollection(mesh_order, dim, BasisType::GaussLobatto);
    }
    else
    {
+      dbg("\033[7mStandard => H1_FECollection");
       mesh_fec = new H1_FECollection(mesh_order, dim, BasisType::GaussLobatto);
    }
    // Current mesh positions.
@@ -584,7 +640,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
                               mono_type != MonolithicSolverType::None;
    if (forced_bounds)
    {
-      MFEM_VERIFY(btype == 2,
+      MFEM_VERIFY(btype == BasisType::Positive,
                   "Monotonicity treatment requires Bernstein basis.");
 
       if (order == 0)
@@ -787,8 +843,8 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    if (use_subcell_RD)
    {
       // Get a uniformly refined mesh.
-      const int btype = BasisType::ClosedUniform;
-      subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, btype));
+      const int ref_type = BasisType::ClosedUniform;
+      subcell_mesh = new ParMesh(ParMesh::MakeRefined(pmesh, order, ref_type));
 
       // Check if the mesh is periodic.
       const L2_FECollection *L2_coll = dynamic_cast<const L2_FECollection *>
@@ -829,18 +885,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       v_sub_gf.ProjectCoefficient(velocity);
 
       // Zero it out on boundaries (not moving boundaries).
-      Array<int> ess_bdr, ess_vdofs;
-      if (subcell_mesh->bdr_attributes.Size() > 0)
-      {
-         ess_bdr.SetSize(subcell_mesh->bdr_attributes.Max());
-      }
-      ess_bdr = 1;
-      xsub->ParFESpace()->GetEssentialVDofs(ess_bdr, ess_vdofs);
-      for (int i = 0; i < ess_vdofs.Size(); i++)
-      {
-         if (ess_vdofs[i] == -1) { v_sub_gf(i) = 0.0; }
-      }
-      v_sub_coef.SetGridFunction(&v_sub_gf);
+      ZeroItOutOnBoundaries(subcell_mesh, xsub, v_sub_gf, v_sub_coef);
 
       // Store initial submesh positions.
       x0_sub = *xsub;
@@ -872,6 +917,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    FunctionCoefficient u0(u0_function);
    u.ProjectCoefficient(u0);
    u.SyncAliasMemory(S);
+   if (amr)
+   {
+      Vector tmp;
+      u.GetTrueDofs(tmp);
+      u.SetFromTrueDofs(tmp);
+      dbg("pmesh.GetNE: %d, u.Size: %d", pmesh.GetNE(), u.Size());
+   }
    // For the case of product remap, we also solve for s and u_s.
    ParGridFunction s, us;
    Array<bool> u_bool_el, u_bool_dofs;
@@ -1045,11 +1097,11 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       vis_s.precision(8);
       vis_us.precision(8);
 
-      int Wx = 0, Wy = 0; // window position
-      const int Ww = 400, Wh = 400; // window size
       u.HostRead();
       s.HostRead();
-      VisualizeField(sout, vishost, visport, u, "Solution u", Wx, Wy, Ww, Wh);
+      VisualizeField(sout, vishost, visport,
+                     u, "Solution u",
+                     Wx, Wy, Ww, Wh, "gAmRj");
       if (product_sync)
       {
          VisualizeField(vis_s, vishost, visport, s, "Solution s",
@@ -1069,6 +1121,17 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       const double mass0_us_loc = lumpedM * us;
       MPI_Allreduce(&mass0_us_loc, &mass0_us, 1, MPI_DOUBLE, MPI_SUM, comm);
    }
+
+   /*{
+      double mass_u, mass_u_loc = masses * u;
+      MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+      if (myid == 0)
+      {
+         std::cout << setprecision(10)
+                   << "Initial mass u: " << mass_u << std::endl
+                   << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+      }
+   }*/
 
    // Setup of the FCT solver (if any).
    Array<int> K_HO_smap;
@@ -1126,17 +1189,108 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    ParGridFunction res = u;
    double residual = 0.0;
 
+   // AMR operator
+   amr::Operator *AMR = nullptr;
+   if (amr) { AMR = new amr::Operator(pfes, pmesh, u, amr_options); }
+   int depth = amr ? GetMeshDepth(pmesh) : 0;
+
    // Time-integration (loop over the time iterations, ti, with a time-step dt).
    bool done = false;
    BlockVector Sold(S);
    int ti_total = 0, ti = 0;
    while (done == false)
    {
-      double dt_real = min(dt, t_final - t);
+      dbg("\033[31m###########################");
+      dbg("\033[31m######## TIME LOOP ########");
+      dbg("\033[31m######## dt:%f ########\033[m",dt);
+      double dt_real;
 
       // This also resets the time step estimate when automatic dt is on.
       adv.SetDt(dt_real);
       adv.ResetTimeStepRatio();
+      auto SetDtTimeStep = [&]()
+      {
+         dt_real = min(dt, t_final - t);
+         adv.SetDt(dt_real);
+         if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+         if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
+      };
+      SetDtTimeStep();
+
+      // The inner refinement loop. At the end we want to have the current
+      // time step resolved to the prescribed tolerance in each element.
+      if (amr)
+      {
+         AMR->Reset();
+         dbg("\t\033[33m##########################");
+         dbg("\t\033[33m######## AMR LOOP ########");
+         for (int ref_it = 1; ; ref_it++)
+         {
+            const int new_depth = mfem::GetMeshDepth(pmesh);
+            if (new_depth > depth) { dt /= amr_dt_factor; }
+            if (new_depth < depth) { dt *= amr_dt_factor; }
+            if (new_depth != depth)
+            {
+               SetDtTimeStep();
+               depth = new_depth;
+               if (myid == 0)
+               {
+                  std::cout << "time step: " << ti
+                            << ", time: " << t
+                            << ", dt: " << dt;
+                  std::cout << endl;
+               }
+            }
+            //pmesh.pncmesh->PrintStats(std::cout);
+
+            dbg("AMR->Apply");
+            AMR->Apply();
+
+            if (!AMR->Refined()) { dbg("Refines STOP!");  break; }
+
+            dbg("AMR->Update");
+            AMR->Update(adv, ode_solver, S, offset,
+                        lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
+                        mass0_u, inflow_gf, inflow);
+            /*if (visualization)
+            {
+               MPI_Barrier(pmesh.GetComm());
+               u.HostRead();
+               VisualizeField(sout, vishost, visport, u, "Solution",
+                              Wx, Wy, Ww, Wh);
+            }*/
+         }
+         /*if (myid == 0)
+         {
+            ml.SpMat().GetDiag(lumpedM);
+            masses = lumpedM;
+            double mass_u, mass_u_loc = masses * u;
+            MPI_Allreduce(&mass_u_loc, &mass_u, 1, MPI_DOUBLE, MPI_SUM, comm);
+            std::cout << setprecision(10)
+                      << "Before DEREFINMENT, u size:" << u.Size() << std::endl
+                      << "Current mass u: " << mass_u << std::endl
+                      << "   Mass loss u: " << abs(mass0_u - mass_u) << std::endl;
+         }*/
+         assert (!AMR->Refined());
+         if (AMR->DeRefined())
+         {
+            dbg("DEREFINE, AMR->Update");
+            AMR->Update(adv, ode_solver, S, offset,
+                        lom, subcell_mesh, pfes_sub, xsub, v_sub_gf,
+                        mass0_u, inflow_gf, inflow);
+            /*if (visualization)
+            {
+               MPI_Barrier(pmesh.GetComm());
+               u.HostRead();
+               VisualizeField(sout, vishost, visport, u, "Solution",
+                              Wx, Wy, Ww, Wh);
+            }*/
+            //assert(false);
+         }
+      }
+
+      if (lo_solver)  { lo_solver->UpdateTimeStep(dt_real); }
+      if (fct_solver) { fct_solver->UpdateTimeStep(dt_real); }
 
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
       if (product_sync)
@@ -1186,6 +1340,25 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       if (product_sync)
       {
          us.SyncMemory(S);
+
+         // It is known that RK time integrators with more than 1 stage may
+         // cause violation of the lower bounds for us.
+         // The lower bound is corrected, causing small conservation error.
+         // Correction can also be done with localized bounds for s, but for
+         // now we have implemented only the minimum global bound.
+         u.HostRead();
+         us.HostReadWrite();
+         const int u_sz = u.Size();
+         Array<bool> active_elem, active_dofs;
+         ComputeBoolIndicators(NE, u, active_elem, active_dofs);
+         for (int i = 0; i < u_sz; i++)
+         {
+            if (active_dofs[i] == false) { continue; }
+
+            double us_min = u(i) * s_min_glob;
+            if (us(i) < us_min) { us(i) = us_min; }
+         }
+
 #ifdef REMHOS_FCT_PRODUCT_DEBUG
          double s_min_debug, s_max_debug;
          ComputeMinMaxS(NE, us, u, s_min_debug, s_max_debug);
@@ -1197,6 +1370,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
                       << "; max_s: " << s_max_debug << std::endl;
          }
 #endif
+      }
+
+      if (amr)
+      {
+         Vector tmp;
+         u.GetTrueDofs(tmp);
+         u.SetFromTrueDofs(tmp);
       }
 
       // Monotonicity check for debug purposes mainly.
@@ -1277,20 +1457,25 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
          else { res = u; }
       }
 
-      if (ti_total == max_tsteps) { done = true; }
+      if (ti_total == max_tsteps) { dbg("max_steps reached!"); done = true; }
 
       if (done || ti % vis_steps == 0)
       {
          if (myid == 0)
          {
+            /*
+            cout << "time step: " << ti << ", time: " << t << ", dt: " << dt;
+            if (steady_state_problem) { cout << ", residual: " << residual ; }
+            cout << endl;
+            */
             cout << "time step: " << ti << ", time: " << t
                  << ", dt: " << dt << ", residual: " << residual << endl;
          }
 
          if (visualization)
          {
-            int Wx = 0, Wy = 0; // window position
-            int Ww = 400, Wh = 400; // window size
+            MPI_Barrier(pmesh.GetComm());
+            u.HostRead();
             VisualizeField(sout, vishost, visport, u, "Solution",
                            Wx, Wy, Ww, Wh);
             if (product_sync)
@@ -1316,10 +1501,10 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    int steps = ti_total;
    switch (ode_solver_type)
    {
-   case 2: steps *= 2; break;
-   case 3: steps *= 3; break;
-   case 4: steps *= 4; break;
-   case 6: steps *= 6; break;
+      case 2: steps *= 2; break;
+      case 3: steps *= 3; break;
+      case 4: steps *= 4; break;
+      case 6: steps *= 6; break;
    }
    adv.PrintTimingData(steps);
 
@@ -1341,18 +1526,18 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    // Print the final meshes and solution.
    if (save_meshes_and_solution)
    {
-      ofstream meshHO("meshHO_final.mesh");
-      meshHO.precision(precision);
-      pmesh.PrintAsOne(meshHO);
+      ofstream meshHO_final("meshHO_final.mesh");
+      meshHO_final.precision(precision);
+      pmesh.PrintAsOne(meshHO_final);
       if (subcell_mesh)
       {
-         ofstream meshLO("meshLO_final.mesh");
-         meshLO.precision(precision);
-         subcell_mesh->PrintAsOne(meshLO);
+         ofstream meshLO_final("meshLO_final.mesh");
+         meshLO_final.precision(precision);
+         subcell_mesh->PrintAsOne(meshLO_final);
       }
-      ofstream sltn("sltn_final.gf");
-      sltn.precision(precision);
-      u.SaveAsOne(sltn);
+      ofstream sltn_final("sltn_final.gf");
+      sltn_final.precision(precision);
+      u.SaveAsOne(sltn_final);
    }
 
    // Check for mass conservation.
@@ -1381,6 +1566,11 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
    else
    {
+      if (amr)
+      {
+         ml.SpMat().GetDiag(lumpedM);
+         masses = lumpedM;
+      }
       mass_u_loc = masses * u;
       if (product_sync) { mass_us_loc = masses * us; }
    }
@@ -1414,8 +1604,8 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
    {
-      double err = u.ComputeLpError(1., u0);
-      if (myid == 0) { cout << "L1-error: " << err << "." << endl; }
+      double u_err = u.ComputeLpError(1., u0);
+      if (myid == 0) { cout << "L1-error: " << u_err << "." << endl; }
    }
    else if (problem_num == 7)
    {

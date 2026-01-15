@@ -14,6 +14,9 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
+#define MFEM_DEBUG_COLOR 205
+#include "debug.hpp"
+
 #include "remhos_ho.hpp"
 #include "remhos_tools.hpp"
 
@@ -83,7 +86,26 @@ LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
-   MFEM_VERIFY(timer, "Timer not set.");
+   Vector rhs(u.Size());
+
+   HypreParMatrix *K_mat = nullptr;
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      MFEM_ABORT("PA for DG is not yet implemented.");
+      K.Mult(u, rhs);
+   }
+   else
+   {
+      K.SpMat().HostReadWriteI();
+      K.SpMat().HostReadWriteJ();
+      K.SpMat().HostReadWriteData();
+      K_mat = K.ParallelAssemble(&K.SpMat());
+      dbg("K_mat->Mult:%dx%d", K_mat->NumRows(), K_mat->NumCols());
+      K_mat->Mult(u, rhs);
+   }
+   /*
+      MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
+                  "PA for DG is not supported for Local Inverse.");
 
    Vector rhs(u.Size());
 
@@ -126,6 +148,20 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       M_inv->Update(), M_inv->Mult(rhs, du);
       timer->sw_L2inv.Stop();
    }
+   }
+
+   void LocalInverseHOSolver::Update()
+   {
+   dbg();
+   /*pfes.Update();
+
+   M.Update();
+   M.Assemble();
+   M.Finalize();
+
+   K.Update();
+   K.Assemble(0);
+   K.Finalize(0);*/
 }
 
 NeumannHOSolver::NeumannHOSolver(ParFiniteElementSpace &space,

@@ -14,12 +14,37 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
+#define MFEM_DEBUG_COLOR 226
+#include "debug.hpp"
+
 #include "remhos_tools.hpp"
 
 using namespace std;
 
 namespace mfem
 {
+
+void GetPerElementMinMax(const ParGridFunction &gf,
+                         Vector &elem_min, Vector &elem_max,
+                         int int_order)
+{
+   const FiniteElementSpace *fes = gf.FESpace();
+   const int ne = fes->GetNE();
+   elem_min.SetSize(ne);
+   elem_max.SetSize(ne);
+   Vector vals;
+
+   if (int_order < 0) { int_order = fes->GetOrder(0) + 1; }
+
+   for (int e = 0; e < ne; e++)
+   {
+      const int geom = fes->GetFE(e)->GetGeomType();
+      const IntegrationRule &ir = IntRules.Get(geom, int_order);
+      gf.GetValues(e, ir, vals);
+      elem_min(e) = vals.Min();
+      elem_max(e) = vals.Max();
+   }
+}
 
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
                                          ParMesh &subcell_mesh,
@@ -356,11 +381,28 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
 DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    : bounds_type(btype),
      pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
-     fec_bounds(std::max(pfes.GetOrder(0), 1),
-                pmesh->Dimension(), BasisType::GaussLobatto),
-     pfes_bounds(pmesh, &fec_bounds),
-     x_min(&pfes_bounds), x_max(&pfes_bounds)
+     fec_bounds(std::max(nullptr),
+                pfes_bounds(nullptr),
+                x_min(), x_max()
 {
+   dbg();
+   Update();
+}
+
+void DofInfo::Update()
+{
+   dbg();
+   delete fec_bounds;
+   fec_bounds = new H1_FECollection(pfes.GetOrder(0), 1),
+
+   pmesh->Dimension(),
+   BasisType::GaussLobatto);
+   delete pfes_bounds;
+   pfes_bounds = new ParFiniteElementSpace(pmesh, fec_bounds);
+
+   x_min.SetSpace(pfes_bounds);
+   x_max.SetSpace(pfes_bounds);
+
    int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
 
@@ -434,7 +476,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
                                    Vector &dof_min, Vector &dof_max,
                                    Array<bool> *active_el)
 {
-   GroupCommunicator &gcomm = pfes_bounds.GroupComm();
+   GroupCommunicator &gcomm = pfes_bounds->GroupComm();
    Array<int> dofsCG;
    const int NE = pfes.GetNE();
 
@@ -451,13 +493,19 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       // Inactive elements don't affect the bounds.
       if (active_el && (*active_el)[i] == false) { continue; }
 
-      pfes_bounds.GetElementDofs(i, dofsCG);
+      x_min.HostReadWrite();
+      x_max.HostReadWrite();
+      pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
          x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), el_min(i));
          x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
    }
+   /*
+   Array<double> minvals(x_min.GetData(), x_min.Size()),
+         maxvals(x_max.GetData(), x_max.Size());
+   */
    Array<double> minvals(x_min.HostReadWrite(), x_min.Size());
    Array<double> maxvals(x_max.HostReadWrite(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
@@ -467,7 +515,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
 
    // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
-      dynamic_cast<const TensorBasisElement *>(pfes_bounds.GetFE(0));
+      dynamic_cast<const TensorBasisElement *>(pfes_bounds->GetFE(0));
    const Array<int> &dof_map = fe_cg->GetDofMap();
    const int ndofs = dof_map.Size();
    for (int i = 0; i < NE; i++)
@@ -485,7 +533,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       // function is called on the old state, but the result from it is used
       // to limit the new state, which has different active elements.
 
-      pfes_bounds.GetElementDofs(i, dofsCG);
+      pfes_bounds->GetElementDofs(i, dofsCG);
       for (int j = 0; j < dofsCG.Size(); j++)
       {
          dof_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
@@ -736,11 +784,18 @@ void DofInfo::FillSubcell2CellDof()
 Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &_lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
-   : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
-     VolumeTerms(NULL),
-     fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     subcell_mesh(submesh), dofs(_dofs), lom(_lom)
+: exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
+VolumeTerms(NULL),
+fes(&pfes), SubFes0(NULL), SubFes1(NULL),
+subcell_mesh(submesh), dofs(_dofs), lom(_lom)
 {
+   dbg();
+   Update();
+}
+
+void Assembly::Update()
+{
+   dbg();
    Mesh *mesh = fes->GetMesh();
    int k, i, m, dim = mesh->Dimension(), ne = fes->GetNE();
 
@@ -1428,6 +1483,18 @@ void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
       }
       default: MFEM_ABORT("Geometry not implemented.");
    }
+}
+
+int GetMeshDepth(ParMesh &pmesh)
+{
+   int max, max_depth = 0;
+   for (int e = 0; e < pmesh.GetNE(); e++)
+   {
+      const int depth = pmesh.pncmesh->GetElementDepth(e);
+      max_depth = std::max(max_depth, depth);
+   }
+   MPI_Allreduce(&max_depth, &max, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+   return max;
 }
 
 void GetMinMax(const ParGridFunction &g, double &min, double &max)
