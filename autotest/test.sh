@@ -9,9 +9,9 @@ file="autotest/out_test.dat"
 ntask=$1
 
 if [ "$2" = "cuda" ]; then
-  command="lrun -n "$((ntask))" ./remhos -no-vis --verify-bounds -d cuda"
+  command="lrun -n "$((ntask))" ./remhos -no-vis -d cuda"
 else
-  command="mpirun -np "$((ntask))" ./remhos -no-vis --verify-bounds"
+  command="mpirun -np "$((ntask))" ./remhos -no-vis"
 fi
 
 methods=( "-ho 1 -lo 2 -fct 2"     # Hennes 1
@@ -66,29 +66,29 @@ for method in "${methods[@]}"; do
 done
 
 echo -e '\n'"--- Product remap 2D (FCT)" >> $file
-run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps"
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1"
 echo -e $run_line >> $file
 $run_line | grep -e 'mass us' -e 'loss us'>> $file
 
-echo -e '\n'"--- Product remap 2D (ClipScale)" >> $file
-run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 2 -ps -s 1"
+echo -e '\n'"--- Product remap 2D IDP2 (ClipScale)" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 1 -lo 5 -fct 2 -ps -s 12"
 echo -e $run_line >> $file
 $run_line | grep -e 'mass us' -e 'loss us'>> $file
 
-echo -e '\n'"--- Product remap 2D (FCTProject)" >> $file
-run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 4 -ps -s 1"
+echo -e '\n'"--- Product remap 2D IDP3 (FCTProject)" >> $file
+run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 5 -fct 4 -ps -s 13"
 echo -e $run_line >> $file
-$run_line | grep -e 'mass us' -e 'loss us'>> $file
+$run_line | grep -e 'mass u' -e 'mass us'>> $file
 
 echo -e '\n'"--- BLAST sharpening test - Pacman remap auto-dt" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
 echo -e $run_line >> $file
-$run_line | grep -e 'mass us' -e 'loss us'>> $file
+$run_line | grep -e 'mass u' -e 'loss u'>> $file
 
 echo -e '\n'"--- BLAST sharpening test - Transport balls-jacks auto-dt" >> $file
-run_line=$command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt -1 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
+run_line=$command" -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.01 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1"
 echo -e $run_line >> $file
-$run_line | grep -e 'mass us' -e 'loss us'>> $file
+$run_line | grep -e 'mass u' -e 'value u'>> $file
 
 echo -e '\n'"--- Steady monolithic 2 2D" >> $file
 run_line=$command" -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2"

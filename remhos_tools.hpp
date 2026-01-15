@@ -23,6 +23,9 @@
 namespace mfem
 {
 
+Mesh *CartesianMesh(int dim, int mpi_cnt, int elem_per_mpi, bool print,
+                    int &par_ref, int **partitioning);
+
 int GetMeshDepth(ParMesh &pmesh);
 
 void GetPerElementMinMax(const ParGridFunction &gf,
@@ -51,6 +54,20 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport,
                     const char *keys = NULL, bool vec = false);
 
 class DofInfo;
+
+struct TimingData
+{
+   // Total times for all major computations.
+   StopWatch sw_rhs, sw_L2inv, sw_LO, sw_FCT;
+
+   // Store the number of local L2 dofs.
+   const HYPRE_Int L2dof;
+
+   // Iterations for the L2 mass inversion.
+   HYPRE_Int L2iter;
+
+   TimingData(const HYPRE_Int l2d) : L2dof(l2d) { }
+};
 
 class SmoothnessIndicator
 {

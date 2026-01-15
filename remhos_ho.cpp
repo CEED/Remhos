@@ -75,7 +75,14 @@ void CGHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 LocalInverseHOSolver::LocalInverseHOSolver(ParFiniteElementSpace &space,
                                            ParBilinearForm &Mbf,
                                            ParBilinearForm &Kbf)
-   : HOSolver(space), M(Mbf), K(Kbf) { dbg(); }
+   : HOSolver(space), M(Mbf), K(Kbf)
+{
+   if (M.GetAssemblyLevel() == AssemblyLevel::PARTIAL)
+   {
+      M_inv = new DGMassInverse(space, BasisType::GaussLegendre);
+      M_inv->SetAbsTol(1e-8), M_inv->SetRelTol(0.0);
+   }
+}
 
 void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
 {
@@ -100,37 +107,51 @@ void LocalInverseHOSolver::CalcHOSolution(const Vector &u, Vector &du) const
       MFEM_VERIFY(M.GetAssemblyLevel() != AssemblyLevel::PARTIAL,
                   "PA for DG is not supported for Local Inverse.");
 
-      Vector rhs(u.Size());
+   Vector rhs(u.Size());
 
+   if (M.GetAssemblyLevel() != AssemblyLevel::PARTIAL)
+   {
+      timer->sw_rhs.Start();
       K.SpMat().HostReadWriteI();
       K.SpMat().HostReadWriteJ();
       K.SpMat().HostReadWriteData();
       HypreParMatrix *K_mat = K.ParallelAssemble(&K.SpMat());
       K_mat->Mult(u, rhs);
-   */
+      timer->sw_rhs.Stop();
 
-   const int ne = pfes.GetMesh()->GetNE();
-   const int nd = pfes.GetFE(0)->GetDof();
-   dbg("ne:%d, nd:%d",ne,nd);
-   DenseMatrix M_loc(nd);
-   DenseMatrixInverse M_loc_inv(&M_loc);
-   Vector rhs_loc(nd), du_loc(nd);
-   Array<int> dofs;
-   for (int i = 0; i < ne; i++)
+      const int ne = pfes.GetMesh()->GetNE();
+      const int nd = pfes.GetFE(0)->GetDof();
+      DenseMatrix M_loc(nd);
+      DenseMatrixInverse M_loc_inv(&M_loc);
+      Vector rhs_loc(nd), du_loc(nd);
+      Array<int> dofs;
+      for (int i = 0; i < ne; i++)
+      {
+         pfes.GetElementDofs(i, dofs);
+         rhs.GetSubVector(dofs, rhs_loc);
+         timer->sw_L2inv.Start();
+         M.SpMat().GetSubMatrix(dofs, dofs, M_loc);
+         M_loc_inv.Factor();
+         M_loc_inv.Mult(rhs_loc, du_loc);
+         timer->sw_L2inv.Stop();
+         du.SetSubVector(dofs, du_loc);
+      }
+      delete K_mat;
+   }
+   else
    {
-      pfes.GetElementDofs(i, dofs);
-      rhs.GetSubVector(dofs, rhs_loc);
-      M.SpMat().GetSubMatrix(dofs, dofs, M_loc);
-      M_loc_inv.Factor();
-      M_loc_inv.Mult(rhs_loc, du_loc);
-      du.SetSubVector(dofs, du_loc);
+      timer->sw_rhs.Start();
+      K.Mult(u, rhs);
+      timer->sw_rhs.Stop();
+
+      timer->sw_L2inv.Start();
+      M_inv->Update(), M_inv->Mult(rhs, du);
+      timer->sw_L2inv.Stop();
+   }
    }
 
-   delete K_mat;
-}
-
-void LocalInverseHOSolver::Update()
-{
+   void LocalInverseHOSolver::Update()
+   {
    dbg();
    /*pfes.Update();
 

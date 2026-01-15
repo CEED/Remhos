@@ -64,6 +64,18 @@ TEST_MK = $(MFEM_DIR)/config/test.mk
 MFEM_DIR1 := $(MFEM_DIR)
 MFEM_DIR2 := $(realpath $(MFEM_DIR))
 
+# Use Caliper annotations
+
+ifdef CALIPER_DIR
+CALIPER_DIR = $(spack location --install-dir caliper)
+ADIAK_DIR = $(spack location --install-dir adiak)
+CALIPER_FLAGS = -I${CALIPER_DIR}/include -DUSE_CALIPER
+ADIAK_INCLUDE = -I${ADIAK_DIR}/include 
+ADIAK_LDFLAGS =  -L${ADIAK_DIR}/lib -ladiak
+CALIPER_LDFLAGS =  -L${CALIPER_DIR}/lib64 -lcaliper 
+endif
+
+
 # Use the compiler used by MFEM. Get the compiler and the options for compiling
 # and linking from MFEM's config.mk. (Skip this if the target does not require
 # building.)
@@ -73,7 +85,7 @@ ifeq (,$(filter help clean distclean style,$(MAKECMDGOALS)))
 endif
 
 CXX = $(MFEM_CXX)
-CPPFLAGS = $(MFEM_CPPFLAGS)
+CPPFLAGS = $(MFEM_CPPFLAGS) $(CALIPER_FLAGS) $(ADIAK_FLAGS)
 CXXFLAGS = $(MFEM_CXXFLAGS)
 
 # MFEM config does not define C compiler
@@ -81,7 +93,8 @@ CC     = gcc
 CFLAGS = -O3
 
 # Optional link flags
-LDFLAGS =
+LDFLAGS = $(CALIPER_LDFLAGS) $(ADIAK_LDFLAGS)
+
 
 OPTIM_OPTS = -O3
 DEBUG_OPTS = -g -Wall -std=c++11
@@ -102,15 +115,16 @@ ifeq ($(REMHOS_DEBUG),YES)
 endif
 
 LIBS = $(strip $(REMHOS_LIBS) $(LDFLAGS))
-CCC  = $(strip $(CXX) $(REMHOS_FLAGS))
+EXTRA_INC_DIR = $(or $(wildcard $(MFEM_DIR)/include/mfem),$(MFEM_DIR))
+CCC  = $(strip $(CXX) $(REMHOS_FLAGS) $(if $(EXTRA_INC_DIR),-I$(EXTRA_INC_DIR)))
 Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
 SOURCE_FILES = remhos.cpp remhos_adv.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
-  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp remhos_amr.cpp remhos_ibc.cpp
+  remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp remhos_solvers.cpp remhos_amr.cpp remhos_ibc.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
 HEADER_FILES = remhos.hpp remhos_adv.hpp remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
-  remhos_mono.hpp remhos_sync.hpp remhos_amr.hpp remhos_ibc.hpp
+  remhos_mono.hpp remhos_sync.hpp remhos_solvers.hpp remhos_amr.hpp remhos_ibc.hpp
 
 # Targets
 

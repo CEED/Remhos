@@ -354,6 +354,9 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    const int *I = K.GetI(), *J = K.GetJ(), loc_size = K.Size();
    int end;
 
+   x_min.HostReadWrite();
+   x_max.HostReadWrite();
+
    for (int i = 0, k = 0; i < loc_size; i++)
    {
       x_min(i) = numeric_limits<double>::infinity();
@@ -367,8 +370,8 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
    }
 
    GroupCommunicator &gcomm = x.ParFESpace()->GroupComm();
-   Array<double> minvals(x_min.GetData(), x_min.Size()),
-         maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.HostReadWrite(), x_min.Size()),
+         maxvals(x_max.HostReadWrite(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -378,9 +381,9 @@ void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
 DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
    : bounds_type(btype),
      pmesh(pfes_sltn.GetParMesh()), pfes(pfes_sltn),
-     fec_bounds(nullptr),
-     pfes_bounds(nullptr),
-     x_min(), x_max()
+     fec_bounds(std::max(nullptr),
+                pfes_bounds(nullptr),
+                x_min(), x_max()
 {
    dbg();
    Update();
@@ -390,9 +393,10 @@ void DofInfo::Update()
 {
    dbg();
    delete fec_bounds;
-   fec_bounds = new H1_FECollection(pfes.GetOrder(0),
-                                    pmesh->Dimension(),
-                                    BasisType::GaussLobatto);
+   fec_bounds = new H1_FECollection(pfes.GetOrder(0), 1),
+
+   pmesh->Dimension(),
+   BasisType::GaussLobatto);
    delete pfes_bounds;
    pfes_bounds = new ParFiniteElementSpace(pmesh, fec_bounds);
 
@@ -428,8 +432,8 @@ void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
    const int NE = pmesh->GetNE();
    const int ndofs = dof_min.Size() / NE;
 
-   x_min.HostReadWrite();
-   x_max.HostReadWrite();
+   el_min.HostRead(), el_max.HostRead();
+   x_min.HostReadWrite(), x_max.HostReadWrite();
 
    x_min = el_min;
    x_max = el_max;
@@ -479,6 +483,11 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
    // Form min/max at each CG dof, considering element overlaps.
    x_min =   std::numeric_limits<double>::infinity();
    x_max = - std::numeric_limits<double>::infinity();
+
+   el_min.HostRead(), el_max.HostRead();
+   dof_min.HostReadWrite(), dof_max.HostReadWrite();
+   x_min.HostReadWrite(), x_max.HostReadWrite();
+
    for (int i = 0; i < NE; i++)
    {
       // Inactive elements don't affect the bounds.
@@ -497,8 +506,8 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
    Array<double> minvals(x_min.GetData(), x_min.Size()),
          maxvals(x_max.GetData(), x_max.Size());
    */
-   Array<double> minvals(x_min.GetData(), x_min.Size());
-   Array<double> maxvals(x_max.GetData(), x_max.Size());
+   Array<double> minvals(x_min.HostReadWrite(), x_min.Size());
+   Array<double> maxvals(x_max.HostReadWrite(), x_max.Size());
    gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
    gcomm.Bcast(minvals);
    gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
@@ -710,6 +719,8 @@ void DofInfo::FillNeighborDofs()
          }
       }
    }
+
+   delete face_to_el;
 }
 
 void DofInfo::FillSubcell2CellDof()
@@ -773,10 +784,10 @@ void DofInfo::FillSubcell2CellDof()
 Assembly::Assembly(DofInfo &_dofs, LowOrderMethod &_lom,
                    const GridFunction &inflow,
                    ParFiniteElementSpace &pfes, ParMesh *submesh, int mode)
-   : exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
-     VolumeTerms(NULL),
-     fes(&pfes), SubFes0(NULL), SubFes1(NULL),
-     subcell_mesh(submesh), dofs(_dofs), lom(_lom)
+: exec_mode(mode), inflow_gf(inflow), x_gf(&pfes),
+VolumeTerms(NULL),
+fes(&pfes), SubFes0(NULL), SubFes1(NULL),
+subcell_mesh(submesh), dofs(_dofs), lom(_lom)
 {
    dbg();
    Update();

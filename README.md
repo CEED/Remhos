@@ -233,7 +233,7 @@ Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the 
 7.  `mpirun -np 8 remhos -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.014 -tf 8 -ho 1 -lo 4 -fct 2`
 8.  `mpirun -np 8 remhos -m ../mfem/data/ball-nurbs.mesh -p 1 -rs 1 -dt 0.02 -tf 3 -ho 1 -lo 4 -fct 2`
 9.  `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.001 -tf 0.75 -ho 1 -lo 4 -fct 2`
-10. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps`
+10. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 14 -rs 3 -dt 0.005 -tf 0.75 -ho 1 -lo 5 -fct 4 -ps -s 13`
 11. `mpirun -np 8 remhos -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.8 -ho 1 -lo 4 -fct 2`
 12. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 7 -rs 3 -o 1 -dt 0.01 -tf 20 -mono 1 -si 2`
 13. `mpirun -np 8 remhos -m ./data/inline-quad.mesh -p 6 -rs 2 -o 1 -dt 0.01 -tf 20 -mono 1 -si 1`
@@ -250,7 +250,7 @@ Alternatively, verify the final mass (`mass`) and maximum value (`max`) for the 
 |  7. | 0.9607429525 | 0.7678305756 |
 |  8. | 0.8087104604 | 0.9999889315 |
 |  9. | 0.08479546709| 0.8156091428 |
-| 10. | 0.08980397023| 0.9886734209 |
+| 10. | 0.09317738757| 0.9994170644 |
 | 11. | 0.1197294512 | 0.9990312449 |
 | 12. | 0.1570667907 | 0.9987771164 |
 | 13. | 0.3182739921 | 1            |
@@ -260,7 +260,19 @@ round-off distance from the above reference values.
 
 ## Performance Timing and FOM
 
-To appear soon.
+Performance is tracked only for the configuration `-ho 3 -lo 5 -fct 2`.
+This configuration supports partial assembly and GPU execution.
+Remhos reports several FOMs in the terminal, based on the distinct phases of an
+advection-based remap calculation. All FOMs are reported in
+`(megaDOFs x time steps) per second`, reflecting the throughput of the calculation.
+
+- FOM RHS: construction of the right-hand side of the system.
+- FOM INV: inverting the high-order operator, which is used to obtain a
+           high-order unbounded (HO) solution.
+- FOM LO:  computation of the low-order bounded (LO) approximation of the solution.
+- FOM FCT: computation of the FCT solution, combining the LO and HO solutions to
+           obtain a bounded high-order solution.
+- **FOM**: performance metric combining all the above phases.
 
 ## Versions
 
@@ -276,7 +288,7 @@ comment in the [issue tracker](https://github.com/CEED/Remhos/issues).
 The following copyright applies to each file in the CEED software suite,
 unless otherwise stated in the file:
 
-> Copyright (c) 2017, Lawrence Livermore National Security, LLC. Produced at the
+> Copyright (c) 2026, Lawrence Livermore National Security, LLC. Produced at the
 > Lawrence Livermore National Laboratory. LLNL-CODE-734707. All Rights reserved.
 
 See files LICENSE and NOTICE for details.

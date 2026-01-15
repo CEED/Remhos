@@ -18,6 +18,11 @@
 #include "remhos_tools.hpp"
 #include "remhos_ho.hpp"
 
+#if MFEM_VERSION >= 40600
+#define MAX_D1D DofQuadLimits::MAX_D1D
+#define MAX_Q1D DofQuadLimits::MAX_Q1D
+#endif
+
 using namespace std;
 
 namespace mfem
@@ -241,36 +246,45 @@ void ResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
 
 void MassBasedAvg::CalcLOSolution(const Vector &u, Vector &du) const
 {
+   timer->sw_LO.Start();
+
    // Compute the new HO solution.
-   Vector du_HO(u.Size());
    ParGridFunction u_HO_new(&pfes);
-   ho_solver.CalcHOSolution(u, du_HO);
-   add(1.0, u, dt, du_HO, u_HO_new);
+   if (du_HO)
+   {
+      add(1.0, u, dt, *du_HO, u_HO_new);
+      du_HO = nullptr;
+   }
+   else
+   {
+      Vector du_HO(u.Size());
+      ho_solver.CalcHOSolution(u, du_HO);
+      add(1.0, u, dt, du_HO, u_HO_new);
+   }
 
    // Mesh positions for the new HO solution.
    ParMesh *pmesh = pfes.GetParMesh();
-   GridFunction x_new(pmesh->GetNodes()->FESpace());
-   // Copy the current nodes into x.
-   pmesh->GetNodes(x_new);
-   if (mesh_v)
-   {
-      // Remap mode - get the positions of the mesh at time [t + dt].
-      x_new.Add(dt, *mesh_v);
-   }
-
    const int NE = pfes.GetNE();
    Vector el_mass(NE), el_vol(NE);
-   MassesAndVolumesAtPosition(u_HO_new, x_new, el_mass, el_vol);
+   MassesAndVolumesAtPosition(u_HO_new, *pmesh->GetNodes(), el_mass, el_vol);
 
    const int ndofs = u.Size() / NE;
-   for (int k = 0; k < NE; k++)
+
+   const auto mass = el_mass.Read(), vol = el_vol.Read();
+   const auto U = mfem::Reshape(u.Read(), ndofs, NE);
+   auto DU = mfem::Reshape(du.Write(), ndofs, NE);
+   const auto δt = dt;
+
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
    {
-      double u_LO_new = el_mass(k) / el_vol(k);
+      const double u_LO_new = mass[k] / vol[k];
       for (int i = 0; i < ndofs; i++)
       {
-         du(k*ndofs + i) = (u_LO_new - u(k*ndofs + i)) / dt;
+         DU(i,k) = (u_LO_new - U(i, k)) / δt;
       }
-   }
+   });
+
+   timer->sw_LO.Stop();
 }
 
 void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
@@ -291,27 +305,32 @@ void MassBasedAvg::MassesAndVolumesAtPosition(const ParGridFunction &u,
    // As an L2 function, u has the correct EVector lexicographic ordering.
    qi_u->Values(u, u_qvals);
 
-   for (int k = 0; k < NE; k++)
+   const auto detJ = mfem::Reshape(geom.detJ.Read(), nqp, NE);
+   const auto u_q = mfem::Reshape(u_qvals.Read(), nqp, NE);
+   const auto weights = ir.GetWeights().Read();
+   assert(NE == el_mass.Size() && NE == el_vol.Size());
+   auto mass = el_mass.Write();
+   auto vol = el_vol.Write();
+
+   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int e)
    {
-      el_mass(k) = 0.0;
-      el_vol(k)  = 0.0;
+      mass[e] = 0.0, vol[e]  = 0.0;
       for (int q = 0; q < nqp; q++)
       {
-         const IntegrationPoint &ip = ir.IntPoint(q);
-         el_mass(k) += ip.weight * geom.detJ(k*nqp + q) * u_qvals(k*nqp + q);
-         el_vol(k)  += ip.weight * geom.detJ(k*nqp + q);
+         const auto w_detJ = weights[q] * detJ(q, e);
+         mass[e] += w_detJ * u_q(q, e), vol[e] += w_detJ;
       }
-   }
+   });
 }
 
 const DofToQuad *get_maps(ParFiniteElementSpace &pfes, Assembly &asmbly)
 {
    const FiniteElement *el_trace =
-      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceBaseGeometry(0));
+      pfes.GetTraceElement(0, pfes.GetParMesh()->GetFaceGeometry(0));
    return &el_trace->GetDofToQuad(*asmbly.lom.irF, DofToQuad::TENSOR);
 }
 
-//====
+//
 //Residual Distribution
 //
 PAResidualDistribution::PAResidualDistribution(ParFiniteElementSpace &space,
@@ -610,7 +629,7 @@ void PAResidualDistribution::ApplyFaceTerms2D(const Vector &x, Vector &y,
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -751,7 +770,7 @@ void PAResidualDistribution::ApplyFaceTerms3D(const Vector &x, Vector &y,
 
    const IntegrationRule *ir = assembly.lom.irF;
    const FiniteElement &el_trace =
-      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceBaseGeometry(0));
+      *pfes.GetTraceElement(0, pfes.GetMesh()->GetFaceGeometry(0));
    const DofToQuad *maps = &el_trace.GetDofToQuad(*ir, DofToQuad::TENSOR);
 
    auto B = mfem::Reshape(maps->B.Read(), quad1D, dofs1D);
@@ -1015,7 +1034,7 @@ void PAResidualDistribution::CalcLOSolution(const Vector &u, Vector &du) const
    });
 }
 
-//====
+//
 //PA Residual Distribution Subcell
 //
 PAResidualDistributionSubcell::PAResidualDistributionSubcell
