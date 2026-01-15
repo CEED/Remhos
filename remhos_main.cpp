@@ -1,16 +1,10 @@
 #include <iostream>
 #include <unistd.h>
 
-// #define DBG_COLOR ::debug::kCyan
-// #include "debug.hpp"
-
-///////////////////////////////////////////////////////////////////////////////
 int remhos(int argc, char *argv[], double &final_mass_u);
 
-///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) try
 {
-   // dbgClearScreen(), dbg();
    double result;
    return remhos(argc, argv, result);
 }

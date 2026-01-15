@@ -12,12 +12,15 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address -O0)
     add_link_options(-fsanitize=address)
 endif()
+if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    add_link_options(-L/opt/homebrew/opt/llvm/lib/c++)
+endif()
 
 # remove -DNDEBUG from default RelWithDebInfo flags
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2" CACHE STRING "" FORCE)
 
 # Verbosity options ***********************************************************
-set(CMAKE_VERBOSE_MAKEFILE OFF CACHE BOOL "" FORCE)
+set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "Verbose makefiles." FORCE)
 # set(CUDA_VERBOSE_BUILD OFF CACHE BOOL "" FORCE)
 
 # Include paths ***************************************************************
@@ -48,8 +51,8 @@ add_custom_target(copy_mesh_files DEPENDS data_is_copied)
 # Library source files ********************************************************
 add_library(Remhos STATIC remhos.cpp remhos_fct.cpp 
                           remhos_ho.cpp remhos_lo.cpp 
-                          remhos_mono.cpp remhos_sync.cpp 
-                          remhos_tools.cpp)
+                          remhos_mono.cpp remhos_solvers.cpp
+                          remhos_sync.cpp remhos_tools.cpp)
 
 # Testing options *************************************************************
 enable_testing()

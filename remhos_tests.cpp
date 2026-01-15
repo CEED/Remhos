@@ -4,12 +4,9 @@
 #include <sstream>
 #include <unistd.h>
 
-// #define DBG_COLOR ::debug::kCyan
-// #include "debug.hpp"
-
 int remhos(int, char *[], double &);
 
-//// ///////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 template <class T>
 std::enable_if_t<!std::numeric_limits<T>::is_integer, bool>
 AlmostEq(T x, T y, T tolerance = 10.0*std::numeric_limits<T>::epsilon())
@@ -133,23 +130,20 @@ int RemhosTest(const Test & test)
    double final_mass_u{};
    remhos(args.size()-1, args.data(), final_mass_u);
 
-   // dbg("final_mass_u: {} vs. {}", final_mass_u, test.result);
-
    if (AlmostEq(final_mass_u, test.result)) { return std::cout << "✅" << std::endl, EXIT_SUCCESS; }
 
-   return  std::cout << "❌" << std::endl, EXIT_FAILURE;
+   std::cout << "❌ " << final_mass_u << " vs. " << test.result << std::endl;
+   return std::cout << "❌" << std::endl, EXIT_FAILURE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) try
 {
-   // dbgClearScreen(), dbg();
-
    int opt;
    int test = -1;
    auto show_usage = [](const int ret = EXIT_FAILURE)
    {
-      printf("Usage: program [-a <arg>] [-b <arg>] [-h]\n");
+      printf("Usage: program [-t <test>] [-h]\n");
       printf("  -t <test>  Optional test number \n");
       printf("  -h         Show this help message\n");
       exit(ret);
