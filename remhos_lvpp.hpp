@@ -2,6 +2,7 @@
 #define REMHOS_LVPP_HPP
 #include "mfem.hpp"
 #include "remap.hpp"
+#include "miniapps/pg/legendre.hpp"
 
 namespace mfem
 {
@@ -20,6 +21,8 @@ class Dykstra
    MassOperator &mass;
    const Vector &xmin;
    const Vector &xmax;
+   Array<LegendreFunction*> legendre_funcs;
+   Array<int> offsets;
    real_t tol;
    int max_iter;
    int max_linesearch = 30;
