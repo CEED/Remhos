@@ -2,7 +2,7 @@
 #define REMHOS_LVPP_HPP
 #include "mfem.hpp"
 #include "remap.hpp"
-#include "miniapps/pg/legendre.hpp"
+#include "legendre.hpp"
 
 namespace mfem
 {
@@ -29,9 +29,11 @@ class Dykstra
    real_t c1 = 1e-03; // Armijo condition constant
 public:
    Dykstra(MPI_Comm comm, StackedFunctional &constraints, MassOperator &mass,
+           Array<LegendreFunction*> &legendre_funcs_, Array<int> &offsets_,
            const Vector &xmin, const Vector &xmax, real_t tol=1e-10, int max_iter=1000)
       : comm(comm), constraints(constraints), mass(mass)
       , xmin(xmin), xmax(xmax)
+      , legendre_funcs(legendre_funcs_), offsets(offsets_)
       , tol(tol), max_iter(max_iter)
    {
       shared_constraints = dynamic_cast<StackedSharedFunctional*>(&constraints);
@@ -50,15 +52,15 @@ private:
    void Project(const Functional &con, Vector &psi, const Vector &grad,
                 const real_t targ, Vector &psi_aux, Vector &projected_x);
 
-   static void MapLatent(const Vector &psi_,
-                         const Vector &xmin_,
-                         const Vector &xmax_,
-                         Vector &x_);
+   void MapLatent(const Vector &psi_,
+                  const Vector &xmin_,
+                  const Vector &xmax_,
+                  Vector &x_);
 
-   static void MapPrimal(const Vector &x_,
-                         const Vector &xmin_,
-                         const Vector &xmax_,
-                         Vector &psi_);
+   void MapPrimal(const Vector &x_,
+                  const Vector &xmin_,
+                  const Vector &xmax_,
+                  Vector &psi_);
 
 };
 }

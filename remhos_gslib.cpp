@@ -269,9 +269,12 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
       StackedSharedFunctional C(offsets.Last());
       C.AddFunctional(vol_func);
+      PointwiseFermiDirac sigmoid(u_final_min, u_final_max);
+      Array<LegendreFunction*> legendre_funcs({&sigmoid});
 
       MassOperator mass(pfes_final);
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
+                        legendre_funcs, offsets,
                         u_final_min, u_final_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
@@ -432,7 +435,10 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
       StackedSharedFunctional C(offsets.Last());
       C.AddFunctional(vol_func);
       MassOperator mass(qspace_final);
+      PointwiseFermiDirac sigmoid(u_min, u_max);
+      Array<LegendreFunction*> legendre_funcs({&sigmoid});
       Dykstra projector(pmesh_final.GetComm(), C, mass,
+                        legendre_funcs, offsets,
                         u_min, u_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
@@ -602,7 +608,10 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       C.AddFunctional(vol_func);
 
       MassOperator mass(pfes_final);
+      PointwiseFermiDirac sigmoid(u_final_min, u_final_max);
+      Array<LegendreFunction*> legendre_funcs({&sigmoid});
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
+                        legendre_funcs, offsets,
                         u_final_min, u_final_max, atol, max_iter);
       u_final = u_interpolated;
       projector.Project(u_final);
@@ -1238,7 +1247,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       mass.Append(mass_q);
       mass.Append(mass_l2);
       if (remap_v) { for (int i=0; i<dim; i++) { mass.Append(mass_h1); } }
+      PointwiseFermiDirac sigmoid(x_min_final, x_max_final);
+      Array<LegendreFunction*> legendre_funcs({&sigmoid});
+      Array<int> dummy_offset({0, x_min_final.Size()});
       Dykstra projector(pmesh_final.GetComm(), C, mass,
+                        legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
       projector.Project(x_initial);
       BlockVector x_final_LVector(ind_rho_e_v, offset);
@@ -1777,7 +1790,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 }
 
 void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
-                                         Vector &rho_min, Vector &rho_max)
+      Vector &rho_min, Vector &rho_max)
 {
    const int s = rho_interp.Size();
    for (int i = 0; i < s; i++)
@@ -2010,7 +2023,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
 }
 
 void InterpolationRemap::DiffuseIndicator(int diffused_ind_order,
-                                          QuadratureFunction &ind)
+      QuadratureFunction &ind)
 {
    if (diffused_ind_order <= 0) { return; }
 

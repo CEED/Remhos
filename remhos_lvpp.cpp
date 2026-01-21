@@ -222,11 +222,15 @@ void Dykstra::MapLatent(const Vector &psi_,
                         const Vector &xmax_,
                         Vector &x_)
 {
-   const real_t* psi = psi_.Read();
-   const real_t* xmin = xmin_.Read();
-   const real_t* xmax = xmax_.Read();
-   real_t* x = x_.Write();
-   MFEM_FORALL(i, x_.Size(), x[i] = sigmoid(psi[i], xmin[i], xmax[i]););
+   Vector curr_psi;
+   Vector curr_x;
+   for (int j=0; j<offsets.Size()-1; j++)
+   {
+      curr_psi.MakeRef(const_cast<Vector&>(psi_), offsets[j],
+                       offsets[j+1]-offsets[j]);
+      curr_x.MakeRef(x_, offsets[j], offsets[j+1]-offsets[j]);
+      legendre_funcs[j]->gradinv(curr_psi, curr_x);
+   }
 }
 
 void Dykstra::MapPrimal(const Vector &x_,
@@ -234,12 +238,15 @@ void Dykstra::MapPrimal(const Vector &x_,
                         const Vector &xmax_,
                         Vector &psi_)
 {
-   const real_t* x = x_.Read();
-   const real_t* xmin = xmin_.Read();
-   const real_t* xmax = xmax_.Read();
-   real_t* psi = psi_.Write();
-   MFEM_FORALL(i, x_.Size(), psi[i] = std::clamp(logit(x[i], xmin[i], xmax[i]),
-                                      -20., 20.););
+   Vector curr_psi;
+   Vector curr_x;
+   for (int j=0; j<offsets.Size()-1; j++)
+   {
+      curr_x.MakeRef(const_cast<Vector&>(x_), offsets[j],
+                     offsets[j+1]-offsets[j]);
+      curr_psi.MakeRef(psi_, offsets[j], offsets[j+1]-offsets[j]);
+      legendre_funcs[j]->grad(curr_x, curr_psi);
+   }
 }
 
 
