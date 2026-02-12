@@ -209,56 +209,56 @@ Mass optimized diff:      2.3314684e-15
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 13 -rs 2 -tf 0.75 -mono 3 -proj -opt 2
 Mass initial (analytic):  1.027019
 Mass interpolated diff:   1.2979308e-05
-Mass optimized diff:      1.5127455e-11
+Mass optimized diff:      1.1157741e-12
 L1 error: 0.00063939343
 
 - 3D scalar GridFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/cube01_hex.mesh -p 10 -rs 2 -o 2 -tf 0.5 -mono 3 -opt 2
 Mass initial (old mesh):  0.11630876
 Mass interpolated diff:   4.1587958e-05
-Mass optimized diff:      1.3877788e-16
+Mass optimized diff:      8.3266727e-17
 
 - 2D scalar constant QuadratureFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 18 -rs 4 -tf 0.75 -mono 4 -opt 2
 Mass initial (old mesh):  0.25
 Mass interpolated diff:   0.00053656117
-Mass optimized diff:      8.3266727e-17
+Mass optimized diff:      7.8970164e-13
 
 - 2D scalar pacman QuadratureFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 4 -opt 2
 Mass initial (old mesh):  0.091297144
 Mass interpolated diff:   0.00035968756
-Mass optimized diff:      2.4211605e-12
+Mass optimized diff:      2.2887664e-12
 
 - 3D scalar QuadratureFunction
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/cube01_hex.mesh -p 10 -rs 2 -o 2 -tf 0.5 -mono 4 -opt 2
 Mass initial (old mesh):  0.11598728
 Mass interpolated diff:   7.1838074e-05
-Mass optimized diff:      2.2495894e-13
+Mass optimized diff:      2.2488955e-13
 
 - 2D ind_rho_e smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 2
 Volume interpolated diff:   0.00035968756
 Mass interpolated diff:     0.00079220903
 Intern energy interp diff:  0.0016091057
-Volume optimized diff:   -6.055739e-07
-Mass optimized diff:     -1.1608138e-06
-Energy optimized diff:   1.23479e-12
+Volume optimized diff:   -6.0557314e-07
+Mass optimized diff:     -1.1608145e-06
+Energy optimized diff:   -1.7285673e-11
 
 - 2D ind_rho_e constant
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 2
 Volume interpolated diff:   0.00035968756
 Mass interpolated diff:     0.0025178129
 Intern energy interp diff:  0.025178129
-Volume optimized diff:   1.2490009e-16
-Mass optimized diff:     2.9976022e-15
-Energy optimized diff:   -6.2172489e-15
+Volume optimized diff:   -4.1633363e-17
+Mass optimized diff:     2.4424907e-15
+Energy optimized diff:   -8.8817842e-16
 
 - 2D ind_rho_e_v smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 6 -opt 2
 Volume interpolated diff:   0.00035968756
 Mass interpolated diff:     0.00079220903
 Total energy interp diff:   0.0019070085
-Volume optimized diff:   -1.2057055e-06
-Mass optimized diff:     5.232909e-07
-Total energy optimized diff:   -1.6349092e-06
+Volume optimized diff:   -1.2057053e-06
+Mass optimized diff:     5.2328978e-07
+Total energy optimized diff:   -1.6349047e-06
