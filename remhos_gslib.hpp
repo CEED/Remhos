@@ -108,6 +108,10 @@ private:
                        const Vector &pos_final,
                        Vector &g_min, Vector &g_max, BoundsType bounds_type);
 
+   void AdjustDiffusion(QuadratureFunction &ind_interp,
+                        QuadratureFunction &rho_interp,
+                        ParGridFunction &e_interp, Array<bool> &active_el);
+
    void CleanEmptyZones(QuadratureFunction &ind_interp,
                         Vector &ind_min, Vector &ind_max);
 
@@ -164,7 +168,7 @@ public:
    // diffuse_order = 0 is no diffusion (direct quadrature point interpolation).
    // diffuse_order = 1 is most diffusive, higher orders are less.
    void Remap(const QuadratureFunction &u_init, const Vector &pos_final,
-              Vector &u_final, int opt_type, unsigned diffuse_order = 0);
+              Vector &u_final, int opt_type);
 
    // Remap of an analytic function.
    // Same as projecting the function to the final mesh.
@@ -178,11 +182,11 @@ public:
    // for a single material (no coupling between materials).
    void RemapHydro(const Vector &ind_rho_e_v_0,
                    bool remap_v, bool p_control,
-                   unsigned diffused_ind_order,
                    const QuadratureFunction &p_0,
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
-                   Vector &ind_rho_e_v, int opt_type);
+                   Vector &ind_rho_e_v, int opt_type,
+                   bool adjust_diffusion = false);
 
    bool visualization = true;
    bool h1_seminorm   = false;

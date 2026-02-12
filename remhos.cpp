@@ -163,7 +163,6 @@ int main(int argc, char *argv[])
    int optimization_type = 0;
    bool h1_seminorm = false;
    int max_opt_iter = 100;
-   int diffuse_quad_order = 0;
    int bounds_type = 0;
    bool pa = false;
    bool next_gen_full = false;
@@ -237,8 +236,6 @@ int main(int argc, char *argv[])
                   "Use to optimize only relevant subset. min bound != max bound");
    args.AddOption(&max_opt_iter, "-mi", "--max-optimization-iterations",
                   "Maximum optimization iterations");
-   args.AddOption(&diffuse_quad_order, "-dqo", "--diffuse-quad-order",
-                  "How much to diffuse quadrature functions.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
@@ -1027,7 +1024,7 @@ int main(int argc, char *argv[])
       interpolator.max_iter      = max_opt_iter;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.Remap(u_qf, x_final, uu_qf,
-                         optimization_type, diffuse_quad_order);
+                         optimization_type);
 
       if (visualization)
       {
@@ -1142,8 +1139,7 @@ int main(int argc, char *argv[])
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, diffuse_quad_order,
-                              p_0, ind_0_bool_el,
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0, ind_0_bool_el,
                               x_final, ind_rho_e, optimization_type);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),

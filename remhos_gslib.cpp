@@ -306,8 +306,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
 void InterpolationRemap::Remap(const QuadratureFunction &u_init,
                                const Vector &pos_final,
-                               Vector &u_final, int opt_type,
-                               unsigned diffuse_order)
+                               Vector &u_final, int opt_type)
 {
    pmesh_final.SetNodes(pos_final);
    QuadratureSpace qspace_final(pmesh_final, u_init.GetIntRule(0));
@@ -344,7 +343,6 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.Setup(pmesh_lor);
    finder.Interpolate(pos_quad_final, u_0_lor, u_interpolated);
-   DiffuseIndicator(diffuse_order, u_interpolated);
    finder.FreeData();
 
 
@@ -643,11 +641,11 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 
 void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     bool remap_v, bool p_control,
-                                    unsigned diffused_ind_order,
                                     const QuadratureFunction &p_0,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
-                                    Vector &ind_rho_e_v, int opt_type)
+                                    Vector &ind_rho_e_v, int opt_type,
+                                    bool adjust_diffusion)
 {
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
@@ -770,6 +768,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
    finder.FreeData();
 
+   // Clean material from diffused elements.
+   if (adjust_diffusion)
+   {
+      Array<bool> active_el;
+      AdjustDiffusion(ind_interp, rho_interp, e_interp, active_el);
+   }
+
    //
    // Compute min / max bounds.
    //
@@ -825,25 +830,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    // }
    Vector v_min, v_max;
    if (remap_v) { CalcVBounds(v_interp, v_min, v_max); }
-   // Finally, diffuse the indicator.
-   // This does not affect the element bounds (using ELEM_FINAL).
-   // This does not affect the bounds of rho and e.
-   if (diffused_ind_order > 0)
-   {
-      // // Temporary L2 Bernstein function, for duffusion of ind.
-      // DG_FECollection fec(diffused_ind_order, dim, BasisType::Positive);
-      // ParFiniteElementSpace pfes_ind_final(&pmesh_final, &fec);
-      // ParGridFunction tmp(&pfes_ind_final);
-      // Vector pos_dof_ind_final;
-      // GetDOFPositions(pfes_ind_final, pos_final, pos_dof_ind_final);
-      // finder.SetL2AvgType(FindPointsGSLIB::NONE);
-      // finder.Setup(pmesh_lor);
-      // finder.Interpolate(pos_dof_ind_final, ind_0_lor, tmp);
-      // ind_interp.ProjectGridFunction(tmp);
-
-      DiffuseIndicator(diffused_ind_order, ind_interp);
-      CleanEmptyZones(ind_interp, ind_min, ind_max);
-   }
 
    //
    // Report conservation errors of ire_interp.
@@ -1694,6 +1680,42 @@ void InterpolationRemap::CalcQuadBounds(const QuadratureFunction &qf_init,
    }
 }
 
+void InterpolationRemap::AdjustDiffusion(QuadratureFunction &ind_interp,
+                                         QuadratureFunction &rho_interp,
+                                         ParGridFunction &e_interp,
+                                         Array<bool> &active_el)
+{
+   // Idea: if an element doesn't have ind > cutoff at least at one point,
+   // then the values in this element come from diffusion. This is cleaned.
+   const double ind_cutoff = 0.9;
+   const IntegrationRule &ir = qspace->GetIntRule(0);
+   const int NE = pmesh_final.GetNE();
+   const int ndof = e_interp.Size() / NE,
+             nqp  = ir.GetNPoints();
+
+   active_el.SetSize(NE);
+   for (int e = 0; e < NE; e++)
+   {
+      active_el[e] = false;
+      for (int q = 0; q < nqp; q++)
+      {
+         if (ind_interp(e*nqp + q) > ind_cutoff) { active_el[e] = true; break; }
+      }
+
+      if (active_el[e]) { continue; }
+
+      for (int q = 0; q < nqp; q++)
+      {
+         ind_interp(e*nqp + q) = 0.0;
+         rho_interp(e*nqp + q) = 0.0;
+      }
+      for (int i = 0; i < ndof; i++)
+      {
+         e_interp(e*ndof + i) = 0.0;
+      }
+   }
+}
+
 void InterpolationRemap::CleanEmptyZones(QuadratureFunction &ind_interp,
       Vector &ind_min, Vector &ind_max)
 {
@@ -1766,7 +1788,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 
             // Note that it's fine to be lower than the mininum, i.e., in
             // elements where the ind function propages due to small diffusion.
-            MFEM_VERIFY(rho_interp(el_e_idx + q) < rho_max(el_e_idx + q) + eps,
+            MFEM_VERIFY(rho_interp(el_e_idx + q) < el_max + eps,
                         "Error: interpolated density is above upper bound: "
                         << rho_interp(el_e_idx + q) << " "
                         << rho_max(el_e_idx + q) );
@@ -1800,14 +1822,6 @@ void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
       if (rho_interp(i) + 1e-12 < rho_min(i))
       {
          rho_interp(i) = 0.5 * (rho_min(i) + rho_max(i));
-      }
-
-      // Happens when the ind interpolation is diffused. The Bernstein DOF
-      // locations don't see any material (so ind = 0), while some quadrature
-      // point sees material (rho > 0 as it's interpolated at the quad points).
-      if (rho_interp(i) - 1e-12 > rho_max(i) && rho_max(i) == 0.0)
-      {
-         rho_interp(i) = 0.0;
       }
    }
 }
