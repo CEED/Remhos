@@ -657,6 +657,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    ParFiniteElementSpace pfes_v_final(&pmesh_final, pfes_v->FEColl(), dim);
    ParFiniteElementSpace pfes_v_scalar_final(&pmesh_final, pfes_v->FEColl());
 
+   // Generate list of points where e will be interpolated.
+   // The interpolation is to Gauss-Legendre to keep optimal order.
+   L2_FECollection fec_GL(pfes_e_final.FEColl()->GetOrder(),
+                          dim, BasisType::GaussLegendre);
+   ParFiniteElementSpace pfes_GL(&pmesh_final, &fec_GL);
+   Vector pos_dof_GL_final;
+   GetDOFPositions(pfes_GL, pos_final, pos_dof_GL_final);
+
    // Extract initial data from the BlockVector.
    const int size_qf   = qspace->GetSize(),
              size_gf_e = pfes_e->GetVSize(),
@@ -722,6 +730,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    QuadratureFunction p_interp(&qspace_final);
    QuadratureFunction e_interp_qf(&qspace_final);
    ParGridFunction e_interp(&pfes_e_final, irev_data + 2*size_qf),
+                   e_interp_GL(&pfes_GL),
                    v_interp(&pfes_v_final, irev_data + 2*size_qf + size_gf_e);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
@@ -738,8 +747,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
-   // Interpolate e at the DOFs of the L2 space.
-   finder.Interpolate(pos_dof_e_final, e_0, e_interp);
+   // Interpolate e as a Gauss-Legendre GF to preserve the order.
+   // Then project to the Bernstein one.
+   finder.Interpolate(pos_dof_GL_final, e_0, e_interp_GL);
+   e_interp.ProjectGridFunction(e_interp_GL);
    // Energy is additionally interpolated at the quad positions,
    // to have spatial correspondence to the volume fractions.
    finder.Interpolate(pos_quad_final, e_0, e_interp_qf);
@@ -1906,6 +1917,17 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
             {
                el_min = std::min(el_min, e_interp_qf(e*nqp + q));
                el_max = std::max(el_max, e_interp_qf(e*nqp + q));
+            }
+         }
+
+         // Taking bounds only at quad points can lead to clipping and reducing
+         // the interpolation order.
+         for (int i = 0; i < s; i++)
+         {
+            if (e_interp(s * e + i) > eps)
+            {
+               el_min = std::min(el_min, e_interp(s * e + i));
+               el_max = std::max(el_max, e_interp(s * e + i));
             }
          }
       }
