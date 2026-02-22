@@ -872,6 +872,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
    if (pmesh_init.GetMyRank() == 0)
    {
+      auto old_flags = std::cout.flags();
+      auto old_prec  = std::cout.precision();
+      cout << std::scientific << std::showpos << setprecision(3);
       std::cout << "Volume initial:             " << volume_0 << std::endl
                 << "Volume interpolated:        " << volume_f << std::endl
                 << "Volume interpolated diff:   "
@@ -915,6 +918,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                    << "Intern energy interp diff %:"
                    << fabs(energy_0 - energy_f) / energy_0 * 100 << endl;
       }
+      std::cout.flags(old_flags);
+      std::cout.precision(old_prec);
    }
 
    // Construct BlockVectors for the min/max values of all fields.
@@ -1285,6 +1290,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    const double tot_energy_f_opt = Integrate(pos_final, &ind, &rho, &e, &v);
    if (Mpi::Root())
    {
+      auto old_flags = std::cout.flags();
+      auto old_prec  = std::cout.precision();
+      cout << std::scientific << std::showpos << setprecision(3);
       std::cout << "-------\n"
                 << "Volume initial:          " << volume_0 << std::endl
                 << "Volume optimized:        " << volume_f_opt << std::endl
@@ -1334,6 +1342,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                    << (energy_f_opt- energy_0) / energy_0 * 100
                    << endl;
       }
+      cout.flags(old_flags);
+      cout.precision(old_prec);
    }
 
    // Check for bounds violations.
