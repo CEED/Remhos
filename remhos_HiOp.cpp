@@ -289,12 +289,12 @@ void RemhosHydroHiOpProblem::VDiffIntegrator::AssembleRHSElementVect(
   }
 }
 
-RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::PressureDiffGradEIntegrator(
+PressureDiffGradEIntegrator::PressureDiffGradEIntegrator(
     mfem::QuadratureFunction &rho, const mfem::QuadratureFunction &p0, mfem::ParGridFunction &e)
   : rho_(&rho), p_0_(&p0), e_(&e)
   {}
 
-void RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator::AssembleRHSElementVect(
+void PressureDiffGradEIntegrator::AssembleRHSElementVect(
   const FiniteElement &el, ElementTransformation &T, Vector &elvect)
 {
   // grab sizes

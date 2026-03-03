@@ -1044,16 +1044,16 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
       if (remap_v)
       {
-         MFEM_VERIFY(p_control == false, "Remap v + p not implemented.");
          ot_prob = new RemhosHydroHiOpProblem(qspace_final,
                                               pfes_e_final,
                                               pfes_v_final,
                                               pos_final,
                                               initial_design,
+                                              p_interp,
                                               NumDesVar,
                                               x_minsub, x_maxsub,
                                               volume_0, mass_0, moment_0, tot_en_0,
-                                              5, false, optProbInd, true, subprob);
+                                              5, false, optProbInd, true, subprob, p_control);
 
          dynamic_cast<RemhosHydroHiOpProblem*>(ot_prob)->setWeightedSpaceType(
             weightedSpace);

@@ -27,6 +27,19 @@ void GetOptimizationSubsetInd(
 
 int GetSizeOptimizationSubset(const Vector &xmin, const Vector &xmax);
 
+class PressureDiffGradEIntegrator : public mfem::LinearFormIntegrator
+{
+public:
+   PressureDiffGradEIntegrator(mfem::QuadratureFunction &rho, const mfem::QuadratureFunction &p0, mfem::ParGridFunction &e);
+   ~PressureDiffGradEIntegrator(){};
+   void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
+private:
+
+   mfem::QuadratureFunction *rho_;
+   const mfem::QuadratureFunction *p_0_;
+   mfem::ParGridFunction    *e_;
+};
+
 
 class RemhosHiOpProblem : public OptimizationProblem
 {
@@ -602,25 +615,12 @@ private:
       const mfem::QuadratureFunction *rho_;
    };
 
-   class PressureDiffGradEIntegrator : public mfem::LinearFormIntegrator
-   {
-   public:
-      PressureDiffGradEIntegrator(mfem::QuadratureFunction &rho, const mfem::QuadratureFunction &p0, mfem::ParGridFunction &e);
-      ~PressureDiffGradEIntegrator(){};
-      void AssembleRHSElementVect(const mfem::FiniteElement &el, mfem::ElementTransformation &T, mfem::Vector &elvect);
-   private:
-
-      mfem::QuadratureFunction *rho_;
-      const mfem::QuadratureFunction *p_0_;
-      mfem::ParGridFunction    *e_;
-   };
-
 public:
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
                             ParFiniteElementSpace & fespace,
                             const Vector          & pos_final_,
                             const Vector          & u_initial,
-                             mfem::QuadratureFunction & p_initial,
+                            mfem::QuadratureFunction & p_initial,
                             const int             & numDesVar,
                             const Vector          & xmin, 
                             const Vector          & xmax, 
@@ -883,7 +883,7 @@ public:
       {
          ParLinearForm pressureGradELF(&fespace_);
          mfem::LinearFormIntegrator *lfi_1 =
-             new mfem::RemhosIndRhoEHiOpProblem::PressureDiffGradEIntegrator( rho, p_initial_, energy);
+             new mfem::PressureDiffGradEIntegrator( rho, p_initial_, energy);
 
          pressureGradELF.AddDomainIntegrator(lfi_1);
          pressureGradELF.Assemble();
@@ -1220,6 +1220,8 @@ private:
    const int    numDesVar_;
    Vector d_lo, d_hi, massvec;
 
+   mfem::QuadratureFunction p_initial_;
+
    double targetVol;
    double targetMass;
    Vector targetMomentum;
@@ -1239,9 +1241,11 @@ private:
    real_t w_2 = 1e1;
    real_t w_3 = 1e1;
    real_t w_4 = 1e1;
+   real_t w_p = 1e3;
 
    mfem::Array<int> optProbInd;
    bool subproblem = false;
+   bool pressureOpt = false;
 
    mutable ParBilinearForm * mass_form =nullptr;
 
@@ -1313,6 +1317,7 @@ public:
                            ParFiniteElementSpace & vectorfespace,
                             const Vector          & pos_final_,
                             const Vector          & u_initial,
+                            mfem::QuadratureFunction & p_initial,
                             const int             & numDesVar,
                             const Vector          & xmin, 
                             const Vector          & xmax, 
@@ -1324,13 +1329,14 @@ public:
                             const bool            & use_H1_semi,
                             const mfem::Array<int> & optProbInd_,
                             const bool            & isL2 = true,
-                            const bool            & sub =false)
+                            const bool            & sub =false,
+                            const bool            & pOpt = false)
       : OptimizationProblem(numDesVar, NULL, NULL),
-        x_initial(u_initial), pos_final(pos_final_), qspace_(qspace), scalarfespace_(scalarfespace), vectorfespace_(vectorfespace), numDesVar_(numDesVar),
+        x_initial(u_initial), p_initial_(p_initial), pos_final(pos_final_), qspace_(qspace), scalarfespace_(scalarfespace), vectorfespace_(vectorfespace), numDesVar_(numDesVar),
         d_lo(numConstraints_), d_hi(numConstraints_), massvec(numConstraints_),
         targetVol(initalvol), targetMass(initalmass), targetMomentum(initalmomentum), targetEnergy(initalenergy), isL2_(isL2),
         size_qf(qspace.GetSize()), size_gf(scalarfespace.GetVSize()), size_gf_vec(vectorfespace.GetVSize()),
-        size_gf_vec_true(vectorfespace.GetTrueVSize()), offset_(5), optProbInd(optProbInd_), subproblem(sub)
+        size_gf_vec_true(vectorfespace.GetTrueVSize()), offset_(5), optProbInd(optProbInd_), subproblem(sub), pressureOpt(pOpt)
    {
       numConstraints = numConstraints_;
       SetEqualityConstraint(massvec);
@@ -1421,6 +1427,7 @@ public:
       real_t normrohSq = 0.0;
       real_t normESq = 0.0;
       real_t normVSq = 0.0;
+      real_t pDiffSq = 0.0;
       
       if(isL2_)
       {
@@ -1460,7 +1467,12 @@ public:
 
       normVSq = Integrate_v_minus_v0(pos_final, &ind, &velocity, &v_0);
 
-      return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq;
+      if(pressureOpt)
+      {
+         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, &energy);
+      } 
+
+      return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq + w_p*pDiffSq;
    }
 
    void CalcObjectiveGrad(const Vector &x, Vector &grad) const  override
@@ -1499,6 +1511,8 @@ public:
       subtract( energy  , e_0  , e_diff);
       subtract( velocity, v_0  , v_diff);
 
+      QuadratureFunction pGradRho(&qspace_); pGradRho = 0.0;
+
       BlockVector ind_rho_e_v_grad(offset_);
       ind_rho_e_v_grad = 0.0;
 
@@ -1524,6 +1538,18 @@ public:
 
                ind_diff[s_offset+q] *= w;
                roh_diff[s_offset+q] *= w;
+
+               if(pressureOpt)
+               {
+                  Vector p0_vals(nqp), rho_vals(nqp), e_vals(nqp);
+                  rho.GetValues(e, rho_vals); 
+                  p_initial_.GetValues(e, p0_vals);
+                  energy.GetValues(Tr, ir, e_vals);
+
+                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
+
+                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
+               }
             }
          }
       }
@@ -1533,6 +1559,7 @@ public:
       ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
       ParGridFunction    e_grad(&scalarfespace_); e_grad = 0.0;
+      ParGridFunction    p_e_grad(&scalarfespace_); p_e_grad = 0.0;
       Vector v_grad_true(size_gf_vec_true); v_grad_true = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
@@ -1553,6 +1580,23 @@ public:
       roh_diff *= w_2;
       e_grad   *= w_3;
       v_grad_true   *= w_4;
+
+      if(pressureOpt)
+      {
+         ParLinearForm pressureGradELF(&scalarfespace_);
+         mfem::LinearFormIntegrator *lfi_1 =
+             new mfem::PressureDiffGradEIntegrator( rho, p_initial_, energy);
+
+         pressureGradELF.AddDomainIntegrator(lfi_1);
+         pressureGradELF.Assemble();
+         pressureGradELF.ParallelAssemble(p_e_grad);
+
+         p_e_grad *= w_p;
+         pGradRho *= w_p;
+
+         e_grad += p_e_grad;
+         roh_diff += pGradRho;
+      }
 
       ind_rho_e_v_grad.GetBlock(0) = ind_diff;
       ind_rho_e_v_grad.GetBlock(1) = roh_diff;
@@ -1984,6 +2028,46 @@ double Integrate_e_minus_e0(const Vector &pos,
          // Volume / mass / internal energy / total energy cases.
          integral += Tr.Weight() * ip.weight * 0.5 * ee;
 
+      }
+   }
+   MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,
+                 MPI_COMM_WORLD);
+   return integral;
+}
+
+double IntegratePressureDiff(const Vector &pos,
+                           const QuadratureFunction *p0_,
+                           const QuadratureFunction *rho_,
+                           const ParGridFunction *e_) const
+{
+   MFEM_VERIFY(rho_ && p0_ && e_, "All function must be specified.");
+
+   const QuadratureSpace *qspace = nullptr;
+   if (rho_) { qspace = dynamic_cast<const QuadratureSpace *>(rho_->GetSpace()); }
+
+   auto mesh = qspace->GetMesh();
+   const int NE = mesh->GetNE();
+   double integral = 0.0;
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nqp = ir.GetNPoints();
+
+      // Transformation w.r.t. the given mesh positions.
+      IsoparametricTransformation Tr;
+      mesh->GetElementTransformation(e, pos, &Tr);
+
+      Vector p0_vals(nqp), rho_vals(nqp), e_vals(nqp);
+      p0_->GetValues(e, p0_vals); 
+      rho_->GetValues(e, rho_vals);
+      e_->GetValues(Tr, ir, e_vals);
+
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
+         integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
    MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,
