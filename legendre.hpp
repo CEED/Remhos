@@ -149,8 +149,9 @@ public:
    { MFEM_ABORT("LegendreFunction::gradinv not implemented."); }
    // @brief Evaluate the inverse gradient of the function at a point x
    // with given index i. This typcailly used in finite-dimensional context,
-   // where the function varies per dimension.
+   // where the function varies per node.
    // @param[in] x The point at which to evaluate the inverse gradient
+   // @param[in] i the index for the function variation, e.g., node index
    // @return The value of the inverse gradient at x
    virtual real_t gradinv(const real_t x, int i) const
    { return this->gradinv(x); }
@@ -168,7 +169,7 @@ public:
    virtual void gradinv(const Vector &x, Vector &invg) const
    {
       invg.SetSize(x.Size());
-      for (int i=0; i<x.Size(); i++) { invg[i] = this->gradinv(x[i]); }
+      for (int i=0; i<x.Size(); i++) { invg[i] = this->gradinv(x[i], i); }
    }
 
    // @brief Evaluate the inverse gradient of the function at a point x
@@ -178,6 +179,12 @@ public:
    virtual void gradinv(const Vector &x, ElementTransformation &Tr,
                         Vector &invg) const
    { this->gradinv(x, invg); }
+   // @brief Evaluate the inverse gradient of the function at a point x
+   // with given index i. This typcailly used in finite-dimensional context,
+   // where the function varies per node.
+   // @param[in] x The point at which to evaluate the inverse gradient
+   // @param[in] i the index for the function variation, e.g., node index
+   // @param[out] The value of the inverse gradient at x
    virtual void gradinv(const Vector &x, int i, Vector &invg) const
    { this->gradinv(x, invg); }
 
@@ -194,6 +201,12 @@ public:
    // @note Unless overridden, this function ignores Tr and calls hessinv(x).
    virtual real_t hessinv(const real_t x, ElementTransformation &Tr) const
    { return this->hessinv(x); }
+   // @brief Evaluate the inverse Hessian of the function at a point x
+   // with given index i. This typcailly used in finite-dimensional context,
+   // where the function varies per node.
+   // @param[in] x The point at which to evaluate the inverse Hessian
+   // @param[in] i the index for the function variation, e.g., node index
+   // @return The value of the inverse Hessian at x
    virtual real_t hessinv(const real_t x, int i) const
    { return this->hessinv(x); }
 
@@ -215,6 +228,12 @@ public:
    virtual void hessinv(const Vector &x, ElementTransformation &Tr,
                         DenseMatrix &H) const
    { this->hessinv(x, H); }
+   // @brief Evaluate the inverse Hessian of the function at a point x
+   // with given index i. This typcailly used in finite-dimensional context,
+   // where the function varies per node.
+   // @param[in] x The point at which to evaluate the inverse Hessian
+   // @param[in] i the index for the function variation, e.g., node index
+   // @param[out] The value of the inverse Hessian at x
    virtual void hessinv(const Vector &x, int i,
                         DenseMatrix &H) const
    { this->hessinv(x, H); }
