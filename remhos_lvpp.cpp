@@ -43,9 +43,9 @@ void Dykstra::Project(Vector &projected_x)
       return;
    }
 
-   std::vector<std::unique_ptr<Vector>> q(num_con);
+   std::vector<std::unique_ptr<Vector>> q(num_con + enforce_sum_to_one);
    Vector grad(N), deriv(N);
-   for (int i = 0; i < num_con; ++i)
+   for (int i = 0; i < num_con + enforce_sum_to_one; ++i)
    {
       q[i] = std::make_unique<Vector>(N);
       *q[i] = 0.0;
@@ -92,7 +92,7 @@ void Dykstra::Project(Vector &projected_x)
          MapLatent(psi, xmin, xmax, projected_x); // update x
          psi += qi;
          // apply a few iteration of tangential projection
-         for (int j=0; j<6; j++)
+         for (int j=0; j<3; j++)
          {
             // Projection target:
             // c(x) + <grad c(x), x_proj - x> = 0
@@ -113,6 +113,10 @@ void Dykstra::Project(Vector &projected_x)
          qi += psi_prev;
          qi -= psi;
       } // full cycle done
+      if (enforce_sum_to_one)
+      {
+         ProjectSumToOne(psi, *q[num_con]);
+      }
 
       MapLatent(psi, xmin, xmax, projected_x);
       if (shared_constraints) { shared_constraints->Update(projected_x); }
@@ -137,6 +141,107 @@ void Dykstra::Project(Vector &projected_x)
       }
    }
 }
+void Dykstra::ProjectSumToOne(Vector &psi, Vector &qi)
+{
+   const int num_materials = sum_to_one_idx_start.Size();
+   Vector curr_psi(num_materials),
+          curr_min(num_materials), curr_max(num_materials);
+   for (int i=0; i<sum_to_one_block_size; i++) // per quadrature
+   {
+      real_t psimax = 0.0;
+      for (int j=0; j<num_materials; j++)
+      {
+         const int idx = sum_to_one_idx_start[j] + i;
+         // Trial psi: apply Dykstra correction.
+         curr_psi[j] = psi[idx] + qi[idx];
+         psimax = std::max(psimax, std::abs(curr_psi[j]));
+         curr_min[j] = xmin[idx];
+         curr_max[j] = xmax[idx];
+      }
+      // min D_R(x, x0) s.t. sum_j x_j = 1
+      // The optimality condition is
+      // grad R(x) - grad R(x0) + lambda 1 = 0
+      // -> psi = psi0 - lambda 1
+      // Here, grad R^* is the scaled sigmoid function.
+      // We can solve for lambda using Illinois method
+      // f(lambda) = sum_j sigmoid(curr_psi[j] - lambda, ...) - 1
+      // f is monotone decreasing in lambda.
+      // For the initial bracket, we use (-1,1)*||psi||_inf.
+      real_t a = -psimax, b = psimax;
+      auto eval = [&](real_t lam) -> real_t
+      {
+         real_t s = 0.0;
+         for (int j=0; j<num_materials; j++)
+         {
+            s += sigmoid(curr_psi[j] - lam, curr_min[j], curr_max[j]);
+         }
+         return s - 1.0;
+      };
+      if (fabs(eval(0.0)) < tol)
+      {
+         continue;
+      }
+
+      real_t fa = eval(a), fb = eval(b);
+      // f is decreasing, so fa >= fb. Expand bracket until root is enclosed.
+      real_t diff = b - a;
+      while (fa * fb > 0)
+      {
+         diff *= 2;
+         if (fa > 0) // both positive: root is to the right, expand right
+         {
+            a = b; fa = fb;
+            b += diff; fb = eval(b);
+         }
+         else        // both negative: root is to the left, expand left
+         {
+            b = a; fb = fa;
+            a -= diff; fa = eval(a);
+         }
+      }
+      real_t a0 = a, b0 = b; // for debugging
+      real_t fa0 = fa, fb0 = fb;
+
+      // Illinois method (same structure as Dykstra::Project).
+      int side = 0; real_t lambda;
+      for (int i=0; i<100; i++)
+      {
+         lambda = (fa*b - fb*a)/(fa - fb);
+         real_t f = eval(lambda);
+         if (f * fb > 0)
+         {
+            b = lambda; fb = f;
+            if (side == -1) { fa *= 0.5; }
+            side = -1;
+         }
+         else
+         {
+            a = lambda; fa = f;
+            if (side == 1) { fb *= 0.5; }
+            side = 1;
+         }
+         if (std::abs(f) < tol)
+         {
+            break;
+         }
+      }
+      // out << "      ProjectSumToOne: lambda = " << lambda << ", f(lambda) = " << eval(
+      //        lambda)
+      //     << ", initial bracket = (" << a0 << ", " << b0 << ") with "
+      //     << "f(a0) = " << fa0 << ", f(b0) = " << fb0 << std::endl;
+
+      // Apply shift and update psi and qi (Dykstra pattern).
+      // qi_new = old_qi + psi_prev - psi_new = lambda (simplifies algebraically)
+      for (int j=0; j<num_materials; j++)
+      {
+         const int idx = sum_to_one_idx_start[j] + i;
+         const real_t psi_prev = psi[idx];
+         psi[idx] = curr_psi[j] - lambda;
+         qi[idx] += psi_prev - psi[idx];
+      }
+   }
+}
+
 void Dykstra::Project(const Functional &con, Vector &psi, const Vector &grad,
                       const real_t targ, Vector &psi_aux, Vector &projected_x)
 {

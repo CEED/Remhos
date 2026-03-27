@@ -137,6 +137,7 @@ private:
 
    void CheckBounds(int myid, const Vector &v,
                     const Vector &v_min, const Vector &v_max);
+   void CheckSumToOne(int myid, const std::vector<BlockVector> &ind_rho_e_v);
 
    void GetTargetValues(const Vector &interp,
                         const Vector &min, const Vector &max, Vector &target);

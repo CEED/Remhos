@@ -728,48 +728,35 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
    L2_FECollection fec_lor(0, dim);
    ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
 
-   int numBlocks = 4;
-   if (remap_v) { numBlocks = 5; }
+   const int num_vars =  3 + remap_v; // ind, rho, energy(, v)
+   const int numBlocks = num_vars + 1;
 
-   Array<int> offset(numBlocks);
-   offset[0] = 0;
-   offset[1] = offset[0] + size_qf;
-   offset[2] = offset[1] + size_qf;
-   offset[3] = offset[2] + size_gf_e;
-   if (remap_v) { offset[4] = offset[3] + size_gf_v; }
+   const int num_materials = ind_rho_e_v_0.size();
+   const int material_vsize = ind_rho_e_v_0[0].Size(); // data size per material
 
-   int ind_cnt = ind_rho_e_v_0.size();
+   Array<int> field_vsize({size_qf, size_qf, size_gf_e});
+   if (remap_v) { field_vsize.Append(size_gf_v); }
+   Array<int> field_tvsize({size_qf, size_qf, size_gf_e});
+   if (remap_v) { field_tvsize.Append(size_gf_v_true); }
+   const int material_tvsize = field_tvsize.Sum();
 
-   // Preprocessing: merge all per-material (ind_k, rho_k, e_k[, v_k]) block vectors
-   // into a single global block vector for joint optimization.
-   // Global block layout: [ind_0, rho_0, e_0, (v_0), ind_1, rho_1, e_1, (v_1), ...]
-   const int blocks_per_mat = numBlocks - 1;   // actual blocks per material
-   const int mat_size       = offset[numBlocks - 1]; // data size per material
-
-   Array<int> global_offset(ind_cnt * blocks_per_mat + 1);
-   global_offset[0] = 0;
-   for (int k = 0; k < ind_cnt; k++)
+   Array<int> offset({0}); offset.Append(field_vsize); offset.PartialSum();
+   Array<int> toffset({0}); toffset.Append(field_tvsize); toffset.PartialSum();
+   Array<int> global_offset({0}), global_toffset({0});
+   for (int k = 0; k < num_materials; k++)
    {
-      const int base = k * blocks_per_mat;
-      for (int b = 0; b < blocks_per_mat; b++)
-      {
-         global_offset[base + b + 1] = global_offset[base + b]
-                                       + (offset[b + 1] - offset[b]);
-      }
+      global_offset.Append(field_vsize);
+      global_toffset.Append(field_tvsize);
    }
+   global_offset.PartialSum();
+   global_toffset.PartialSum();
 
-   // global_x0: merged initial state (read-only source for interpolation / optimization)
-   BlockVector global_x0(global_offset);
-   for (int k = 0; k < ind_cnt; k++)
-   {
-      std::copy(ind_rho_e_v_0[k].GetData(),
-                ind_rho_e_v_0[k].GetData() + mat_size,
-                global_x0.GetData() + k * mat_size);
-   }
+   // starting index of the k-th material in the global BlockVector
+   Array<int> ind_idx(num_materials);
+   for (int k=0; k<num_materials; k++) { ind_idx[k] = k*material_tvsize; }
 
-   // global_x: merged output state (initialized to global_x0, will hold optimized result)
+   // global_x: merged output state
    BlockVector global_x(global_offset);
-   global_x = global_x0;
 
    // global_x_interp: merged interpolated state; k-th slice is filled inside the loop
    BlockVector global_x_interp(global_offset);
@@ -778,10 +765,11 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
    BlockVector global_x_min(global_offset);
    BlockVector global_x_max(global_offset);
 
-   Vector volume_0_all(ind_cnt), mass_0_all(ind_cnt), energy_0_all(ind_cnt),
-          moment_0_all(ind_cnt*dim), tot_en_0_all(ind_cnt);
+   Vector volume_0_all(num_materials), mass_0_all(num_materials),
+          energy_0_all(num_materials),
+          moment_0_all(num_materials*dim), tot_en_0_all(num_materials);
 
-   for (int k = 0; k < ind_cnt; k++)
+   for (int k = 0; k < num_materials; k++)
    {
 
       BlockVector *irev_ptr = const_cast<BlockVector *>(&ind_rho_e_v_0[k]);
@@ -821,7 +809,7 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       }
 
       // Interpolate into the k-th slice of global_x_interp.
-      BlockVector ind_rho_e_v_interp(global_x_interp.GetData() + k * mat_size,
+      BlockVector ind_rho_e_v_interp(global_x_interp.GetData() + k * material_vsize,
                                      offset);
       real_t *irev_data = ind_rho_e_v_interp.GetData();
       QuadratureFunction ind_interp(&qspace_final, irev_data),
@@ -947,14 +935,17 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
 
       // Compute min / max bounds.
       // Also adjust interpolated values in some special cases.
-      Vector ind_min, ind_max;
+      Vector &ind_min = global_x_min.GetBlock(k*num_vars),
+              &ind_max = global_x_max.GetBlock(k*num_vars);
       CalcQuadBounds(ind_0, ind_interp, pos_final, ind_min, ind_max, ELEM_FINAL);
       CleanEmptyZones(ind_interp, ind_min, ind_max);
-      Vector rho_min, rho_max;
+      Vector &rho_min = global_x_min.GetBlock(k*num_vars+1),
+              &rho_max = global_x_max.GetBlock(k*num_vars+1);
       CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
       UpdateRhoInterp(rho_interp, rho_min, rho_max);
 
-      Vector e_min, e_max;
+      Vector &e_min = global_x_min.GetBlock(k*num_vars+2),
+              &e_max = global_x_max.GetBlock(k*num_vars+2);
       if (p_control)
       {
          CalcEBounds(e_0, active_el_0[k], e_interp, pos_final, ind_max,
@@ -973,27 +964,10 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          rho_max += 1e-2;
       }
 
-      Vector v_min, v_max;
-      if (remap_v)
-      {
-         CalcVBounds(v_interp, v_min, v_max);
-      }
+      Vector &v_min = global_x_min.GetBlock(k*num_vars+3),
+              &v_max = global_x_max.GetBlock(k*num_vars+3);
+      if (remap_v) { CalcVBounds(v_interp, v_min, v_max); }
 
-      BlockVector x_min(global_x_min.GetData() + k * mat_size, offset);
-      BlockVector x_max(global_x_max.GetData() + k * mat_size, offset);
-
-      x_min.GetBlock(0) = ind_min;
-      x_min.GetBlock(1) = rho_min;
-      x_min.GetBlock(2) = e_min;
-      x_max.GetBlock(0) = ind_max;
-      x_max.GetBlock(1) = rho_max;
-      x_max.GetBlock(2) = e_max;
-
-      if (remap_v)
-      {
-         x_min.GetBlock(3) = v_min;
-         x_max.GetBlock(3) = v_max;
-      }
 
       // Optimize.
       if (opt_type == 0)
@@ -1200,8 +1174,8 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       // Blocks per material: [ind, rho, e, v_0, ..., v_{dim-1}].
       // Velocity is per-material so that momentum_f/energy_f can use shift_f.
       const int num_vars = 3 + dim * (int)remap_v;
-      Array<int> space_idx(num_vars * ind_cnt);
-      for (int k = 0; k < ind_cnt; k++)
+      Array<int> space_idx(num_vars * num_materials);
+      for (int k = 0; k < num_materials; k++)
       {
          const int base = k * num_vars;
          space_idx[base + 0] = -1; // ind - qf
@@ -1226,9 +1200,8 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       }
 
       // Global T-vector offsets: tile the per-material offsets ind_cnt times.
-      Array<int> global_t_offsets(ind_cnt * num_vars + 1);
-      global_t_offsets[0] = 0;
-      for (int k = 0; k < ind_cnt; k++)
+      Array<int> global_t_offsets({0});
+      for (int k = 0; k < num_materials; k++)
       {
          global_t_offsets.Append(space_size);
       }
@@ -1245,11 +1218,11 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       // Fill x_initial, x_min_final, x_max_final from per-material L-vectors.
       // For QF and L2 (ind, rho, e): L-vector == T-vector, direct copy.
       // For H1 (velocity): GetTrueDofs for L->T conversion.
-      for (int k = 0; k < ind_cnt; k++)
+      for (int k = 0; k < num_materials; k++)
       {
-         BlockVector x_init_k(global_x_interp.GetData() + k * mat_size, offset);
-         BlockVector x_min_k(global_x_min.GetData() + k * mat_size, offset);
-         BlockVector x_max_k(global_x_max.GetData() + k * mat_size, offset);
+         BlockVector x_init_k(global_x_interp.GetData() + k * material_vsize, offsets);
+         BlockVector x_min_k(global_x_min.GetData() + k * material_vsize, offsets);
+         BlockVector x_max_k(global_x_max.GetData() + k * material_vsize, offsets);
 
          for (int i = 0; i < 3; i++)
          {
@@ -1266,13 +1239,13 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
                         "Expecting dim*n dofs for pfes_v_scalar_final.");
             for (int d = 0; d < dim; d++)
             {
-               vtmp.MakeRef(&pfes_v_scalar_final, x_init_k.GetBlock(3), d * n);
+               vtmp.MakeRef(&pfes_v_scalar_final, x_init_k.GetBlock(3 + d).GetData());
                vtmp.GetTrueDofs(x_initial.GetBlock(k * num_vars + 3 + d));
 
-               vtmp.MakeRef(&pfes_v_scalar_final, x_min_k.GetBlock(3), d * n);
+               vtmp.MakeRef(&pfes_v_scalar_final, x_min_k.GetBlock(3 + d).GetData());
                vtmp.GetTrueDofs(x_min_final.GetBlock(k * num_vars + 3 + d));
 
-               vtmp.MakeRef(&pfes_v_scalar_final, x_max_k.GetBlock(3), d * n);
+               vtmp.MakeRef(&pfes_v_scalar_final, x_max_k.GetBlock(3 + d).GetData());
                vtmp.GetTrueDofs(x_max_final.GetBlock(k * num_vars + 3 + d));
             }
          }
@@ -1285,7 +1258,8 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       // Constraint functionals: one set per material.
       // funcs_per_mat = volume + mass + energy/potential + dim*momentum (if remap_v)
       const int funcs_per_mat = 3 + dim * (int)remap_v;
-      std::vector<std::unique_ptr<ComposedFunctional>> funcs(funcs_per_mat * ind_cnt);
+      std::vector<std::unique_ptr<ComposedFunctional>> funcs(funcs_per_mat *
+            num_materials);
 
       // shift_f / shift_df: wrap a single-material function so that it
       // extracts the k-th material's slice from the global vector before
@@ -1295,8 +1269,8 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       {
          return [f, material_idx, num_vars](const Vector &x) -> real_t
          {
-            const Vector x_k(x.GetData() + material_idx * num_vars, num_vars);
-            return f(x_k);
+            const Vector x_curr(x.GetData() + material_idx * num_vars, num_vars);
+            return f(x_curr);
          };
       };
       auto shift_df = [num_vars](
@@ -1305,21 +1279,13 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          return [df, material_idx, num_vars](const Vector &x, Vector &y) -> void
          {
             y = 0.0;
-            const Vector x_k(x.GetData() + material_idx * num_vars, num_vars);
-            Vector y_k(y.GetData() + material_idx * num_vars, num_vars);
-            df(x_k, y_k);
+            const Vector x_curr(x.GetData() + material_idx * num_vars, num_vars);
+            Vector y_curr(y.GetData() + material_idx * num_vars, num_vars);
+            df(x_curr, y_curr);
          };
       };
-      // if (Mpi::Root())
-      // {
-      //    volume_0_all.Print();
-      //    mass_0_all.Print();
-      //    energy_0_all.Print();
-      //    moment_0_all.Print();
-      //    tot_en_0_all.Print();
-      // }
 
-      for (int k = 0; k < ind_cnt; k++)
+      for (int k = 0; k < num_materials; k++)
       {
          funcs[funcs_per_mat * k + 0] = std::make_unique<ComposedFunctional>(
                                            shift_f(remap::volume_f, k),
@@ -1357,7 +1323,7 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          }
       }
 
-      StackedSharedFunctional C(ind_cnt * per_mat_size);
+      StackedSharedFunctional C(num_materials * per_mat_size);
       for (auto &f : funcs)
       {
          f->SetComm(pmesh_final.GetComm());
@@ -1367,7 +1333,7 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       MassOperator mass_q(qspace_final), mass_l2(pfes_e_final),
                    mass_h1(pfes_v_scalar_final);
       MultiMassOperator mass;
-      for (int k = 0; k < ind_cnt; k++)
+      for (int k = 0; k < num_materials; k++)
       {
          mass.Append(mass_q);
          mass.Append(mass_q);
@@ -1381,12 +1347,13 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       Dykstra projector(pmesh_final.GetComm(), C, mass,
                         legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
+      projector.EnforceSumToOne(ind_idx, size_qf);
       projector.Project(x_initial);
 
       // Write back optimized values to ind_rho_e_v for each material.
       // For QF and L2 (ind, rho, e): T-vector == L-vector, direct copy.
       // For H1 (velocity): SetFromTrueDofs for T->L conversion.
-      for (int k = 0; k < ind_cnt; k++)
+      for (int k = 0; k < num_materials; k++)
       {
          BlockVector result_L(ind_rho_e_v[k].GetData(), offset);
          for (int i = 0; i < 3; i++)
@@ -1405,9 +1372,9 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
    }
 
 
-   for (int k = 0; k < ind_cnt; k++)
+   for (int k = 0; k < num_materials; k++)
    {
-      BlockVector ind_rho_e_v_interp(global_x_interp.GetData() + k * mat_size,
+      BlockVector ind_rho_e_v_interp(global_x_interp.GetData() + k * material_vsize,
                                      offset);
       real_t *irev_data = ind_rho_e_v_interp.GetData();
       QuadratureFunction ind_interp(&qspace_final, irev_data),
@@ -1490,19 +1457,23 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
 
       // Check for bounds violations.
       if (Mpi::Root()) { std::cout << "-------\nIndicator violations: \n"; }
-      CheckBounds(pmesh_init.GetMyRank(), ind, global_x_min.GetBlock(k*ind_cnt),
-                  global_x_max.GetBlock(k*ind_cnt));
+      CheckBounds(pmesh_init.GetMyRank(), ind,
+                  global_x_min.GetBlock(k*num_vars),
+                  global_x_max.GetBlock(k*num_vars));
       if (Mpi::Root()) { std::cout << "*\nDensity violations: \n"; }
-      CheckBounds(pmesh_init.GetMyRank(), rho, global_x_min.GetBlock(k*ind_cnt + 1),
-                  global_x_min.GetBlock(k*ind_cnt + 1));
+      CheckBounds(pmesh_init.GetMyRank(), rho,
+                  global_x_min.GetBlock(k*num_vars + 1),
+                  global_x_max.GetBlock(k*num_vars + 1));
       if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
-      CheckBounds(pmesh_init.GetMyRank(), e, global_x_min.GetBlock(k*ind_cnt + 2),
-                  global_x_min.GetBlock(k*ind_cnt + 2));
+      CheckBounds(pmesh_init.GetMyRank(), e,
+                  global_x_min.GetBlock(k*num_vars + 2),
+                  global_x_max.GetBlock(k*num_vars + 2));
       if (remap_v)
       {
          if (Mpi::Root()) { std::cout << "*\nVelocity violations: \n"; }
-         CheckBounds(pmesh_init.GetMyRank(), v, global_x_min.GetBlock(k*ind_cnt + 3),
-                     global_x_min.GetBlock(k*ind_cnt + 3));
+         CheckBounds(pmesh_init.GetMyRank(), v,
+                     global_x_min.GetBlock(k*num_vars + 3),
+                     global_x_max.GetBlock(k*num_vars + 3));
       }
 
       // Print final objective values.
@@ -1526,6 +1497,7 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          }
       }
    }
+   CheckSumToOne(pmesh_final.GetMyRank(), ind_rho_e_v);
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
@@ -2082,15 +2054,15 @@ void InterpolationRemap::UpdateEInterp(ParGridFunction &e_interp,
 void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
                                      Vector &v_min, Vector &v_max)
 {
-   real_t max = v_interp.Max(), min = v_interp.Min();
-   MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   real_t maxval = v_interp.Max(), minval = v_interp.Min();
+   MPI_Allreduce(MPI_IN_PLACE, &maxval, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &minval, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    v_min.SetSize(v_interp.Size());
    v_max.SetSize(v_interp.Size());
 
    // Make it more strict, per component, if this looks bad.
-   v_min = min;
-   v_max = max;
+   v_min = minval;
+   v_max = maxval;
 }
 
 void InterpolationRemap::GetTargetValues(const Vector &interp,
@@ -2141,6 +2113,46 @@ void InterpolationRemap::CheckBounds(int myid, const Vector &v,
                 << " (out of " << s << " values )\n"
                 << "Max error:    " << err_max
                 << " (max function value is " << m << ")\n";
+   }
+}
+
+void InterpolationRemap::CheckSumToOne(int myid,
+                                       const std::vector<BlockVector> &ind_rho_e_v)
+{
+   const int num_materials = ind_rho_e_v.size();
+   const int blk_size = ind_rho_e_v[0].GetBlock(0).Size();
+   std::vector<const Vector *> inds(num_materials);
+   for (int k = 0; k < num_materials; k++)
+   {
+      inds[k] = &ind_rho_e_v[k].GetBlock(0);
+   }
+
+   real_t err = 0.0;
+   int cnt = 0;
+   real_t maxerr = 0.0;
+   for (int i=0; i < blk_size; i++)
+   {
+      real_t s = -1;
+      for (int k=0; k<num_materials; k++)
+      {
+         s += (*inds[k])(i);
+      }
+      err += std::fabs(s);
+      maxerr = std::max(maxerr, std::fabs(s));
+      if (fabs(s) > atol) { cnt++; }
+   }
+   MPI_Allreduce(MPI_IN_PLACE, &err, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &cnt, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &maxerr, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   int blk_size_total = blk_size;
+   MPI_Allreduce(MPI_IN_PLACE, &blk_size_total, 1, MPI_INT, MPI_SUM,
+                 MPI_COMM_WORLD);
+   if (myid == 0)
+   {
+      std::cout << "Sum to one errors: " << cnt
+                << " (out of " << blk_size_total << " values )\n"
+                << "Max error:        " << maxerr << "\n"
+                << "L1 error:         " << err << "\n";
    }
 }
 

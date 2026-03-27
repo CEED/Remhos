@@ -27,6 +27,10 @@ class Dykstra
    int max_iter;
    int max_linesearch = 30;
    real_t c1 = 1e-03; // Armijo condition constant
+
+   bool enforce_sum_to_one = false;
+   Array<int> sum_to_one_idx_start;
+   int sum_to_one_block_size;
 public:
    Dykstra(MPI_Comm comm, StackedFunctional &constraints, MassOperator &mass,
            Array<LegendreFunction*> &legendre_funcs_, Array<int> &offsets_,
@@ -40,6 +44,12 @@ public:
    }
    void SetAbsTol(real_t tol) { this->tol = tol; }
    void SetMaxIter(int max_iter) { this->max_iter = max_iter; }
+   void EnforceSumToOne(const Array<int> &idx_start, const int block_size)
+   {
+      enforce_sum_to_one = true;
+      sum_to_one_idx_start = idx_start;
+      sum_to_one_block_size = block_size;
+   }
 
    // Dykstra projection with Bregman divergence
    // At each iteration, we project onto the tangent plane of each constraint
@@ -48,6 +58,7 @@ public:
    // where Project_k is the projection onto the k-th constraint (tangent plane)
    void Project(Vector &projected_x);
 private:
+   void ProjectSumToOne(Vector &psi, Vector &qi);
 
    void Project(const Functional &con, Vector &psi, const Vector &grad,
                 const real_t targ, Vector &psi_aux, Vector &projected_x);
