@@ -2,3 +2,5 @@ bounds/
 initial_mesh/
 *_after_opt*/
 *_before_opt*/
+IndRhoE_pressure_opt/
+IndRhoE_pressure_opt1/
