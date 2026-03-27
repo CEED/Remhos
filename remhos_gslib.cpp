@@ -1285,6 +1285,15 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          };
       };
 
+      // TODO: Remove this duct-taped approach of treating duplicated velocity dofs.
+      // Ideally, we take [ind, rho, e] per material and v globally.
+      // This indices will be used in the projector to syncronize duplicated velocity after each projection step.
+      Array<int> velocity_indices(num_materials);
+      for (int k=0; k<num_materials; k++) { velocity_indices[k] = k*material_tvsize + size_qf*2 + size_gf_e; }
+      Array<int> velocity_related_constraints(funcs_per_mat*num_materials);
+      velocity_related_constraints = 0;
+      Array<int> master_material_indices(funcs_per_mat*num_materials);
+      master_material_indices = -1;
       for (int k = 0; k < num_materials; k++)
       {
          funcs[funcs_per_mat * k + 0] = std::make_unique<ComposedFunctional>(
@@ -1309,12 +1318,16 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
          {
             for (int i = 0; i < dim; i++)
             {
+               velocity_related_constraints[funcs_per_mat * k + 3 + i] = 1;
+               master_material_indices[funcs_per_mat * k + 3 + i] = k;
                funcs[funcs_per_mat * k + 3 + i] = std::make_unique<ComposedFunctional>(
                shift_f([i](const Vector &x) { return remap::momentum_f(x, i); }, k),
                shift_df([i](const Vector &x, Vector &g) { remap::momentum_df(x, g, i); }, k),
                qspace_final, fes, space_idx);
                funcs[funcs_per_mat * k + 3 + i]->SetTarget(moment_0_all[dim * k + i]);
             }
+            velocity_related_constraints[funcs_per_mat * k + 2] = 1;
+            master_material_indices[funcs_per_mat * k + 2] = k;
             funcs[funcs_per_mat * k + 2] = std::make_unique<ComposedFunctional>(
                                               shift_f(remap::energy_f, k),
                                               shift_df(remap::energy_df, k),
@@ -1348,6 +1361,8 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
                         legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
       projector.EnforceSumToOne(ind_idx, size_qf);
+      projector.SetDuplicatedVelocity(velocity_indices, velocity_related_constraints,
+                                      master_material_indices, size_gf_v_true);
       projector.Project(x_initial);
 
       // Write back optimized values to ind_rho_e_v for each material.

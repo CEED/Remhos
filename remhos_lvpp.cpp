@@ -108,6 +108,29 @@ void Dykstra::Project(Vector &projected_x)
             con.Mult(projected_x, con_val);
             if (std::abs(con_val[0])<tol) { break; }
          }
+         // TODO: Remove duplication of velocity blocks in the input data.
+         // This is a temporary workaround
+         if (duplicated_velocity && velocity_related_constraints[i])
+         {
+            // input data has duplicated velocity blocks.
+            // Sync the velocity blocks after projection.
+            // Velocity blocks are contiguous,
+            // so we can just copy the projected values psi, projected_x.
+            // Starting index of velocity: velocity_idx_start, block size: velocity_block_size.
+            // Master material index: master_material_idx.
+            // qi will be updated after this, so we don't need to update qi.
+            const int num_vel_blocks = velocity_idx_start.Size();
+            const int master = master_material_idx[i];
+            for (int k = 0; k < num_vel_blocks; k++)
+            {
+               if (master == k) { continue; }
+               for (int j = 0; j < velocity_block_size; j++)
+               {
+                  psi[velocity_idx_start[k] + j] = psi[velocity_idx_start[master] + j];
+               }
+            }
+            MapLatent(psi, xmin, xmax, projected_x);
+         }
 
          // Update perturbation
          qi += psi_prev;
