@@ -167,6 +167,8 @@ int main(int argc, char *argv[])
    int optimization_type = 0;
    bool h1_seminorm = false;
    int max_opt_iter = 100;
+   real_t opt_atol = 1e-10;
+   real_t opt_rtol = 1e-8;
    int bounds_type = 0;
    bool pa = false;
    bool next_gen_full = false;
@@ -241,6 +243,10 @@ int main(int argc, char *argv[])
                   "Use to optimize only relevant subset. min bound != max bound");
    args.AddOption(&max_opt_iter, "-mi", "--max-optimization-iterations",
                   "Maximum optimization iterations");
+   args.AddOption(&opt_rtol, "-opt_rtol", "--opt-rtol",
+                  "Relative tolerance for optimization solver.");
+   args.AddOption(&opt_atol, "-opt_atol", "--opt-atol",
+                  "Absolute tolerance for optimization solver.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
@@ -961,6 +967,8 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.atol          = opt_atol;
+      interpolator.rtol          = opt_rtol;
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       ParGridFunction u_gf(&pfes);
