@@ -695,7 +695,7 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
                                     const QuadratureFunction &p_0,
                                     std::vector<Array<bool>> &active_el_0,
                                     const Vector &pos_final,
-                                    std::vector<BlockVector> &ind_rho_e_v, int opt_type)
+                                    std::vector<BlockVector> &ind_rho_e_v, int opt_type, bool fix_velocity)
 {
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
@@ -1274,15 +1274,18 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
             return f(x_curr);
          };
       };
-      auto shift_df = [num_vars](
+      auto shift_df = [num_vars, fix_velocity](
                          std::function<void(const Vector &, Vector &)> df, int material_idx)
       {
-         return [df, material_idx, num_vars](const Vector &x, Vector &y) -> void
+         return [df, material_idx, num_vars, fix_velocity](const Vector &x,
+                Vector &y) -> void
          {
             y = 0.0;
             const Vector x_curr(x.GetData() + material_idx * num_vars, num_vars);
             Vector y_curr(y.GetData() + material_idx * num_vars, num_vars);
             df(x_curr, y_curr);
+            // mask velocity gradients if velocity is fixed, so that velocity dofs are not updated in the optimization iterations.
+            if (fix_velocity) { for (int i = 3; i < num_vars; i++) { y_curr(i) = 0.0; } }
          };
       };
 
@@ -1362,8 +1365,11 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
                         legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
       projector.EnforceSumToOne(ind_idx, size_qf);
-      projector.SetDuplicatedVelocity(velocity_indices, velocity_related_constraints,
-                                      master_material_indices, size_gf_v_true);
+      if (!fix_velocity)
+      {
+         projector.SetDuplicatedVelocity(velocity_indices, velocity_related_constraints,
+                                         master_material_indices, size_gf_v_true);
+      }
       projector.Project(x_initial);
 
       // Write back optimized values to ind_rho_e_v for each material.

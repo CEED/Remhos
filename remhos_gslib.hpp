@@ -179,7 +179,8 @@ public:
                    const QuadratureFunction &p_0,
                    std::vector<Array<bool>> &active_el_0,
                    const Vector &pos_final,
-                   std::vector<BlockVector> &ind_rho_e_v, int opt_type);
+                   std::vector<BlockVector> &ind_rho_e_v, int opt_type,
+                   bool fix_velocity = false);
 
    bool visualization = true;
    bool h1_seminorm   = false;

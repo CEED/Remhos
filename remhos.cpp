@@ -45,13 +45,17 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
+                          NonlinearPenalty, FCTProject
+                         };
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased
+                        };
 
 enum class MonolithicSolverType
-{ None, ResDistMono, ResDistMonoSubcell,
-  InterpolationGF, InterpolationQF, InterpolationIndRhoE, InterpolationHydro };
+{
+   None, ResDistMono, ResDistMonoSubcell,
+   InterpolationGF, InterpolationQF, InterpolationIndRhoE, InterpolationHydro
+};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -178,7 +182,8 @@ int main(int argc, char *argv[])
    const char *device_config = "cpu";
    bool optRelevantSubset = false;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpaceType =
-       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+      hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+   bool fix_velocity = false;
 
    int precision = 8;
    cout.precision(precision);
@@ -275,6 +280,9 @@ int main(int argc, char *argv[])
    args.AddOption((int*)(&weightedSpaceType), "-wst", "--mono-weightedspace",
                   "weighted space type: 0 - Euclidean,\n\t"
                   "                     1 - HilbertLumped,\n\t");
+   args.AddOption(&fix_velocity, "-fv", "--fix-velocity", "-no-fv",
+                  "--no-fix-velocity",
+                  "Fix the velocity to the interpolated velocity.");
    args.Parse();
    if (!args.Good())
    {
@@ -729,7 +737,7 @@ int main(int argc, char *argv[])
    if (smth_ind_type)
    {
       smth_indicator = new SmoothnessIndicator(smth_ind_type, *subcell_mesh,
-                                               pfes, u, dofs);
+            pfes, u, dofs);
    }
 
    // Setup of the high-order solver (if any).
@@ -792,7 +800,7 @@ int main(int argc, char *argv[])
       if (pa)
       {
          lo_solver = new PAResidualDistributionSubcell(pfes, k, asmbl, lumpedM,
-                                                       subcell_scheme, time_dep);
+               subcell_scheme, time_dep);
          if (exec_mode == 0)
          {
             const PAResidualDistributionSubcell *RD_ptr =
@@ -1001,7 +1009,7 @@ int main(int argc, char *argv[])
    if (mono_type == MonolithicSolverType::InterpolationQF)
    {
       const IntegrationRule &ir =
-          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+         IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
       QuadratureFunction u_qf(qspace);
       InitializeQuadratureFunction(0, u0, x0, u_qf);
@@ -1048,7 +1056,7 @@ int main(int argc, char *argv[])
       const bool remap_v = (mono_type==MonolithicSolverType::InterpolationHydro);
 
       const IntegrationRule &ir =
-          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+         IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
 
       H1_FECollection fec_v(order+1, dim, BasisType::GaussLobatto);
@@ -1143,7 +1151,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
-      interpolator.subprob   = optRelevantSubset;      
+      interpolator.subprob   = optRelevantSubset;
       interpolator.weightedSpace   = weightedSpaceType;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
@@ -1152,7 +1160,7 @@ int main(int argc, char *argv[])
 
       interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0,
                               ind_0_bool_el,
-                              x_final, ind_rho_e, optimization_type);
+                              x_final, ind_rho_e, optimization_type, fix_velocity);
 
       for (int k = 0; k < ind_cnt; k++)
       {
@@ -1745,9 +1753,9 @@ void AdvectionOperator::Mult(const Vector &X, Vector &Y) const
 }
 
 void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
-                                               const Vector &dx,
-                                               const Vector &x_min,
-                                               const Vector &x_max) const
+      const Vector &dx,
+      const Vector &x_min,
+      const Vector &x_max) const
 {
    if (dt_control == TimeStepControl::FixedTimeStep) { return; }
 

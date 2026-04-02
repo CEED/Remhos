@@ -92,7 +92,7 @@ void Dykstra::Project(Vector &projected_x)
          MapLatent(psi, xmin, xmax, projected_x); // update x
          psi += qi;
          // apply a few iteration of tangential projection
-         for (int j=0; j<3; j++)
+         for (int j=0; j<6; j++)
          {
             // Projection target:
             // c(x) + <grad c(x), x_proj - x> = 0
