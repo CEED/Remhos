@@ -1220,9 +1220,10 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
       // For H1 (velocity): GetTrueDofs for L->T conversion.
       for (int k = 0; k < num_materials; k++)
       {
-         BlockVector x_init_k(global_x_interp.GetData() + k * material_vsize, offsets);
-         BlockVector x_min_k(global_x_min.GetData() + k * material_vsize, offsets);
-         BlockVector x_max_k(global_x_max.GetData() + k * material_vsize, offsets);
+         // Use L-vector offset to view into L-vector data.
+         BlockVector x_init_k(global_x_interp.GetData() + k * material_vsize, offset);
+         BlockVector x_min_k(global_x_min.GetData() + k * material_vsize, offset);
+         BlockVector x_max_k(global_x_max.GetData() + k * material_vsize, offset);
 
          for (int i = 0; i < 3; i++)
          {
@@ -1239,13 +1240,13 @@ void InterpolationRemap::RemapHydro(const std::vector<BlockVector>
                         "Expecting dim*n dofs for pfes_v_scalar_final.");
             for (int d = 0; d < dim; d++)
             {
-               vtmp.MakeRef(&pfes_v_scalar_final, x_init_k.GetBlock(3 + d).GetData());
+               vtmp.MakeRef(&pfes_v_scalar_final, x_init_k.GetBlock(3).GetData() + d * n);
                vtmp.GetTrueDofs(x_initial.GetBlock(k * num_vars + 3 + d));
 
-               vtmp.MakeRef(&pfes_v_scalar_final, x_min_k.GetBlock(3 + d).GetData());
+               vtmp.MakeRef(&pfes_v_scalar_final, x_min_k.GetBlock(3).GetData() + d * n);
                vtmp.GetTrueDofs(x_min_final.GetBlock(k * num_vars + 3 + d));
 
-               vtmp.MakeRef(&pfes_v_scalar_final, x_max_k.GetBlock(3 + d).GetData());
+               vtmp.MakeRef(&pfes_v_scalar_final, x_max_k.GetBlock(3).GetData() + d * n);
                vtmp.GetTrueDofs(x_max_final.GetBlock(k * num_vars + 3 + d));
             }
          }
