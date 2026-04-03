@@ -42,28 +42,28 @@ Mass optimized diff:      7.1838074e-05
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 0
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Intern energy interp diff:  +1.454e-02
+Intern energy interp diff:  +1.547e-03
 Volume optimized diff:   +3.597e-04
 Mass optimized diff:     +7.922e-04
-Energy optimized diff:   +1.454e-02
+Energy optimized diff:   +1.547e-03
 
 - 2D ind_rho_e constant
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 0
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +2.518e-03
-Intern energy interp diff:  +2.535e-01
+Intern energy interp diff:  +2.518e-02
 Volume optimized diff:   +3.597e-04
 Mass optimized diff:     +2.518e-03
-Energy optimized diff:   +2.535e-01
+Energy optimized diff:   +2.518e-02
 
 - 2D ind_rho_e_v smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 6 -opt 0
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Total energy interp diff:   +1.484e-02
+Total energy interp diff:   +1.794e-03
 Volume optimized diff:   +3.597e-04
 Mass optimized diff:     +7.922e-04
-Total energy optimized diff:   +1.484e-02
+Total energy optimized diff:   +1.794e-03
 
 --- Method -opt 1
 
@@ -108,28 +108,28 @@ Mass optimized diff:      9.7144515e-17
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 1
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Intern energy interp diff:  +1.454e-02
-Volume optimized diff:   -8.327e-17
-Mass optimized diff:     -6.716e-08
-Energy optimized diff:   -1.187e-07
+Intern energy interp diff:  +1.547e-03
+Volume optimized diff:   +1.388e-17
+Mass optimized diff:     -5.239e-11
+Energy optimized diff:   +4.582e-11
 
 - 2D ind_rho_e constant
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 1
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +2.518e-03
-Intern energy interp diff:  +2.535e-01
-Volume optimized diff:   +1.256e-09
-Mass optimized diff:     +8.789e-09
-Energy optimized diff:   -6.909e-05
+Intern energy interp diff:  +2.518e-02
+Volume optimized diff:   +1.314e-12
+Mass optimized diff:     +9.179e-12
+Energy optimized diff:   +7.991e-11
 
 - 2D ind_rho_e_v smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 6 -opt 1
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Total energy interp diff:   +1.484e-02
-Volume optimized diff:   -8.327e-17
-Mass optimized diff:     +3.408e-09
-Total energy optimized diff:   +4.139e-05
+Total energy interp diff:   +1.794e-03
+Volume optimized diff:   +2.776e-17
+Mass optimized diff:     +1.010e-14
+Total energy optimized diff:   +3.036e-14
 
 --- Method -opt 1 -h1s
 
@@ -174,28 +174,28 @@ Mass optimized diff:      9.7144515e-17
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 1 -h1s
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Intern energy interp diff:  +1.454e-02
-Volume optimized diff:   -8.327e-17
-Mass optimized diff:     -6.716e-08
-Energy optimized diff:   -1.187e-07
+Intern energy interp diff:  +1.547e-03
+Volume optimized diff:   +1.388e-17
+Mass optimized diff:     -5.239e-11
+Energy optimized diff:   +4.582e-11
 
 - 2D ind_rho_e constant
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 1 -h1s
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +2.518e-03
-Intern energy interp diff:  +2.535e-01
-Volume optimized diff:   +1.256e-09
-Mass optimized diff:     +8.789e-09
-Energy optimized diff:   -6.909e-05
+Intern energy interp diff:  +2.518e-02
+Volume optimized diff:   +1.314e-12
+Mass optimized diff:     +9.179e-12
+Energy optimized diff:   +7.991e-11
 
 - 2D ind_rho_e_v smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 6 -opt 1 -h1s
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Total energy interp diff:   +1.484e-02
-Volume optimized diff:   -8.327e-17
-Mass optimized diff:     +3.408e-09
-Total energy optimized diff:   +4.139e-05
+Total energy interp diff:   +1.794e-03
+Volume optimized diff:   +2.776e-17
+Mass optimized diff:     +1.010e-14
+Total energy optimized diff:   +3.036e-14
 
 --- Method -opt 2
 
@@ -240,25 +240,25 @@ Mass optimized diff:      2.2488955e-13
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 5 -opt 2
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Intern energy interp diff:  +1.454e-02
-Volume optimized diff:   +4.634e-05
-Mass optimized diff:     -6.864e-08
-Energy optimized diff:   -1.708e-11
+Intern energy interp diff:  +1.547e-03
+Volume optimized diff:   -1.810e-06
+Mass optimized diff:     +3.711e-07
+Energy optimized diff:   -4.809e-13
 
 - 2D ind_rho_e constant
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 34 -rs 4 -tf 0.75 -mono 5 -opt 2
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +2.518e-03
-Intern energy interp diff:  +2.535e-01
-Volume optimized diff:   -3.105e-04
-Mass optimized diff:     -2.174e-03
-Energy optimized diff:   -3.046e-12
+Intern energy interp diff:  +2.518e-02
+Volume optimized diff:   -2.776e-17
+Mass optimized diff:     +2.665e-15
+Energy optimized diff:   +0.000e+00
 
 - 2D ind_rho_e_v smooth
 mpirun -np 4 ./remhos -no-vis -dt -1.0 -mi 20 -m ./data/inline-quad.mesh -p 14 -rs 4 -tf 0.75 -mono 6 -opt 2
 Volume interpolated diff:   +3.597e-04
 Mass interpolated diff:     +7.922e-04
-Total energy interp diff:   +1.484e-02
-Volume optimized diff:   +4.084e-05
-Mass optimized diff:     -2.428e-05
-Total energy optimized diff:   +7.992e-05
+Total energy interp diff:   +1.794e-03
+Volume optimized diff:   -2.154e-06
+Mass optimized diff:     +1.359e-05
+Total energy optimized diff:   +1.286e-06
