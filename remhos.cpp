@@ -1134,13 +1134,18 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
-      interpolator.subprob   = optRelevantSubset;      
-      interpolator.weightedSpace   = weightedSpaceType;
+      interpolator.subprob       = optRelevantSubset;
+      interpolator.weightedSpace = weightedSpaceType;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, false, p_0, ind_0_bool_el,
-                              x_final, ind_rho_e, optimization_type);
+      const bool p_control = false;
+      const bool e_ho_interp = false;
+      const bool adjust_diff = false;
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0,
+                              ind_0_bool_el, x_final,
+                              ind_rho_e, optimization_type,
+                              e_ho_interp, adjust_diff);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
@@ -2173,7 +2178,8 @@ void v0_function(const Vector &x, Vector &v)
       case 18:
       case 34:
       case 38:
-      case 39: v(0) = x(0); v(1) = x(1); break;
+      case 39: v(0) =  sin(1.2*M_PI*x(0)) * cos(1.2*M_PI*x(1));
+               v(1) = -cos(1.2*M_PI*x(0)) * sin(1.2*M_PI*x(1)); break;
       default: MFEM_ABORT("v0 is not defined for this problem.");
    }
 }

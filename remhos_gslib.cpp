@@ -645,6 +645,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
                                     Vector &ind_rho_e_v, int opt_type,
+                                    bool interpolate_e_HO,
                                     bool adjust_diffusion)
 {
    const int dim = pmesh_init.Dimension();
@@ -663,7 +664,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                           dim, BasisType::GaussLegendre);
    ParFiniteElementSpace pfes_GL(&pmesh_final, &fec_GL);
    Vector pos_dof_GL_final;
-   GetDOFPositions(pfes_GL, pos_final, pos_dof_GL_final);
+   if (interpolate_e_HO)
+   {
+      GetDOFPositions(pfes_GL, pos_final, pos_dof_GL_final);
+   }
 
    // Extract initial data from the BlockVector.
    const int size_qf   = qspace->GetSize(),
@@ -747,10 +751,20 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
-   // Interpolate e as a Gauss-Legendre GF to preserve the order.
-   // Then project to the Bernstein one.
-   finder.Interpolate(pos_dof_GL_final, e_0, e_interp_GL);
-   e_interp.ProjectGridFunction(e_interp_GL);
+
+   if (interpolate_e_HO)
+   {
+      // Interpolate e as a Gauss-Legendre GF to preserve the order.
+      // Then project to the Bernstein one.
+      // This oscillates badly when e has a jump. No bounds preservation.
+      finder.Interpolate(pos_dof_GL_final, e_0, e_interp_GL);
+      e_interp.ProjectGridFunction(e_interp_GL);
+   }
+   else
+   {
+      // Standard interpolation at the DOFs. Preserves bounds, not the order.
+      finder.Interpolate(pos_dof_e_final, e_0, e_interp);
+   }
    // Energy is additionally interpolated at the quad positions,
    // to have spatial correspondence to the volume fractions.
    finder.Interpolate(pos_quad_final, e_0, e_interp_qf);
@@ -1962,15 +1976,19 @@ void InterpolationRemap::UpdateEInterp(ParGridFunction &e_interp,
 void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
                                      Vector &v_min, Vector &v_max)
 {
-   real_t max = v_interp.Max(), min = v_interp.Min();
-   MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-   MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    v_min.SetSize(v_interp.Size());
    v_max.SetSize(v_interp.Size());
+   v_min = v_interp;
+   v_max = v_interp;
 
-   // Make it more strict, per component, if this looks bad.
-   v_min = min;
-   v_max = max;
+   // real_t max = v_interp.Max(), min = v_interp.Min();
+   // MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   // MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+
+
+   // // Make it more strict, per component, if this looks bad.
+   // v_min = min;
+   // v_max = max;
 }
 
 void InterpolationRemap::GetTargetValues(const Vector &interp,

@@ -186,6 +186,7 @@ public:
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
                    Vector &ind_rho_e_v, int opt_type,
+                   bool interpolate_e_HO,
                    bool adjust_diffusion = false);
 
    bool visualization = true;
