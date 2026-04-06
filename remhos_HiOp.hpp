@@ -1237,12 +1237,6 @@ private:
    Array<int> offset_;
    Array<int> offsetGP;
 
-   real_t w_1 = 1e1;
-   real_t w_2 = 1e1;
-   real_t w_3 = 1e1;
-   real_t w_4 = 1e1;
-   real_t w_p = 1e3;
-
    mfem::Array<int> optProbInd;
    bool subproblem = false;
    bool pressureOpt = false;
@@ -1310,8 +1304,14 @@ private:
 };
 
 
-
 public:
+
+   real_t w_1 = 1e1;
+   real_t w_2 = 1e1;
+   real_t w_3 = 1e1;
+   real_t w_4 = 1e1;
+   real_t w_p = 1e3;
+
    RemhosHydroHiOpProblem(  QuadratureSpace        & qspace,
                            ParFiniteElementSpace & scalarfespace,
                            ParFiniteElementSpace & vectorfespace,

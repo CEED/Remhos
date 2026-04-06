@@ -812,8 +812,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    UpdateRhoInterp(rho_interp, rho_min, rho_max);
    if (p_control)
    {
-      rho_min -= 1e-2;
-      rho_max += 1e-2;
+      rho_min -= 0.1;
+      rho_max += 0.1;
    }
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
@@ -1050,7 +1050,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
       if (remap_v)
       {
-         ot_prob = new RemhosHydroHiOpProblem(qspace_final,
+         auto hiop = new RemhosHydroHiOpProblem(qspace_final,
                                               pfes_e_final,
                                               pfes_v_final,
                                               pos_final,
@@ -1060,6 +1060,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                               x_minsub, x_maxsub,
                                               volume_0, mass_0, moment_0, tot_en_0,
                                               5, false, optProbInd, true, subprob, p_control);
+         hiop->w_1 = 1.0;
+         hiop->w_2 = 1.0;
+         hiop->w_3 = 1.0;
+         hiop->w_4 = 0.0;
+         hiop->w_p = 1e3;
+
+         ot_prob = hiop;
 
          dynamic_cast<RemhosHydroHiOpProblem*>(ot_prob)->setWeightedSpaceType(
             weightedSpace);
