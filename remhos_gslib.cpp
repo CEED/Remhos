@@ -90,7 +90,7 @@ void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
             << pmesh.GetMyRank() << "\n";
    sol_sock << "quadrature\n" << pmesh << q << std::flush;
    sol_sock << "window_title '" << info << "'\n";
-   sol_sock << "window_geometry " << x << " " << y << " 400 400\n";
+   sol_sock << "window_geometry " << x << " " << y << " 350 350\n";
    sol_sock << "keys rmj\n";
    sol_sock.send();
    sol_sock.close();
