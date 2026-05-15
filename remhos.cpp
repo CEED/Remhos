@@ -381,6 +381,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    device.SetGPUAwareMPI(gpu_aware_mpi);
    if (myid == 0) { device.Print(); }
 
+#ifdef REMHOS_USE_DEVICE_UMPIRE
+   // Warm up the device pool on the configured GPU to avoid first-use latency.
+   auto allocator = rm.getAllocator(allocator_name);
+   void *tmp_device_ptr = allocator.allocate(umpire_dev_block_size);
+   allocator.deallocate(tmp_device_ptr);
+#endif
+
    const bool gpu_setup = device.Allows(Backend::DEVICE_MASK);
    if (gpu_setup)
    {
