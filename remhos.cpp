@@ -566,23 +566,14 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       v.ProjectCoefficient(vcoeff);
 
       double t = 0.0;
-#ifdef REMHOS_USE_CALIPER
-      CALI_CXX_MARK_LOOP_BEGIN(mainloop, "rem.mainloop");
-#endif
       while (t < t_final)
       {
-#ifdef REMHOS_USE_CALIPER
-         CALI_CXX_MARK_LOOP_ITERATION(mainloop, t);
-#endif
          t += dt;
          // Move the mesh nodes.
          x.Add(std::min(dt, t_final-t), v);
          // Update the node velocities.
          v.ProjectCoefficient(vcoeff);
       }
-#ifdef REMHOS_USE_CALIPER
-      CALI_CXX_MARK_LOOP_END(mainloop);
-#endif
 
 
       // Pseudotime velocity.
@@ -1149,8 +1140,14 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    bool done = false;
    BlockVector Sold(S);
    int ti_total = 0, ti = 0;
+#ifdef REMHOS_USE_CALIPER
+   CALI_CXX_MARK_LOOP_BEGIN(mainloop, "rem.mainloop");
+#endif
    while (done == false)
    {
+#ifdef REMHOS_USE_CALIPER
+      CALI_CXX_MARK_LOOP_ITERATION(mainloop, ti_total);
+#endif
       double dt_real = min(dt, t_final - t);
 
       // This also resets the time step estimate when automatic dt is on.
@@ -1331,6 +1328,9 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
          }
       }
    }
+#ifdef REMHOS_USE_CALIPER
+   CALI_CXX_MARK_LOOP_END(mainloop);
+#endif
 
 #ifdef REMHOS_USE_CALIPER
    adiak::value("steps", ti_total);
