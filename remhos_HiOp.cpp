@@ -62,6 +62,81 @@ int GetSizeOptimizationSubset(const Vector &xmin, const Vector &xmax)
       return counter;
 }
 
+VectorGradientDifferenceCoefficient::VectorGradientDifferenceCoefficient(
+   const mfem::ParGridFunction &v, const mfem::ParGridFunction &v_ref)
+   : MatrixCoefficient(v.VectorDim(), v.ParFESpace()->GetParMesh()->Dimension()),
+     v_(&v), v_ref_(&v_ref)
+{
+   MFEM_VERIFY(v.VectorDim() == v_ref.VectorDim(),
+               "Vector dimensions must match.");
+   MFEM_VERIFY(v.ParFESpace()->GetParMesh()->Dimension() ==
+               v_ref.ParFESpace()->GetParMesh()->Dimension(),
+               "Spatial dimensions must match.");
+}
+
+void VectorGradientDifferenceCoefficient::Eval(
+   DenseMatrix &K, ElementTransformation &T, const IntegrationPoint &ip)
+{
+   DenseMatrix K_ref;
+   T.SetIntPoint(&ip);
+   v_->GetVectorGradient(T, K);
+   v_ref_->GetVectorGradient(T, K_ref);
+   K -= K_ref;
+}
+
+VectorDomainLFH1semiNormIntegrator::VectorDomainLFH1semiNormIntegrator(
+   mfem::MatrixCoefficient &Q)
+   : Q_(&Q)
+{ }
+
+void VectorDomainLFH1semiNormIntegrator::AssembleRHSElementVect(
+   const FiniteElement &el, ElementTransformation &T, Vector &elvect)
+{
+   const int dof = el.GetDof();
+   const int dim = el.GetDim();
+   const int vdim = Q_->GetHeight();
+
+   MFEM_VERIFY(Q_->GetWidth() == dim,
+               "Matrix coefficient width must match the mesh dimension.");
+
+   DenseMatrix dshape(dof, dim);
+   DenseMatrix q_val(vdim, dim);
+
+   elvect.SetSize(dof * vdim);
+   elvect = 0.0;
+
+   const IntegrationRule *ir = IntRule;
+   if (ir == NULL)
+   {
+      const int order = T.OrderW() + 2 * el.GetOrder();
+      ir = &IntRules.Get(el.GetGeomType(), order);
+   }
+
+   for (int q = 0; q < ir->GetNPoints(); q++)
+   {
+      const IntegrationPoint &ip = ir->IntPoint(q);
+      T.SetIntPoint(&ip);
+
+      const real_t w = ip.weight * T.Weight();
+      el.CalcPhysDShape(T, dshape);
+      Q_->Eval(q_val, T, ip);
+
+      for (int c = 0; c < vdim; c++)
+      {
+         Vector elvect_comp(elvect.GetData() + c * dof, dof);
+         for (int j = 0; j < dof; j++)
+         {
+            real_t contribution = 0.0;
+            for (int d = 0; d < dim; d++)
+            {
+               contribution += q_val(c, d) * dshape(j, d);
+            }
+            elvect_comp(j) += w * contribution;
+         }
+      }
+   }
+}
+
 
 RemhosIndRhoEHiOpProblem::EnergyGradIntegrator::EnergyGradIntegrator(
   const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho)

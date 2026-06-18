@@ -1985,17 +1985,17 @@ void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
 {
    v_min.SetSize(v_interp.Size());
    v_max.SetSize(v_interp.Size());
-   v_min = v_interp;
-   v_max = v_interp;
+   // v_min = v_interp;
+   // v_max = v_interp;
 
-   // real_t max = v_interp.Max(), min = v_interp.Min();
-   // MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-   // MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+   real_t max = v_interp.Max(), min = v_interp.Min();
+   MPI_Allreduce(MPI_IN_PLACE, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+   MPI_Allreduce(MPI_IN_PLACE, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
 
 
-   // // Make it more strict, per component, if this looks bad.
-   // v_min = min;
-   // v_max = max;
+   // Make it more strict, per component, if this looks bad.
+   v_min = min;
+   v_max = max;
 }
 
 void InterpolationRemap::GetTargetValues(const Vector &interp,

@@ -40,6 +40,36 @@ private:
    mfem::ParGridFunction    *e_;
 };
 
+class VectorGradientDifferenceCoefficient : public mfem::MatrixCoefficient
+{
+public:
+   VectorGradientDifferenceCoefficient(const mfem::ParGridFunction &v,
+                                      const mfem::ParGridFunction &v_ref);
+   ~VectorGradientDifferenceCoefficient() { }
+
+   void Eval(mfem::DenseMatrix &K,
+             mfem::ElementTransformation &T,
+             const mfem::IntegrationPoint &ip) override;
+
+private:
+   const mfem::ParGridFunction *v_;
+   const mfem::ParGridFunction *v_ref_;
+};
+
+class VectorDomainLFH1semiNormIntegrator : public mfem::LinearFormIntegrator
+{
+public:
+   VectorDomainLFH1semiNormIntegrator(mfem::MatrixCoefficient &Q);
+   ~VectorDomainLFH1semiNormIntegrator() { }
+
+   void AssembleRHSElementVect(const mfem::FiniteElement &el,
+                               mfem::ElementTransformation &T,
+                               mfem::Vector &elvect) override;
+
+private:
+   mfem::MatrixCoefficient *Q_;
+};
+
 
 class RemhosHiOpProblem : public OptimizationProblem
 {
@@ -1310,6 +1340,7 @@ public:
    real_t w_2 = 1e1;
    real_t w_3 = 1e1;
    real_t w_4 = 1e1;
+   real_t w_4_H1 = 1e-1;
    real_t w_p = 1e3;
 
    RemhosHydroHiOpProblem(  QuadratureSpace        & qspace,
@@ -1427,6 +1458,7 @@ public:
       real_t normrohSq = 0.0;
       real_t normESq = 0.0;
       real_t normVSq = 0.0;
+      real_t FnormGradVSq = 0.0;
       real_t pDiffSq = 0.0;
       
       if(isL2_)
@@ -1467,12 +1499,14 @@ public:
 
       normVSq = Integrate_v_minus_v0(pos_final, &ind, &velocity, &v_0);
 
+      FnormGradVSq = Integrate_grad_v_minus_grad_v0(pos_final, &ind, &velocity, &v_0);
+
       if(pressureOpt)
       {
          pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, &energy);
       } 
 
-      return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq + w_p*pDiffSq;
+      return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq + w_4_H1* FnormGradVSq + w_p*pDiffSq;
    }
 
    void CalcObjectiveGrad(const Vector &x, Vector &grad) const  override
@@ -1558,15 +1592,19 @@ public:
 
       ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
+      ParLinearForm dQdvH1(&vectorfespace_);
       ParGridFunction    e_grad(&scalarfespace_); e_grad = 0.0;
       ParGridFunction    p_e_grad(&scalarfespace_); p_e_grad = 0.0;
       Vector v_grad_true(size_gf_vec_true); v_grad_true = 0.0;
+      Vector v_grad_true_h1(size_gf_vec_true); v_grad_true_h1 = 0.0;
       GridFunctionCoefficient e_diff_coeff(&e_diff);
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
+      VectorGradientDifferenceCoefficient grad_v_diff_coeff(velocity, v_0);
 
       auto *lfi_1 = new DomainLFIntegrator(e_diff_coeff);
       //auto *lfi_2 = new	VectorDomainLFIntegrator (v_diff_coeff);
       auto *lfi_2 = new VDiffIntegrator (velocity, v_0, ind);
+      auto *lfi_3 = new VectorDomainLFH1semiNormIntegrator(grad_v_diff_coeff);
 
       dQdeta.AddDomainIntegrator(lfi_1);
       dQdeta.Assemble();
@@ -1576,10 +1614,16 @@ public:
       dQdv.Assemble();
       dQdv.ParallelAssemble(v_grad_true);
 
+      dQdvH1.AddDomainIntegrator(lfi_3);
+      dQdvH1.Assemble();
+      dQdvH1.ParallelAssemble(v_grad_true_h1);
+
       ind_diff *= w_1;
       roh_diff *= w_2;
       e_grad   *= w_3;
       v_grad_true   *= w_4;
+      v_grad_true_h1 *= w_4_H1;
+      v_grad_true += v_grad_true_h1;
 
       if(pressureOpt)
       {
@@ -1963,7 +2007,6 @@ double Integrate_v_minus_v0(const Vector &pos,
       IsoparametricTransformation Tr;
       mesh->GetElementTransformation(j, pos, &Tr);
 
-      Vector ind_vals(nqp);
       DenseMatrix v_vals(dim, nqp);
       DenseMatrix v_vals_0(dim, nqp);
       
@@ -1982,6 +2025,52 @@ double Integrate_v_minus_v0(const Vector &pos,
          // Volume / mass / internal energy / total energy cases.
          integral += Tr.Weight() * ip.weight * 0.5 * vv;
 
+      }
+   }
+   MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,
+                 MPI_COMM_WORLD);
+   return integral;
+}
+
+double Integrate_grad_v_minus_grad_v0(const Vector &pos,
+                            const QuadratureFunction *ind,
+                            const ParGridFunction *v,
+                            const ParGridFunction *v_0) const
+{
+   MFEM_VERIFY(ind, "At least one function must be specified.");
+
+   const QuadratureSpace *qspace = nullptr;
+   if (ind) { qspace = dynamic_cast<const QuadratureSpace *>(ind->GetSpace()); }
+
+   auto mesh = qspace->GetMesh();
+   const int NE = mesh->GetNE(), dim = mesh->Dimension();
+   double integral = 0.0;
+   for (int j = 0; j < NE; j++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(j);
+      const int nqp = ir.GetNPoints();
+
+      // Transformation w.r.t. the given mesh positions.
+      IsoparametricTransformation Tr;
+      mesh->GetElementTransformation(j, pos, &Tr);
+
+      for (int q = 0; q < nqp; q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+
+         DenseMatrix grad_v_vals(dim, nqp);
+         DenseMatrix grad_v_vals_0(dim, nqp);
+
+         v->GetVectorGradient  (Tr, grad_v_vals);
+         v_0->GetVectorGradient(Tr, grad_v_vals_0);
+
+         grad_v_vals -=grad_v_vals_0;
+
+         real_t vv = grad_v_vals.FNorm2();
+
+         // Volume / mass / internal energy / total energy cases.
+         integral += Tr.Weight() * ip.weight * 0.5 * vv;
       }
    }
    MPI_Allreduce(MPI_IN_PLACE, &integral, 1, MPI_DOUBLE, MPI_SUM,
