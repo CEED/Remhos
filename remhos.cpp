@@ -171,6 +171,7 @@ int main(int argc, char *argv[])
    TimeStepControl dt_control = TimeStepControl::FixedTimeStep;
    double dt = 0.005;
    bool visualization = true;
+   bool p_control = false;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -261,6 +262,9 @@ int main(int argc, char *argv[])
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
+   args.AddOption(&p_control, "-pc", "--pressure-control", "-no-pc",
+                  "--no-pressure-control",
+                  "Enable or disable pressure control during hydro remap.");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
@@ -1097,17 +1101,20 @@ int main(int argc, char *argv[])
       if (visualization)
       {
          VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 0);
-         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 400, 0);
+         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 350, 0);
          socketstream sock_e;
          VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
-                        800, 0, 400, 400);
+                        700, 0, 350, 350);
+         if (p_control)
+         {
+            VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1050, 0);
+         }
          if (remap_v)
          {
             socketstream sock_v;
             VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
-                           1200, 0, 400, 400, "", true);
+                           1400, 0, 350, 350, "", true);
          }
-         VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1200, 0);
 
          ParaViewDataCollection pvdc("IndRhoE_before_opt", &pmesh);
          pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1139,7 +1146,6 @@ int main(int argc, char *argv[])
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
-      const bool p_control = false;
       const bool e_ho_interp = false;
       const bool adjust_diff = false;
       interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0,
@@ -1161,16 +1167,20 @@ int main(int argc, char *argv[])
       {
          x = x_final;
          VisQuadratureFunction(pmesh, ind, "ind QF", 0, 500);
-         VisQuadratureFunction(pmesh, rho, "rho QF", 400, 500);
+         VisQuadratureFunction(pmesh, rho, "rho QF", 350, 500);
          socketstream sock_f;
-         VisualizeField(sock_f, "localhost", 19916, e, "e GF", 800, 500, 400, 400);
+         VisualizeField(sock_f, "localhost", 19916, e, "e GF",
+                        700, 500, 350, 350);
+         if (p_control)
+         {
+            VisQuadratureFunction(pmesh, p, "p QF", 1050, 500);
+         }
          if (remap_v)
          {
             socketstream sock_v;
             VisualizeField(sock_v, "localhost", 19916, v, "v GF",
-                           1200, 500, 400, 400, "", true);
+                           1400, 500, 350, 350, "", true);
          }
-         VisQuadratureFunction(pmesh, p, "p QF", 1200, 500);
 
          ParaViewDataCollection pvdc("IndRhoE_after_opt", &pmesh);
          pvdc.SetDataFormat(VTKFormat::BINARY32);

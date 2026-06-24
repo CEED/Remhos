@@ -713,14 +713,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    {
       socketstream sock_ind, sock_rho;
       VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, "ind_0 LOR",
-                     0, 500, 400, 400);
+                     0, 500, 350, 350);
       VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR",
-                     400, 500, 400, 400);
+                     350, 500, 350, 350);
       if (p_control)
       {
          socketstream sock_p;
          VisualizeField(sock_p, "localhost", 19916, p_0_lor, "p_0 LOR",
-                        800, 500, 400, 400);
+                        1050, 500, 350, 350);
       }
    }
 
@@ -747,7 +747,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    if (p_control)
    {
       finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
-      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 0, 0);
+      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 1050, 900);
    }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
@@ -845,6 +845,25 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    //                   300, 500, 300, 300);
    //    //MFEM_ABORT("e bounds");
    // }
+   Vector p_min, p_max;
+   if (p_control)
+   {
+      // Same quad points, same procedure as density (based on the indicators).
+      CalcRhoBounds(p_interp, ind_interp, ind_max, p_min, p_max);
+      // {
+      //    QuadratureFunction gf_min(qspace), gf_max(qspace), gf_diff(qspace);
+      //    gf_min = p_min, gf_max = p_max;
+      //    gf_diff = gf_max; gf_diff -= gf_min;
+
+      //    VisQuadratureFunction(pmesh_final, ind_interp, "ind interp", 0, 900);
+      //    VisQuadratureFunction(pmesh_final, p_interp, "p interp", 0, 900);
+      //    VisQuadratureFunction(pmesh_final, gf_min, "p_min QF", 0, 900);
+      //    VisQuadratureFunction(pmesh_final, gf_max, "p_max QF", 0, 900);
+      //    VisQuadratureFunction(pmesh_final, gf_diff, "p_max - p_min QF", 0, 900);
+      //    MFEM_ABORT("p bounds");
+      // }
+   }
+
    Vector v_min, v_max;
    if (remap_v) { CalcVBounds(v_interp, v_min, v_max); }
 
@@ -1366,6 +1385,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    CheckBounds(pmesh_init.GetMyRank(), rho, rho_min, rho_max);
    if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
+   if (p_control)
+   {
+      QuadratureFunction p(qspace);
+      ComputePressureQF(rho, e, p);
+      if (Mpi::Root()) { std::cout << "*\nPressure violations: \n"; }
+      CheckBounds(pmesh_init.GetMyRank(), p, p_min, p_max);
+   }
    if (remap_v)
    {
       if (Mpi::Root()) { std::cout << "*\nVelocity violations: \n"; }
