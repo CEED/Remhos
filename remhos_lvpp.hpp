@@ -27,6 +27,17 @@ class Dykstra
    int max_iter;
    int max_linesearch = 30;
    real_t c1 = 1e-03; // Armijo condition constant
+
+   bool enforce_sum_to_one = false;
+   Array<int> sum_to_one_idx_start;
+   int sum_to_one_block_size;
+
+   // TODO: Remove this when the input format is finalized.
+   bool duplicated_velocity = false;
+   Array<int> velocity_idx_start;
+   Array<int> velocity_related_constraints;
+   Array<int> master_material_idx;
+   int velocity_block_size = 0;
 public:
    Dykstra(MPI_Comm comm, StackedFunctional &constraints, MassOperator &mass,
            Array<LegendreFunction*> &legendre_funcs_, Array<int> &offsets_,
@@ -40,6 +51,25 @@ public:
    }
    void SetAbsTol(real_t tol) { this->tol = tol; }
    void SetMaxIter(int max_iter) { this->max_iter = max_iter; }
+   void EnforceSumToOne(const Array<int> &idx_start, const int block_size)
+   {
+      enforce_sum_to_one = true;
+      sum_to_one_idx_start = idx_start;
+      sum_to_one_block_size = block_size;
+   }
+
+   // TODO: Remove this after the input format is finalized.
+   void SetDuplicatedVelocity(Array<int> &velocity_starting_index,
+                              Array<int> &velocity_related_constraints_index,
+                              Array<int> &master_material_index,
+                              int velocity_block_size)
+   {
+      duplicated_velocity = true;
+      velocity_idx_start = velocity_starting_index;
+      velocity_related_constraints = velocity_related_constraints_index;
+      master_material_idx = master_material_index;
+      this->velocity_block_size = velocity_block_size;
+   }
 
    // Dykstra projection with Bregman divergence
    // At each iteration, we project onto the tangent plane of each constraint
@@ -48,6 +78,7 @@ public:
    // where Project_k is the projection onto the k-th constraint (tangent plane)
    void Project(Vector &projected_x);
 private:
+   void ProjectSumToOne(Vector &psi, Vector &qi);
 
    void Project(const Functional &con, Vector &psi, const Vector &grad,
                 const real_t targ, Vector &psi_aux, Vector &projected_x);
