@@ -646,7 +646,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     const Vector &pos_final,
                                     Vector &ind_rho_e_v, int opt_type,
                                     bool interpolate_e_HO,
-                                    bool adjust_diffusion)
+                                    bool adjust_diffusion,
+                                    bool remap_staggered)
 {
    const int dim = pmesh_init.Dimension();
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
@@ -979,9 +980,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    else if (opt_type == 1)
    {
       OptimizationSolver* optsolver = NULL;
+      OptimizationSolver* optsolver_2 = NULL;
       {
 #ifdef MFEM_USE_HIOP
          optsolver = new HiopNlpOptimizer(MPI_COMM_WORLD);
+         optsolver_2 = new HiopNlpOptimizer(MPI_COMM_WORLD);
 #else
          MFEM_ABORT("MFEM is not built with HiOp support!");
 #endif
@@ -991,18 +994,30 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       offset_true[1] = offset_true[0] + size_qf;
       offset_true[2] = offset_true[1] + size_qf;
       offset_true[3] = offset_true[2] + size_gf_e;
+
+      Array<int> offset_true_woE(numBlocks-1);
+      offset_true_woE[0] = 0;
+      offset_true_woE[1] = offset_true_woE[0] + size_qf;
+      offset_true_woE[2] = offset_true_woE[1] + size_qf;
+
       if (remap_v)
       {
          offset_true[4] = offset_true[3] + size_gf_v_true;
+         offset_true_woE[3] = offset_true_woE[2] + size_gf_v_true;
       }
 
       Vector rho_target, e_target, v_target;
       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
       GetTargetValues( e_interp, e_min, e_max, e_target );
 
+
+
       BlockVector initial_design(offset_true);
       BlockVector design_min    (offset_true);
       BlockVector design_max    (offset_true);
+      BlockVector initial_design_woE(offset_true_woE);
+      BlockVector design_min_woE    (offset_true_woE);
+      BlockVector design_max_woE    (offset_true_woE);
       initial_design.GetBlock(0) = ind_interp;
       initial_design.GetBlock(1) = rho_target;
       initial_design.GetBlock(2) = e_target;
@@ -1012,6 +1027,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       design_max.GetBlock(0) = ind_max;
       design_max.GetBlock(1) = rho_max;
       design_max.GetBlock(2) = e_max;
+      initial_design_woE.GetBlock(0) = ind_interp;
+      initial_design_woE.GetBlock(1) = rho_target;
+      design_min_woE.GetBlock(0) = ind_min;
+      design_min_woE.GetBlock(1) = rho_min;
+      design_max_woE.GetBlock(0) = ind_max;
+      design_max_woE.GetBlock(1) = rho_max;
       if (remap_v)
       {
          ParGridFunction vtmp_min(&pfes_v_final, v_min);
@@ -1028,20 +1049,30 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          initial_design.GetBlock(3) = true_v_interp;
          design_min    .GetBlock(3) = true_v_min;
          design_max    .GetBlock(3) = true_v_max;
+
+         initial_design_woE.GetBlock(2) = true_v_interp;
+         design_min_woE    .GetBlock(2) = true_v_min;
+         design_max_woE    .GetBlock(2) = true_v_max;
       }
 
       int NumDesVar = initial_design.Size();
+      int NumDesVar_woE = initial_design_woE.Size();
       BlockVector y_out(offset_true);
+      BlockVector y_out_woE(offset_true_woE);
 
       y_out = initial_design;
+      y_out_woE = initial_design_woE;
 
       mfem::Array<int> optProbInd;
       mfem::Vector ind_rho_e_sub;
       mfem::Vector y_out_sub;
       mfem::Vector minsub;
       mfem::Vector maxsub;
+      mfem::Vector minsub_woE;
+      mfem::Vector maxsub_woE;
 
       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
+      Vector x_maxsub_woE(NumDesVar_woE), x_minsub_woE(NumDesVar_woE);
 
       if (subprob)
       {
@@ -1063,62 +1094,155 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       {
          x_maxsub = design_max;
          x_minsub = design_min;
+         x_maxsub_woE = design_max_woE;
+         x_minsub_woE = design_min_woE;
       }
 
       OptimizationProblem *ot_prob = nullptr;
 
-      if (remap_v)
+      if(remap_staggered)
       {
-         auto hiop = new RemhosHydroHiOpProblem(qspace_final,
-                                                pfes_e_final, pfes_v_final,
+         auto hiop = new RemhosIndRhoVOpProblem(qspace_final,
+                                                pfes_e_final,
+                                                pfes_v_final,
                                                 pos_final,
-                                                initial_design, p_interp,
-                                                NumDesVar, x_minsub, x_maxsub,
+                                                initial_design,
+                                                initial_design_woE,
+                                                NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
                                                 volume_0, mass_0, moment_0, tot_en_0,
-                                                5, false, optProbInd, true,
-                                                subprob, p_control);
+                                                4, false, optProbInd, true,
+                                                subprob);
          hiop->setWeightedSpaceType(weightedSpace);
 
-         if (p_control)
-         {
-            hiop->w_1 = 1.0;
-            hiop->w_2 = 1.0;
-            hiop->w_3 = 1.0;
-            hiop->w_4 = 0.0;
-            hiop->w_p = 1e3;
-         }
-
          ot_prob = hiop;
+
+         optsolver->SetOptimizationProblem(*ot_prob);
+         optsolver->SetMaxIter(max_iter);
+         optsolver->SetAbsTol(1e-7);
+         optsolver->SetRelTol(1e-7);
+         optsolver->SetPrintLevel(3);
+
+         if (subprob)
+         {
+            optsolver->Mult(initial_design_woE, y_out_sub);
+            y_out_woE.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver->Mult(initial_design_woE, y_out_woE); }
+
+         //-------------------------------------------------------------------------
+         
+         QuadratureFunction ind_opt(&qspace_final,
+                                    y_out_woE.GetBlock(0).GetData());
+         QuadratureFunction rho_opt(&qspace_final,
+                                    y_out_woE.GetBlock(1).GetData());
+         Vector vel_true_opt(y_out_woE.GetData() + 2*size_qf, size_gf_v_true);
+
+         initial_design.GetBlock(0) = ind_opt;
+         initial_design.GetBlock(1) = rho_opt;
+         initial_design.GetBlock(2) = e_target;
+         initial_design.GetBlock(3) = vel_true_opt;
+
+           // Vector p_min, p_max;
+         Vector e_min_p; 
+         Vector e_max_p;
+
+         CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
+                           p_max, p_min, rho_opt, pos_final, ind_max,
+                           e_min_p, e_max_p);
+
+         delete ot_prob;
+
+         auto hiop_2 = new RemhosEOpProblem(qspace_final,
+                                                pfes_e_final,
+                                                pfes_v_final,
+                                                pos_final,
+                                                initial_design,
+                                                e_target,
+                                                e_target.Size(), e_min_p, e_max_p,
+                                                volume_0, mass_0, moment_0, tot_en_0,
+                                                1, false, optProbInd, true,
+                                                subprob);
+
+         hiop_2->setWeightedSpaceType(weightedSpace);
+
+         ot_prob = hiop_2;
+
+         optsolver_2->SetOptimizationProblem(*ot_prob);
+         optsolver_2->SetMaxIter(max_iter);
+         optsolver_2->SetAbsTol(1e-7);
+         optsolver_2->SetRelTol(1e-7);
+         optsolver_2->SetPrintLevel(3);
+
+         Vector y_out_E = e_target;
+
+         if (subprob)
+         {
+            optsolver_2->Mult(initial_design_woE, y_out_sub);
+            y_out_woE.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver_2->Mult(e_target, y_out_E); }
+
+         initial_design.GetBlock(0) = ind_opt;
+         initial_design.GetBlock(1) = rho_opt;
+         initial_design.GetBlock(2) = y_out_E;
+         initial_design.GetBlock(3) = vel_true_opt;
+
+         y_out = initial_design;
       }
       else
       {
-         ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final,
-                                                pfes_e_final,
-                                                pos_final,
-                                                initial_design,
-                                                p_interp,
-                                                NumDesVar,
-                                                x_minsub, x_maxsub,
-                                                volume_0, mass_0, energy_0,
-                                                3, false, optProbInd, true,
-                                                subprob, p_control);
+         if (remap_v)
+         {
+            auto hiop = new RemhosHydroHiOpProblem(qspace_final,
+                                                   pfes_e_final, pfes_v_final,
+                                                   pos_final,
+                                                   initial_design, p_interp,
+                                                   NumDesVar, x_minsub, x_maxsub,
+                                                   volume_0, mass_0, moment_0, tot_en_0,
+                                                   5, false, optProbInd, true,
+                                                   subprob, p_control);
+            hiop->setWeightedSpaceType(weightedSpace);
 
-         dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
-            weightedSpace);
+            if (p_control)
+            {
+               hiop->w_1 = 1.0;
+               hiop->w_2 = 1.0;
+               hiop->w_3 = 1.0;
+               hiop->w_4 = 0.0;
+               hiop->w_p = 1e3;
+            }
+
+            ot_prob = hiop;
+         }
+         else
+         {
+            ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final,
+                                                   pfes_e_final,
+                                                   pos_final,
+                                                   initial_design,
+                                                   p_interp,
+                                                   NumDesVar,
+                                                   x_minsub, x_maxsub,
+                                                   volume_0, mass_0, energy_0,
+                                                   3, false, optProbInd, true,
+                                                   subprob, p_control);
+
+            dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
+               weightedSpace);
+         }
+         optsolver->SetOptimizationProblem(*ot_prob);
+         optsolver->SetMaxIter(max_iter);
+         optsolver->SetAbsTol(1e-7);
+         optsolver->SetRelTol(1e-7);
+         optsolver->SetPrintLevel(3);
+
+         if (subprob)
+         {
+            optsolver->Mult(ind_rho_e_sub, y_out_sub);
+            y_out.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver->Mult(initial_design, y_out); }
       }
-
-      optsolver->SetOptimizationProblem(*ot_prob);
-      optsolver->SetMaxIter(max_iter);
-      optsolver->SetAbsTol(1e-7);
-      optsolver->SetRelTol(1e-7);
-      optsolver->SetPrintLevel(3);
-
-      if (subprob)
-      {
-         optsolver->Mult(ind_rho_e_sub, y_out_sub);
-         y_out.SetSubVector(optProbInd, y_out_sub);
-      }
-      else { optsolver->Mult(initial_design, y_out); }
 
       BlockVector T_vector_design(offset_true);
       BlockVector L_vector_design(offset);
@@ -1979,6 +2103,102 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
                el_max = std::max(el_max, e_interp(s * e + i));
             }
          }
+      }
+
+      // Set the bounds at the DOFs.
+      // When material is present, we set bounds at all energy DOFs.
+      for (int i = 0; i < s; i++)
+      {
+         e_min(s * e + i) = el_min;
+         e_max(s * e + i) = el_max;
+      }
+   }
+}
+
+void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
+                                          Array<bool> &active_el_0,
+                                          const ParGridFunction &e_interp,
+                                          const QuadratureFunction &e_interp_qf,
+                                          const Vector &p_qf_max,
+                                          const Vector &p_qf_min,
+                                          const QuadratureFunction &rho_interp_qf,
+                                          const Vector &pos_final,
+                                          const Vector &ind_max,
+                                          Vector &e_min, Vector &e_max)
+{
+   const double eps = 1e-12;
+
+   const int size_e = e_interp.Size(), NE = pmesh_init.GetNE();
+   const int s = size_e / NE;
+   e_min.SetSize(size_e); e_max.SetSize(size_e);
+   e_min = 0.0; e_max = 0.0;
+
+   for (int e = 0; e < NE; e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      const int nqp = ir.GetNPoints();
+
+      // Check if the new mesh element has material.
+      bool el_has_ind = false;
+      bool el_has_e_value = false;
+      for (int q = 0; q < nqp; q++)
+      {
+         if (ind_max(e*nqp + q) > 1e-12)           { el_has_ind = true; }
+         if (fabs(e_interp_qf(e*nqp + q)) > 1e-12) { el_has_e_value = true; }
+      }
+
+      // Compute min and max energy in the new mesh element.
+      double el_min =   std::numeric_limits<double>::infinity(),
+             el_max = - std::numeric_limits<double>::infinity();
+      // The new mesh element is completely empty -> we want zeros in it.
+      if (el_has_ind == false) { el_min = el_max = 0.0; }
+      else
+      {
+         MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
+
+         double rho_val_min =   std::numeric_limits<double>::infinity();
+         double rho_val_max = - std::numeric_limits<double>::infinity();
+
+         for (int q = 0; q < nqp; q++)
+         {
+            double rhoval = rho_interp_qf(e*nqp + q);
+
+            rho_val_min = std::min(rho_val_min, rhoval);
+            rho_val_max = std::max(rho_val_max, rhoval);
+         }
+
+         for (int q = 0; q < nqp; q++)
+         {
+            double pval_max = p_qf_max(e*nqp + q);
+            double pval_min = p_qf_min(e*nqp + q);
+
+            double e_val_max = pval_max / ( rho_val_min);
+            double e_val_min = pval_min / ( rho_val_max);
+
+            if( e_val_max < e_interp_qf(e*nqp + q) || e_val_min > e_interp_qf(e*nqp + q))
+            {
+               std::cout<<"value out of bounds found: "<< e_val_max<< " | "<< e_val_min<<" | "<< e_interp_qf(e*nqp + q)<<std::endl;
+            }
+
+            el_min = std::min(el_min, e_val_min);
+            el_max = std::max(el_max, e_val_max);
+
+         }
+
+         // // Taking bounds only at quad points can lead to clipping and reducing
+         // // the interpolation order.
+         // for (int i = 0; i < s; i++)
+         // {
+         //    double pval = p_interp_qf(s * e + i);
+         //    double rhoval = rho_interp_qf(s * e + i);
+         //    double e_val = pval / (0.4 * rhoval);
+
+         //    if (e_val > eps)
+         //    {
+         //       el_min = std::min(el_min, e_val);
+         //       el_max = std::max(el_max, e_val);
+         //    }
+         // }
       }
 
       // Set the bounds at the DOFs.

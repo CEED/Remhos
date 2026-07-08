@@ -410,6 +410,140 @@ void PressureDiffGradEIntegrator::AssembleRHSElementVect(
   }
 }
 
+RemhosIndRhoVOpProblem::momentumGradVIntegrator::momentumGradVIntegrator(
+  const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho, const int dim)
+  : ind_(&ind), rho_(&rho), considerdDim_(dim)
+  {}
+
+void RemhosIndRhoVOpProblem::momentumGradVIntegrator::AssembleRHSElementVect(
+  const FiniteElement &el, ElementTransformation &T, Vector &elvect)
+{
+  // grab sizes
+  int dof = el.GetDof();
+  int dim = el.GetDim();
+  int eleIndex = T.ElementNo;
+
+  // initialize storage
+  Vector N(dof);
+
+  // output vector
+  elvect.SetSize(dof*dim);
+  elvect = 0.0;
+
+  const IntegrationRule *ir = &(ind_->GetSpace()->GetIntRule(eleIndex));
+  const int nqp = ir->GetNPoints();
+
+  Vector ind_vals(nqp), rho_vals(nqp);
+  ind_->GetValues(eleIndex, ind_vals);
+  rho_->GetValues(eleIndex, rho_vals);
+
+  // loop over integration points
+  for (int i = 0; i < ir->GetNPoints(); i++)
+  {
+    // set current integration point
+    const IntegrationPoint &ip = ir->IntPoint(i);
+    T.SetIntPoint(&ip);
+
+    // evaluate gaussian integration weight
+    double w = ip.weight * T.Weight();
+    el.CalcShape(ip, N);
+
+    Vector elvect_temp(elvect.GetData() + considerdDim_*dof, dof);
+    elvect_temp.Add( w * ind_vals[i] * rho_vals[i], N);
+  }
+}
+
+RemhosIndRhoVOpProblem::VDiffIntegrator::VDiffIntegrator(
+  const mfem::ParGridFunction &v, const mfem::ParGridFunction &v_0, const mfem::QuadratureFunction &ind)
+  : v_(&v), v_0_(&v_0), ind_(&ind)
+  {}
+
+void RemhosIndRhoVOpProblem::VDiffIntegrator::AssembleRHSElementVect(
+  const FiniteElement &el, ElementTransformation &T, Vector &elvect)
+{
+  // grab sizes
+  int dof = el.GetDof();
+  int dim = el.GetDim();
+  int eleIndex = T.ElementNo;
+
+  // initialize storage
+  Vector N(dof);
+  Vector velGP(dim);
+  Vector vel0GP(dim);
+
+  // output vector
+  elvect.SetSize(dof*dim);
+  elvect = 0.0;
+
+  const IntegrationRule *ir = &(ind_->GetSpace()->GetIntRule(eleIndex));
+  const int nqp = ir->GetNPoints();
+
+  // loop over integration points
+  for (int i = 0; i < ir->GetNPoints(); i++)
+  {
+    // set current integration point
+    const IntegrationPoint &ip = ir->IntPoint(i);
+    T.SetIntPoint(&ip);
+
+    v_->GetVectorValue(eleIndex, ip, velGP);
+    v_0_->GetVectorValue(eleIndex, ip, vel0GP);
+
+    // evaluate gaussian integration weight
+    double w = ip.weight * T.Weight();
+    el.CalcShape(ip, N);
+
+    for( int d = 0; d<dim; d++)
+    {
+      real_t v_diff_comp = velGP[d] - vel0GP[d];
+      Vector elvect_temp(elvect.GetData() + d*dof, dof);
+      elvect_temp.Add( w * v_diff_comp, N);
+    }
+  }
+}
+
+RemhosEOpProblem::totalEnergyGradEIntegrator::totalEnergyGradEIntegrator(
+  const mfem::QuadratureFunction &ind, const mfem::QuadratureFunction &rho)
+  : ind_(&ind), rho_(&rho) 
+  {}
+
+void RemhosEOpProblem::totalEnergyGradEIntegrator::AssembleRHSElementVect(
+  const FiniteElement &el, ElementTransformation &T, Vector &elvect)
+{
+  // grab sizes
+  int dof = el.GetDof();
+  int dim = el.GetDim();
+  int eleIndex = T.ElementNo;
+
+  // initialize storage
+  Vector N(dof);
+
+  // output vector
+  elvect.SetSize(dof);
+  elvect = 0.0;
+
+  const IntegrationRule *ir = &(ind_->GetSpace()->GetIntRule(eleIndex));
+  const int nqp = ir->GetNPoints();
+
+  Vector ind_vals(nqp), rho_vals(nqp);
+  ind_->GetValues(eleIndex, ind_vals);
+  rho_->GetValues(eleIndex, rho_vals);
+
+  // loop over integration points
+  for (int i = 0; i < ir->GetNPoints(); i++)
+  {
+    // set current integration point
+    const IntegrationPoint &ip = ir->IntPoint(i);
+    T.SetIntPoint(&ip);
+
+    // evaluate gaussian integration weight
+    double w = ip.weight * T.Weight();
+
+    el.CalcShape(ip, N);
+
+    elvect.Add(w * ind_vals[i] * rho_vals[i] , N);
+  }
+}
+
 
 
 } // namespace mfem

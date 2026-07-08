@@ -131,6 +131,17 @@ private:
                     const Vector &ind_max,
                     Vector &e_min, Vector &e_max, BoundsType bounds_type);
 
+   void CalcEBoundsPBased(const ParGridFunction &e_init,
+                          Array<bool> &active_el_0,
+                          const ParGridFunction &e_interp,
+                          const QuadratureFunction &e_interp_qf,
+                           const Vector &p_qf_max,
+                           const Vector &p_qf_min,
+                          const QuadratureFunction &rho_interp_qf,
+                          const Vector &pos_final,
+                          const Vector &ind_max,
+                          Vector &e_min, Vector &e_max);
+
    void UpdateEInterp(ParGridFunction &e_interp,
                       Vector &e_min, Vector &e_max);
 
@@ -187,7 +198,8 @@ public:
                    const Vector &pos_final,
                    Vector &ind_rho_e_v, int opt_type,
                    bool interpolate_e_HO,
-                   bool adjust_diffusion = false);
+                   bool adjust_diffusion = false,
+                   bool remap_staggered = false);
 
    bool visualization = true;
    bool h1_seminorm   = false;
