@@ -70,14 +70,6 @@ double getDeviceMemoryHighWatermark() {
 #endif
 #endif
 
-#ifdef REMHOS_USE_CALIPER
-#define REMHOS_CALI_BEGIN(name) cali_begin_region(name)
-#define REMHOS_CALI_END(name) cali_end_region(name)
-#else
-#define REMHOS_CALI_BEGIN(name)
-#define REMHOS_CALI_END(name)
-#endif
-
 using namespace std;
 using namespace mfem;
 
@@ -546,7 +538,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    if (dt < 0.0)
    {
       if (myid == 0) { cout << "[remhos setup] begin rem.setup.cfl_dt" << endl; }
-      REMHOS_CALI_BEGIN("rem.setup.cfl_dt");
       dt = std::numeric_limits<double>::infinity();
       Vector vel_e(dim);
       for (int e = 0; e < NE; e++)
@@ -560,7 +551,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
          dt = fmin(dt, 0.25 * length_e / speed_e);
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
-      REMHOS_CALI_END("rem.setup.cfl_dt");
       if (myid == 0) { cout << "[remhos setup] end rem.setup.cfl_dt" << endl; }
    }
 
@@ -574,7 +564,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    if (exec_mode == 1)
    {
       if (myid == 0) { cout << "[remhos setup] begin rem.setup.mesh_motion" << endl; }
-      REMHOS_CALI_BEGIN("rem.setup.mesh_motion");
       const int prob_exec = problem_num % 20;
       const bool taylor_green =
          prob_exec == 10 || (prob_exec >= 12 && prob_exec <= 17);
@@ -655,7 +644,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 
       // Return the mesh to the initial configuration.
       x = x0;
-      REMHOS_CALI_END("rem.setup.mesh_motion");
       if (myid == 0) { cout << "[remhos setup] end rem.setup.mesh_motion" << endl; }
    }
 
@@ -755,7 +743,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
 
    if (myid == 0) { cout << "[remhos setup] begin rem.setup.forms" << endl; }
-   REMHOS_CALI_BEGIN("rem.setup.forms");
    if (pa)
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
@@ -803,14 +790,11 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       ones = 1.0;
       m.Mult(ones, lumpedM);
    }
-   REMHOS_CALI_END("rem.setup.forms");
    if (myid == 0) { cout << "[remhos setup] end rem.setup.forms" << endl; }
 
    // Store topological dof data.
    if (myid == 0) { cout << "[remhos setup] begin rem.setup.dof_info" << endl; }
-   REMHOS_CALI_BEGIN("rem.setup.dof_info");
    DofInfo dofs(pfes, bounds_type);
-   REMHOS_CALI_END("rem.setup.dof_info");
    if (myid == 0) { cout << "[remhos setup] end rem.setup.dof_info" << endl; }
 
    // Precompute data required for high and low order schemes. This could be put
@@ -954,9 +938,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    else { subcell_mesh = &pmesh; }
 
    if (myid == 0) { cout << "[remhos setup] begin rem.setup.assembly_data" << endl; }
-   REMHOS_CALI_BEGIN("rem.setup.assembly_data");
    Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
-   REMHOS_CALI_END("rem.setup.assembly_data");
    if (myid == 0) { cout << "[remhos setup] end rem.setup.assembly_data" << endl; }
 
    // Setup the initial conditions.
@@ -2482,3 +2464,4 @@ void setupCaliper()
    //cali_set_global_string_byname("rem.git_hash", GIT_HASH);
 #endif
 }
+
