@@ -359,13 +359,10 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
      fec_bounds(std::max(pfes.GetOrder(0), 1),
                 pmesh->Dimension(), BasisType::GaussLobatto),
      pfes_bounds(pmesh, &fec_bounds),
-     x_min(&pfes_bounds), x_max(&pfes_bounds),
-     el_to_dof_bounds(&pfes_bounds.GetElementToDofTable())
+     x_min(&pfes_bounds), x_max(&pfes_bounds)
 {
    int n = pfes.GetVSize();
    int ne = pmesh->GetNE();
-
-   Transpose(*el_to_dof_bounds, dof_to_el_bounds);
 
    xi_min.SetSize(n);
    xi_max.SetSize(n);
@@ -437,57 +434,43 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
                                    Vector &dof_min, Vector &dof_max,
                                    Array<bool> *active_el)
 {
+   GroupCommunicator &gcomm = pfes_bounds.GroupComm();
+   Array<int> dofsCG;
    const int NE = pfes.GetNE();
-   const real_t inf = std::numeric_limits<double>::infinity();
-   const auto *dof_comm = pfes_bounds.GetDeviceSharedDofCommunicator();
-
-   // These Read() calls will stage the CSR arrays to device on first use, then
-   // MFEM reuses the device copy until the host data changes.
-   const int *d_dof_to_el_i = dof_to_el_bounds.ReadI();
-   const int *d_dof_to_el_j = dof_to_el_bounds.ReadJ();
-   const bool *d_active_el = active_el ? active_el->Read() : NULL;
-   const int bounds_ndofs = x_min.Size();
 
    // Form min/max at each CG dof, considering element overlaps.
-   auto d_el_min = el_min.Read();
-   auto d_el_max = el_max.Read();
-   auto d_x_min_write = x_min.Write();
-   auto d_x_max_write = x_max.Write();
-   mfem::forall(bounds_ndofs, [=] MFEM_HOST_DEVICE (int i)
-   {
-      double cg_min = inf;
-      double cg_max = -inf;
-      for (int j = d_dof_to_el_i[i]; j < d_dof_to_el_i[i + 1]; j++)
-      {
-         const int e = d_dof_to_el_j[j];
-         if (d_active_el && !d_active_el[e]) { continue; }
+   x_min =   std::numeric_limits<double>::infinity();
+   x_max = - std::numeric_limits<double>::infinity();
 
-         cg_min = std::min(cg_min, d_el_min[e]);
-         cg_max = std::max(cg_max, d_el_max[e]);
+   el_min.HostRead(), el_max.HostRead();
+   dof_min.HostReadWrite(), dof_max.HostReadWrite();
+   x_min.HostReadWrite(), x_max.HostReadWrite();
+
+   for (int i = 0; i < NE; i++)
+   {
+      // Inactive elements don't affect the bounds.
+      if (active_el && (*active_el)[i] == false) { continue; }
+
+      pfes_bounds.GetElementDofs(i, dofsCG);
+      for (int j = 0; j < dofsCG.Size(); j++)
+      {
+         x_min(dofsCG[j]) = std::min(x_min(dofsCG[j]), el_min(i));
+         x_max(dofsCG[j]) = std::max(x_max(dofsCG[j]), el_max(i));
       }
-      d_x_min_write[i] = cg_min;
-      d_x_max_write[i] = cg_max;
-   });
-   dof_comm->ReduceAndBcast(x_min, DeviceSharedDofCommunicator::Op::Min);
-   dof_comm->ReduceAndBcast(x_max, DeviceSharedDofCommunicator::Op::Max);
+   }
+   Array<double> minvals(x_min.HostReadWrite(), x_min.Size());
+   Array<double> maxvals(x_max.HostReadWrite(), x_max.Size());
+   gcomm.Reduce<double>(minvals, GroupCommunicator::Min);
+   gcomm.Bcast(minvals);
+   gcomm.Reduce<double>(maxvals, GroupCommunicator::Max);
+   gcomm.Bcast(maxvals);
 
    // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
       dynamic_cast<const TensorBasisElement *>(pfes_bounds.GetFE(0));
-   MFEM_VERIFY(fe_cg != NULL, "Bounds space must use tensor basis elements.");
    const Array<int> &dof_map = fe_cg->GetDofMap();
    const int ndofs = dof_map.Size();
-   MFEM_VERIFY(NE == 0 || el_to_dof_bounds->RowSize(0) == ndofs,
-               "Unexpected bound-space element dof layout.");
-
-   auto d_el_to_dof = el_to_dof_bounds->ReadJ();
-   // This Read() stages the data once on device and then reuses it.
-   auto d_dof_map = dof_map.Read();
-   auto d_x_min = x_min.Read();
-   auto d_x_max = x_max.Read();
-   auto d_dof_min = dof_min.Write();
-   auto d_dof_max = dof_max.Write();
-   mfem::forall(NE*ndofs, [=] MFEM_HOST_DEVICE (int k)
+   for (int i = 0; i < NE; i++)
    {
       // Comment about the case when active_el != null, i.e., when this function
       // is used to compute the bounds of s:
@@ -501,12 +484,14 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       // inactive to active, to get some valid bounds. More specifically, this
       // function is called on the old state, but the result from it is used
       // to limit the new state, which has different active elements.
-      const int e = k / ndofs;
-      const int j = k % ndofs;
-      const int cg_dof = d_el_to_dof[e*ndofs + d_dof_map[j]];
-      d_dof_min[k] = d_x_min[cg_dof];
-      d_dof_max[k] = d_x_max[cg_dof];
-   });
+
+      pfes_bounds.GetElementDofs(i, dofsCG);
+      for (int j = 0; j < dofsCG.Size(); j++)
+      {
+         dof_min(i*ndofs + j) = x_min(dofsCG[dof_map[j]]);
+         dof_max(i*ndofs + j) = x_max(dofsCG[dof_map[j]]);
+      }
+   }
 }
 
 void DofInfo::ComputeElementsMinMax(const Vector &u,
@@ -515,37 +500,26 @@ void DofInfo::ComputeElementsMinMax(const Vector &u,
                                     Array<bool> *active_dof) const
 {
    const int NE = pfes.GetNE(), ndof = pfes.GetFE(0)->GetDof();
-   const real_t inf = std::numeric_limits<double>::infinity();
-   const bool *d_active_el = active_el ? active_el->Read() : NULL;
-   const bool *d_active_dof = active_dof ? active_dof->Read() : NULL;
-   auto d_u = u.Read();
-   auto d_u_min = u_min.Write();
-   auto d_u_max = u_max.Write();
-   mfem::forall(NE, [=] MFEM_HOST_DEVICE (int k)
+   int dof_id;
+   u.HostRead(); u_min.HostReadWrite(); u_max.HostReadWrite();
+   for (int k = 0; k < NE; k++)
    {
-      real_t el_min = inf;
-      real_t el_max = -inf;
+      u_min(k) = numeric_limits<double>::infinity();
+      u_max(k) = -numeric_limits<double>::infinity();
 
       // Inactive elements don't affect the bounds.
-      if (d_active_el && !d_active_el[k])
-      {
-         d_u_min[k] = el_min;
-         d_u_max[k] = el_max;
-         return;
-      }
+      if (active_el && (*active_el)[k] == false) { continue; }
 
       for (int i = 0; i < ndof; i++)
       {
-         const int dof_id = k*ndof + i;
+         dof_id = k*ndof + i;
          // Inactive dofs don't affect the bounds.
-         if (d_active_dof && !d_active_dof[dof_id]) { continue; }
+         if (active_dof && (*active_dof)[dof_id] == false) { continue; }
 
-         el_min = std::min(el_min, d_u[dof_id]);
-         el_max = std::max(el_max, d_u[dof_id]);
+         u_min(k) = min(u_min(k), u(dof_id));
+         u_max(k) = max(u_max(k), u(dof_id));
       }
-      d_u_min[k] = el_min;
-      d_u_max[k] = el_max;
-   });
+   }
 }
 
 void DofInfo::FillNeighborDofs()
@@ -1458,6 +1432,7 @@ void ExtractBdrDofs(int p, Geometry::Type gtype, DenseMatrix &dofs)
 
 void GetMinMax(const ParGridFunction &g, double &min, double &max)
 {
+   g.HostRead();
    double min_loc = g.Min(), max_loc = g.Max();
    MPI_Allreduce(&min_loc, &min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
    MPI_Allreduce(&max_loc, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
