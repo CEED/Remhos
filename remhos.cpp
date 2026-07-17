@@ -575,20 +575,80 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    {
       if (myid == 0) { cout << "[remhos setup] begin rem.setup.mesh_motion" << endl; }
       REMHOS_CALI_BEGIN("rem.setup.mesh_motion");
-      ParGridFunction v(&mesh_pfes);
-      VectorFunctionCoefficient vcoeff(dim, velocity_function);
-      v.ProjectCoefficient(vcoeff);
-
+      const int prob_exec = problem_num % 20;
+      const bool taylor_green =
+         prob_exec == 10 || (prob_exec >= 12 && prob_exec <= 17);
       double t = 0.0;
-      while (t < t_final)
+      if (gpu_setup && taylor_green &&
+          mesh_pfes.GetOrdering() == Ordering::byNODES &&
+          (dim == 2 || dim == 3))
       {
-         t += dt;
-         // Move the mesh nodes.
-         x.Add(std::min(dt, t_final-t), v);
-         // Update the node velocities.
-         v.ProjectCoefficient(vcoeff);
-      }
+         if (myid == 0)
+         {
+            cout << "[remhos setup] using device mesh motion" << endl;
+         }
 
+         const int ndofs = mesh_pfes.GetNDofs();
+         x.UseDevice(true);
+         x0.UseDevice(true);
+         v_gf.UseDevice(true);
+
+         real_t *X = x.ReadWrite();
+         const real_t pi = M_PI;
+         const real_t bmin0 = bb_min[0], bmax0 = bb_max[0];
+         const real_t bmin1 = bb_min[1], bmax1 = bb_max[1];
+         const real_t bmin2 = (dim == 3) ? bb_min[2] : 0.0;
+         const real_t bmax2 = (dim == 3) ? bb_max[2] : 1.0;
+         const real_t inv0 = 1.0 / (bmax0 - bmin0);
+         const real_t inv1 = 1.0 / (bmax1 - bmin1);
+         const real_t inv2 = (dim == 3) ? 1.0 / (bmax2 - bmin2) : 0.0;
+
+         while (t < t_final)
+         {
+            const real_t dt_step = std::min(dt, t_final - t);
+            if (dt_step <= 0.0) { break; }
+
+            mfem::forall(ndofs, [=] MFEM_HOST_DEVICE (int i)
+            {
+               const real_t x0 = X[i];
+               const real_t x1 = X[ndofs + i];
+               const real_t X0 = (x0 - bmin0) * inv0;
+               const real_t X1 = (x1 - bmin1) * inv1;
+               real_t v0 = sin(pi * X0) * cos(pi * X1);
+               real_t v1 = -cos(pi * X0) * sin(pi * X1);
+               if (dim == 3)
+               {
+                  const real_t x2 = X[2 * ndofs + i];
+                  const real_t X2 = (x2 - bmin2) * inv2;
+                  const real_t c2 = cos(pi * X2);
+                  v0 *= c2;
+                  v1 *= c2;
+               }
+               X[i] += dt_step * v0;
+               X[ndofs + i] += dt_step * v1;
+            });
+
+            t += dt_step;
+         }
+      }
+      else
+      {
+         ParGridFunction v(&mesh_pfes);
+         VectorFunctionCoefficient vcoeff(dim, velocity_function);
+         v.ProjectCoefficient(vcoeff);
+
+         while (t < t_final)
+         {
+            const double dt_step = std::min(dt, t_final - t);
+            if (dt_step <= 0.0) { break; }
+
+            // Move the mesh nodes.
+            x.Add(dt_step, v);
+            t += dt_step;
+            // Update the node velocities.
+            v.ProjectCoefficient(vcoeff);
+         }
+      }
 
       // Pseudotime velocity.
       add(x, -1.0, x0, v_gf);
