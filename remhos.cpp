@@ -98,6 +98,11 @@ int exec_mode;
 
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v);
+MFEM_HOST_DEVICE inline void velocity_function_gpu(int prob_exec, int dim,
+                                                   const real_t x[3],
+                                                   const real_t bmin[3],
+                                                   const real_t bmax[3],
+                                                   real_t v[3]);
 
 // Initial condition
 double u0_function(const Vector &x);
@@ -583,14 +588,10 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
          v_gf.UseDevice(true);
 
          real_t *X = x.ReadWrite();
-         const real_t pi = M_PI;
-         const real_t bmin0 = bb_min[0], bmax0 = bb_max[0];
-         const real_t bmin1 = bb_min[1], bmax1 = bb_max[1];
-         const real_t bmin2 = (dim == 3) ? bb_min[2] : 0.0;
-         const real_t bmax2 = (dim == 3) ? bb_max[2] : 1.0;
-         const real_t inv0 = 1.0 / (bmax0 - bmin0);
-         const real_t inv1 = 1.0 / (bmax1 - bmin1);
-         const real_t inv2 = (dim == 3) ? 1.0 / (bmax2 - bmin2) : 0.0;
+         const real_t bmin[3] = { bb_min[0], bb_min[1],
+                                  (dim == 3) ? bb_min[2] : 0.0 };
+         const real_t bmax[3] = { bb_max[0], bb_max[1],
+                                  (dim == 3) ? bb_max[2] : 1.0 };
 
          while (t < t_final)
          {
@@ -599,22 +600,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 
             mfem::forall(ndofs, [=] MFEM_HOST_DEVICE (int i)
             {
-               const real_t x0 = X[i];
-               const real_t x1 = X[ndofs + i];
-               const real_t X0 = (x0 - bmin0) * inv0;
-               const real_t X1 = (x1 - bmin1) * inv1;
-               real_t v0 = sin(pi * X0) * cos(pi * X1);
-               real_t v1 = -cos(pi * X0) * sin(pi * X1);
-               if (dim == 3)
-               {
-                  const real_t x2 = X[2 * ndofs + i];
-                  const real_t X2 = (x2 - bmin2) * inv2;
-                  const real_t c2 = cos(pi * X2);
-                  v0 *= c2;
-                  v1 *= c2;
-               }
-               X[i] += dt_step * v0;
-               X[ndofs + i] += dt_step * v1;
+               const real_t x_loc[3] = { X[i], X[ndofs + i],
+                                         (dim == 3) ? X[2 * ndofs + i] : 0.0 };
+               real_t v_loc[3];
+               velocity_function_gpu(prob_exec, dim, x_loc, bmin, bmax, v_loc);
+               X[i] += dt_step * v_loc[0];
+               X[ndofs + i] += dt_step * v_loc[1];
+               if (dim == 3) { X[2 * ndofs + i] += dt_step * v_loc[2]; }
             });
 
             t += dt_step;
@@ -2067,6 +2059,44 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    dt_ratio = fmin(dt_ratio, (GetDt() != 0.)?(dt / GetDt()):(0.));
 }
 
+MFEM_HOST_DEVICE inline void velocity_function_gpu(int prob_exec, int dim,
+                                                   const real_t x[3],
+                                                   const real_t bmin[3],
+                                                   const real_t bmax[3],
+                                                   real_t v[3])
+{
+   v[0] = 0.0;
+   v[1] = 0.0;
+   v[2] = 0.0;
+
+   switch (prob_exec)
+   {
+      case 10:
+      case 12:
+      case 13:
+      case 14:
+      case 15:
+      case 16:
+      case 17:
+      {
+         // Taylor-Green deformation used for mesh motion in remap tests.
+         const real_t pi = 3.14159265358979323846;
+         const real_t X0 = (x[0] - bmin[0]) / (bmax[0] - bmin[0]);
+         const real_t X1 = (x[1] - bmin[1]) / (bmax[1] - bmin[1]);
+         v[0] =  sin(pi * X0) * cos(pi * X1);
+         v[1] = -cos(pi * X0) * sin(pi * X1);
+         if (dim == 3)
+         {
+            const real_t X2 = (x[2] - bmin[2]) / (bmax[2] - bmin[2]);
+            const real_t c2 = cos(pi * X2);
+            v[0] *= c2;
+            v[1] *= c2;
+         }
+         break;
+      }
+   }
+}
+
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
@@ -2464,4 +2494,3 @@ void setupCaliper()
    //cali_set_global_string_byname("rem.git_hash", GIT_HASH);
 #endif
 }
-
