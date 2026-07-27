@@ -172,6 +172,7 @@ int main(int argc, char *argv[])
    double dt = 0.005;
    bool visualization = true;
    bool p_control = false;
+   bool remap_staggered = false;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -264,7 +265,10 @@ int main(int argc, char *argv[])
                   "Enable or disable GLVis visualization.");
    args.AddOption(&p_control, "-pc", "--pressure-control", "-no-pc",
                   "--no-pressure-control",
-                  "Enable or disable pressure control during hydro remap.");
+                  "Enable or disable pressure control during hydro remap.");   
+   args.AddOption(&remap_staggered, "-res", "--remap-staggered", "-no-res",
+                  "--no-remap-staggered",
+                  "Enable staggered remap during hydro remap.");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
@@ -1151,7 +1155,7 @@ int main(int argc, char *argv[])
       interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0,
                               ind_0_bool_el, x_final,
                               ind_rho_e, optimization_type,
-                              e_ho_interp, adjust_diff);
+                              e_ho_interp, adjust_diff,remap_staggered);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
