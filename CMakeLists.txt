@@ -106,3 +106,26 @@ target_link_libraries(remhos_main PRIVATE Remhos)
 # Install *********************************************************************
 install(TARGETS remhos_main DESTINATION bin)
 install(DIRECTORY data/ DESTINATION data)
+
+# Testing *********************************************************************
+enable_testing()
+
+function(add_remhos_test name)
+    add_executable(${name} ${name}.cpp)
+    add_dependencies(${name} copy_mesh_files)
+    target_link_libraries(${name} PRIVATE Remhos)
+    if (MFEM_USE_HIP)
+        set_source_files_properties(${name}.cpp PROPERTIES LANGUAGE HIP)
+    endif()
+    add_test(NAME ${name}_n1
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 $<TARGET_FILE:${name}>)
+    add_test(NAME ${name}_n3
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3 $<TARGET_FILE:${name}>)
+endfunction()
+
+add_test(NAME remhos_main_n1
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 $<TARGET_FILE:remhos_main>)
+add_test(NAME remhos_main_n3
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3 $<TARGET_FILE:remhos_main>)
+
+add_remhos_test(remhos_tests)

@@ -209,9 +209,9 @@ int main(int argc, char *argv[])
 
 MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
 {
-   // Initialize MPI.
-   mfem::MPI_Session mpi(argc, argv);
-   const int myid = mpi.WorldRank();
+   // Initialize MPI (skip if already initialized, e.g. when called from a test harness).
+   if (!mfem::Mpi::IsInitialized()) { mfem::Mpi::Init(argc, argv); }
+   const int myid = mfem::Mpi::WorldRank();
 
    const char *mesh_file = "default";
    int dim = 3;
@@ -344,10 +344,13 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    const char * allocator_name = REMHOS_DEVICE_ALLOCATOR_NAME;
    size_t umpire_dev_pool_size = ((size_t) dev_pool_size) * 1024 * 1024 * 1024;
    size_t umpire_dev_block_size = 1024 * 1024;
-   rm.makeAllocator<umpire::strategy::QuickPool>(allocator_name,
-                                                 rm.getAllocator("DEVICE"),
-                                                 umpire_dev_pool_size,
-                                                 umpire_dev_block_size);
+   if (!rm.isAllocator(allocator_name))
+   {
+      rm.makeAllocator<umpire::strategy::QuickPool>(allocator_name,
+                                                    rm.getAllocator("DEVICE"),
+                                                    umpire_dev_pool_size,
+                                                    umpire_dev_block_size);
+   }
 
 #ifdef HYPRE_USING_UMPIRE
    HYPRE_SetUmpireDevicePoolName(allocator_name);
