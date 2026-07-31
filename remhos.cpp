@@ -1998,9 +1998,7 @@ void apply_mesh_motion(ParGridFunction &x, Vector &x0, GridFunction &v_gf,
 {
    ParFiniteElementSpace &mesh_pfes = *x.ParFESpace();
    const int dim = mesh_pfes.GetVDim();
-   const int myid = mesh_pfes.GetMyRank();
 
-   if (myid == 0) { cout << "[remhos setup] begin rem.setup.mesh_motion" << endl; }
    const int prob_exec = problem_num % 20;
    const bool taylor_green =
       prob_exec == 10 || (prob_exec >= 12 && prob_exec <= 17);
@@ -2009,11 +2007,6 @@ void apply_mesh_motion(ParGridFunction &x, Vector &x0, GridFunction &v_gf,
        mesh_pfes.GetOrdering() == Ordering::byNODES &&
        (dim == 2 || dim == 3))
    {
-      if (myid == 0)
-      {
-         cout << "[remhos setup] using device mesh motion" << endl;
-      }
-
       const int ndofs = mesh_pfes.GetNDofs();
       x.UseDevice(true);
       x0.UseDevice(true);
@@ -2068,7 +2061,6 @@ void apply_mesh_motion(ParGridFunction &x, Vector &x0, GridFunction &v_gf,
 
    // Return the mesh to the initial configuration.
    x = x0;
-   if (myid == 0) { cout << "[remhos setup] end rem.setup.mesh_motion" << endl; }
 }
 
 MFEM_HOST_DEVICE inline void velocity_function_gpu(int prob_exec, int dim,
