@@ -544,7 +544,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    // Initial time step estimate (CFL-based).
    if (dt < 0.0)
    {
-      if (myid == 0) { cout << "[remhos setup] begin rem.setup.cfl_dt" << endl; }
       dt = std::numeric_limits<double>::infinity();
       Vector vel_e(dim);
       for (int e = 0; e < NE; e++)
@@ -558,7 +557,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
          dt = fmin(dt, 0.25 * length_e / speed_e);
       }
       MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, comm);
-      if (myid == 0) { cout << "[remhos setup] end rem.setup.cfl_dt" << endl; }
    }
 
    // Mesh velocity.
@@ -668,7 +666,6 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       K_HO.KeepNbrBlock(true);
    }
 
-   if (myid == 0) { cout << "[remhos setup] begin rem.setup.forms" << endl; }
    if (pa)
    {
       M_HO.SetAssemblyLevel(AssemblyLevel::PARTIAL);
@@ -716,12 +713,9 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
       ones = 1.0;
       m.Mult(ones, lumpedM);
    }
-   if (myid == 0) { cout << "[remhos setup] end rem.setup.forms" << endl; }
 
    // Store topological dof data.
-   if (myid == 0) { cout << "[remhos setup] begin rem.setup.dof_info" << endl; }
    DofInfo dofs(pfes, bounds_type);
-   if (myid == 0) { cout << "[remhos setup] end rem.setup.dof_info" << endl; }
 
    // Precompute data required for high and low order schemes. This could be put
    // into a separate routine. I am using a struct now because the various
@@ -863,9 +857,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    }
    else { subcell_mesh = &pmesh; }
 
-   if (myid == 0) { cout << "[remhos setup] begin rem.setup.assembly_data" << endl; }
    Assembly asmbl(dofs, lom, inflow_gf, pfes, subcell_mesh, exec_mode);
-   if (myid == 0) { cout << "[remhos setup] end rem.setup.assembly_data" << endl; }
 
    // Setup the initial conditions.
    const int vsize = pfes.GetVSize();
