@@ -405,6 +405,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    TENS::Specialization<2,QVectorLayout::byNODES,1,2,3>::Opt<1>::Add();
    TENS::Specialization<2,QVectorLayout::byVDIM,2,3,3>::Opt<1>::Add();
    DET::Specialization<2,2,3,3>::Add();
+   GRAD::Specialization<2,QVectorLayout::byNODES,0,2,2,1>::Add();
    DGTraceIntegrator::AddSpecialization<2,2,3>();
    DGMassInverse::CGKernels::Specialization<2,2,3>::Add();
    // 2D Q2.
@@ -418,6 +419,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    DGTraceIntegrator::AddSpecialization<2,4,5>();
    DGMassInverse::CGKernels::Specialization<2,4,5>::Add();
    // 3D Q1.
+   GRAD::Specialization<3,QVectorLayout::byNODES,0,3,2,1>::Add();
    DGTraceIntegrator::AddSpecialization<3,2,4>();
    ConvectionIntegrator::AddSpecialization<3,2,4>();
    DGMassInverse::CGKernels::Specialization<3,2,4>::Add();
@@ -2394,4 +2396,3 @@ void setupCaliper()
    //cali_set_global_string_byname("rem.git_hash", GIT_HASH);
 #endif
 }
-
