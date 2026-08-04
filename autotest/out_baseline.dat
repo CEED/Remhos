@@ -3,13 +3,13 @@
 
 - Remap pacman nonper-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 1 -lo 2 -fct 2
-Final mass u:  0.08479546635
-Max value u:   0.8262759545
+Final mass u:  0.08479546673
+Max value u:   0.8194162172
 
 - Remap bump nonper-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 1 -lo 2 -fct 2
-Final mass u:  0.1197299711
-Max value u:   0.9998930413
+Final mass u:  0.1197299275
+Max value u:   0.9998930411
 
 - Transport per-1D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 1 -lo 2 -fct 2
@@ -40,13 +40,13 @@ Max value u:   0.9999889304
 
 - Remap pacman nonper-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 4 -fct 2
-Final mass u:  0.0847954729
-Max value u:   0.7581364675
+Final mass u:  0.08479547311
+Max value u:   0.7605308114
 
 - Remap bump nonper-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 4 -fct 2
-Final mass u:  0.1197299801
-Max value u:   0.9997499683
+Final mass u:  0.1197299572
+Max value u:   0.9997891776
 
 - Transport per-1D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 3 -lo 4 -fct 2
@@ -77,13 +77,13 @@ Max value u:   0.9999889315
 
 - Remap pacman nonper-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 2 -lo 3 -fct 2 -pa
-Final mass u:  0.08479546775
-Max value u:   0.7779015453
+Final mass u:  0.08479546756
+Max value u:   0.7796574102
 
 - Remap bump nonper-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 2 -lo 3 -fct 2 -pa
-Final mass u:  0.1197300033
-Max value u:   0.9997879406
+Final mass u:  0.119730007
+Max value u:   0.9997807884
 
 - Transport per-1D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 2 -lo 3 -fct 2 -pa
@@ -114,13 +114,13 @@ Max value u:   0.9999889307
 
 - Remap pacman nonper-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 2 -lo 4 -fct 2 -pa
-Final mass u:  0.0847954729
-Max value u:   0.7581364676
+Final mass u:  0.08479547311
+Max value u:   0.7605308114
 
 - Remap bump nonper-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 2 -lo 4 -fct 2 -pa
-Final mass u:  0.1197299801
-Max value u:   0.9997499683
+Final mass u:  0.1197299572
+Max value u:   0.9997891776
 
 - Transport per-1D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 2 -lo 4 -fct 2 -pa
@@ -135,7 +135,7 @@ Max value u:   0.9850024108
 - Transport balls-jacks per-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.004 -tf 0.8 -ho 2 -lo 4 -fct 2 -pa
 Final mass u:  0.1623263888
-Max value u:   0.7145371968
+Max value u:   0.7145371967
 
 - Transport bump per-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-cube.mesh -p 0 -rs 1 -o 2 -dt 0.015 -tf 2 -ho 2 -lo 4 -fct 2 -pa
@@ -151,13 +151,13 @@ Max value u:   0.9999889315
 
 - Remap pacman nonper-struct-2D
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt 0.0015 -tf 0.75 -ho 3 -lo 1 -fct 1
-Final mass u:  0.08479546845
-Max value u:   0.905654904
+Final mass u:  0.08479546781
+Max value u:   0.9029174627
 
 - Remap bump nonper-struct-3D
 mpirun -np 2 ./remhos -no-vis -m ./data/cube01_hex.mesh -p 10 -rs 1 -o 2 -dt 0.02 -tf 0.7 -ho 3 -lo 1 -fct 1
-Final mass u:  0.11972981
-Max value u:   0.996173945
+Final mass u:  0.1197296921
+Max value u:   0.9965971304
 
 - Transport per-1D
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-segment.mesh -p 0 -rs 3 -dt 0.001 -tf 1 -ho 3 -lo 1 -fct 1
@@ -186,23 +186,23 @@ Max value u:   0.9995762608
 
 --- Product remap 2D (FCT)
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 1 -fct 1 -ps -s 1
-Final mass us: 0.1815368098
-Mass loss us:  0.00192894
+Final mass us: 0.1815663209
+Mass loss us:  0.00195845
 
 --- Product remap 2D IDP2 (ClipScale)
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 1 -lo 5 -fct 2 -ps -s 12
-Final mass us: 0.1796076412
-Mass loss us:  2.31348e-07
+Final mass us: 0.1796076256
+Mass loss us:  2.46936e-07
 
 --- Product remap 2D IDP3 (FCTProject)
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 2 -dt 0.005 -tf 0.75 -ho 3 -lo 5 -fct 4 -ps -s 13
-Final mass u:  0.08980386855
-Final mass us: 0.179607829
+Final mass u:  0.08980388315
+Final mass us: 0.1796078959
 
 --- BLAST sharpening test - Pacman remap auto-dt
 mpirun -np 2 ./remhos -no-vis -m ./data/inline-quad.mesh -p 14 -rs 1 -dt -1 -tf 0.75 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
-Final mass u:  0.08479612805
-Mass loss u:   6.61247e-07
+Final mass u:  0.08478904799
+Mass loss u:   6.41881e-06
 
 --- BLAST sharpening test - Transport balls-jacks auto-dt
 mpirun -np 2 ./remhos -no-vis -m ./data/periodic-square.mesh -p 5 -rs 3 -dt 0.01 -tf 0.8 -ho 3 -lo 5 -fct 4 -bt 1 -dtc 1
