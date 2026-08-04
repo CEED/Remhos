@@ -98,6 +98,13 @@ int exec_mode;
 
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v);
+MFEM_HOST_DEVICE inline void velocity_function_gpu(int prob_exec, int dim,
+                                                   const real_t x[3],
+                                                   const real_t bmin[3],
+                                                   const real_t bmax[3],
+                                                   real_t v[3]);
+void apply_mesh_motion(ParGridFunction &x, Vector &x0, GridFunction &v_gf,
+                     double dt, double t_final, bool gpu);
 
 // Initial condition
 double u0_function(const Vector &x);
@@ -561,26 +568,7 @@ MFEM_EXPORT int remhos(int argc, char *argv[], double &final_mass_u)
    VectorGridFunctionCoefficient v_mesh_coeff(&v_gf);
    if (exec_mode == 1)
    {
-      ParGridFunction v(&mesh_pfes);
-      VectorFunctionCoefficient vcoeff(dim, velocity_function);
-      v.ProjectCoefficient(vcoeff);
-
-      double t = 0.0;
-      while (t < t_final)
-      {
-         t += dt;
-         // Move the mesh nodes.
-         x.Add(std::min(dt, t_final-t), v);
-         // Update the node velocities.
-         v.ProjectCoefficient(vcoeff);
-      }
-
-
-      // Pseudotime velocity.
-      add(x, -1.0, x0, v_gf);
-
-      // Return the mesh to the initial configuration.
-      x = x0;
+      apply_mesh_motion(x, x0, v_gf, dt, t_final, gpu_setup);
    }
 
    // Define the discontinuous DG finite element space of the given
@@ -1997,6 +1985,114 @@ void AdvectionOperator::UpdateTimeStepEstimate(const Vector &x,
    dt_ratio = fmin(dt_ratio, (GetDt() != 0.)?(dt / GetDt()):(0.));
 }
 
+void apply_mesh_motion(ParGridFunction &x, Vector &x0, GridFunction &v_gf,
+                     double dt, double t_final, bool gpu)
+{
+   ParFiniteElementSpace &mesh_pfes = *x.ParFESpace();
+   const int dim = mesh_pfes.GetVDim();
+
+   const int prob_exec = problem_num % 20;
+   const bool taylor_green =
+      prob_exec == 10 || (prob_exec >= 12 && prob_exec <= 17);
+   double t = 0.0;
+   if (gpu && taylor_green &&
+       mesh_pfes.GetOrdering() == Ordering::byNODES &&
+       (dim == 2 || dim == 3))
+   {
+      const int ndofs = mesh_pfes.GetNDofs();
+      x.UseDevice(true);
+      x0.UseDevice(true);
+      v_gf.UseDevice(true);
+
+      real_t *X = x.ReadWrite();
+      const real_t bmin[3] = { bb_min[0], bb_min[1],
+                               (dim == 3) ? bb_min[2] : 0.0 };
+      const real_t bmax[3] = { bb_max[0], bb_max[1],
+                               (dim == 3) ? bb_max[2] : 1.0 };
+
+      while (t < t_final)
+      {
+         const real_t dt_step = std::min(dt, t_final - t);
+         if (dt_step <= 0.0) { break; }
+
+         mfem::forall(ndofs, [=] MFEM_HOST_DEVICE (int i)
+         {
+            const real_t x_loc[3] = { X[i], X[ndofs + i],
+                                      (dim == 3) ? X[2 * ndofs + i] : 0.0 };
+            real_t v_loc[3];
+            velocity_function_gpu(prob_exec, dim, x_loc, bmin, bmax, v_loc);
+            X[i] += dt_step * v_loc[0];
+            X[ndofs + i] += dt_step * v_loc[1];
+            if (dim == 3) { X[2 * ndofs + i] += dt_step * v_loc[2]; }
+         });
+
+         t += dt_step;
+      }
+   }
+   else
+   {
+      ParGridFunction v(&mesh_pfes);
+      VectorFunctionCoefficient vcoeff(dim, velocity_function);
+      v.ProjectCoefficient(vcoeff);
+
+      while (t < t_final)
+      {
+         const double dt_step = std::min(dt, t_final - t);
+         if (dt_step <= 0.0) { break; }
+
+         // Move the mesh nodes.
+         x.Add(dt_step, v);
+         t += dt_step;
+         // Update the node velocities.
+         v.ProjectCoefficient(vcoeff);
+      }
+   }
+
+   // Pseudotime velocity.
+   add(x, -1.0, x0, v_gf);
+
+   // Return the mesh to the initial configuration.
+   x = x0;
+}
+
+MFEM_HOST_DEVICE inline void velocity_function_gpu(int prob_exec, int dim,
+                                                   const real_t x[3],
+                                                   const real_t bmin[3],
+                                                   const real_t bmax[3],
+                                                   real_t v[3])
+{
+   v[0] = 0.0;
+   v[1] = 0.0;
+   v[2] = 0.0;
+
+   switch (prob_exec)
+   {
+      case 10:
+      case 12:
+      case 13:
+      case 14:
+      case 15:
+      case 16:
+      case 17:
+      {
+         // Taylor-Green deformation used for mesh motion in remap tests.
+         const real_t pi = 3.14159265358979323846;
+         const real_t X0 = (x[0] - bmin[0]) / (bmax[0] - bmin[0]);
+         const real_t X1 = (x[1] - bmin[1]) / (bmax[1] - bmin[1]);
+         v[0] =  sin(pi * X0) * cos(pi * X1);
+         v[1] = -cos(pi * X0) * sin(pi * X1);
+         if (dim == 3)
+         {
+            const real_t X2 = (x[2] - bmin[2]) / (bmax[2] - bmin[2]);
+            const real_t c2 = cos(pi * X2);
+            v[0] *= c2;
+            v[1] *= c2;
+         }
+         break;
+      }
+   }
+}
+
 // Velocity coefficient
 void velocity_function(const Vector &x, Vector &v)
 {
@@ -2394,4 +2490,3 @@ void setupCaliper()
    //cali_set_global_string_byname("rem.git_hash", GIT_HASH);
 #endif
 }
-
