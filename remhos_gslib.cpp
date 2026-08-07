@@ -2191,7 +2191,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
          // {
          //    double pval = p_interp_qf(s * e + i);
          //    double rhoval = rho_interp_qf(s * e + i);
-         //    double e_val = pval / (0.4 * rhoval);
+         //    double e_val = pval / (rhoval);
 
          //    if (e_val > eps)
          //    {
@@ -2325,7 +2325,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         pressure[counter] = 0.4* rho_vals(q) * e_vals(q);
+         pressure[counter] = rho_vals(q) * e_vals(q);
          counter++;
       }
    }

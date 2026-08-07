@@ -897,9 +897,9 @@ public:
                   p_initial_.GetValues(e, p0_vals);
                   energy.GetValues(Tr, ir, e_vals);
 
-                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
+                  double pressureDiff = rho_vals(q) * e_vals(q) - p0_vals(q);
 
-                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
+                  pGradRho[s_offset+q] = w * pressureDiff * e_vals(q);
                }
             }
          }
@@ -1241,7 +1241,7 @@ double IntegratePressureDiff(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
+         double pressureDiff = rho_vals(q) * e_vals(q) - p0_vals(q);
          integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
@@ -1580,9 +1580,9 @@ public:
                   p_initial_.GetValues(e, p0_vals);
                   energy.GetValues(Tr, ir, e_vals);
 
-                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
+                  double pressureDiff = rho_vals(q) * e_vals(q) - p0_vals(q);
 
-                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
+                  pGradRho[s_offset+q] = w * pressureDiff * e_vals(q);
                }
             }
          }
@@ -2155,7 +2155,7 @@ double IntegratePressureDiff(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
+         double pressureDiff = rho_vals(q) * e_vals(q) - p0_vals(q);
          integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
