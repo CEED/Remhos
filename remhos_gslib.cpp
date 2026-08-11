@@ -2148,41 +2148,51 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
       }
 
       // Compute min and max energy in the new mesh element.
-      double el_min =   std::numeric_limits<double>::infinity(),
-             el_max = - std::numeric_limits<double>::infinity();
+      double el_min = - std::numeric_limits<double>::infinity(),
+             el_max = + std::numeric_limits<double>::infinity();
       // The new mesh element is completely empty -> we want zeros in it.
       if (el_has_ind == false) { el_min = el_max = 0.0; }
       else
       {
          MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
 
-         double rho_val_min =   std::numeric_limits<double>::infinity();
-         double rho_val_max = - std::numeric_limits<double>::infinity();
-
          for (int q = 0; q < nqp; q++)
          {
-            double rhoval = rho_interp_qf(e*nqp + q);
+            const int idx = e*nqp + q;
 
-            rho_val_min = std::min(rho_val_min, rhoval);
-            rho_val_max = std::max(rho_val_max, rhoval);
+            const double rho = rho_interp_qf(idx);
+            const double pval_max = p_qf_max(idx);
+            const double pval_min = p_qf_min(idx);
+
+            MFEM_VERIFY(rho > eps,
+                        "Non-positive optimized density at active point: "
+                        << "element " << e << ", quadrature point " << q
+                        << ", rho = " << rho);
+            MFEM_VERIFY(pval_min <= pval_max + eps,
+                        "Invalid pressure bounds at element " << e
+                        << ", quadrature point " << q << ": ["
+                        << pval_min << ", " << pval_max << "]");
+
+            const double e_val_max = pval_max / rho;
+            const double e_val_min = pval_min / rho;
+
+            el_min = std::max(el_min, e_val_min);
+            el_max = std::min(el_max, e_val_max);
          }
 
-         for (int q = 0; q < nqp; q++)
+         if (el_min > el_max)
          {
-            double pval_max = p_qf_max(e*nqp + q);
-            double pval_min = p_qf_min(e*nqp + q);
+            const double empty_el_min = el_min;
+            const double empty_el_max = el_max;
+            const double collapsed_bound = 0.5 * (el_min + el_max);
+            el_min = el_max = collapsed_bound;
 
-            double e_val_max = pval_max / ( rho_val_min);
-            double e_val_min = pval_min / ( rho_val_max);
-
-            if( e_val_max < e_interp_qf(e*nqp + q) || e_val_min > e_interp_qf(e*nqp + q))
-            {
-               std::cout<<"value out of bounds found: "<< e_val_max<< " | "<< e_val_min<<" | "<< e_interp_qf(e*nqp + q)<<std::endl;
-            }
-
-            el_min = std::min(el_min, e_val_min);
-            el_max = std::max(el_max, e_val_max);
-
+            std::cout << "Empty pressure-derived energy interval on rank "
+                      << myid << ", element " << e << ": ["
+                      << empty_el_min << ", " << empty_el_max << "], gap = "
+                      << empty_el_min - empty_el_max
+                      << ". Setting both energy bounds to "
+                      << collapsed_bound << '.' << std::endl;
          }
 
          // // Taking bounds only at quad points can lead to clipping and reducing
