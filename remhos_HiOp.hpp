@@ -641,8 +641,8 @@ private:
 
    real_t w_1 = 1e0;
    real_t w_2 = 1.0;
-   real_t w_3 = 1.0;
-   real_t w_p = 1e3;
+   real_t w_3 = 0.0;
+   real_t w_p = 0.1;
    bool pressureOpt = false;
 
    mutable ParBilinearForm * mass_form =nullptr;
@@ -660,6 +660,8 @@ private:
    };
 
 public:
+   double gamma = 1.0;
+
    RemhosIndRhoEHiOpProblem(QuadratureSpace       & qspace,
                             ParFiniteElementSpace & fespace,
                             const Vector          & pos_final_,
@@ -813,7 +815,7 @@ public:
       real_t pDiffSq = 0.0;
       if(pressureOpt)
       {
-         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, &energy);
+         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, gamma, &energy);
       } 
 
       return w_1*normindSq + w_2*normrohSq +w_3* val + w_p*pDiffSq;
@@ -897,9 +899,9 @@ public:
                   p_initial_.GetValues(e, p0_vals);
                   energy.GetValues(Tr, ir, e_vals);
 
-                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
+                  double pressureDiff = gamma *rho_vals(q) * e_vals(q) - p0_vals(q);
 
-                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
+                  pGradRho[s_offset+q] = gamma*w * pressureDiff * e_vals(q);
                }
             }
          }
@@ -1213,6 +1215,7 @@ double Integrate(const Vector &pos,
 double IntegratePressureDiff(const Vector &pos,
                            const QuadratureFunction *p0_,
                            const QuadratureFunction *rho_,
+                           const double gamma,
                            const ParGridFunction *e_) const
 {
    MFEM_VERIFY(rho_ && p0_ && e_, "All function must be specified.");
@@ -1241,7 +1244,7 @@ double IntegratePressureDiff(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
+         double pressureDiff = gamma * rho_vals(q) * e_vals(q) - p0_vals(q);
          integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
@@ -1336,10 +1339,12 @@ public:
 
    real_t w_1 = 1e1;
    real_t w_2 = 1e1;
-   real_t w_3 = 1e1;
+   real_t w_3 = 0;
    real_t w_4 = 1e1;
    real_t w_4_H1 = 1e-1;
-   real_t w_p = 1e3;
+   real_t w_p = 1e6;
+
+   double gamma = 1.0;
 
    RemhosHydroHiOpProblem(  QuadratureSpace        & qspace,
                            ParFiniteElementSpace & scalarfespace,
@@ -1503,7 +1508,7 @@ public:
 
       if(pressureOpt)
       {
-         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, &energy);
+         pDiffSq = IntegratePressureDiff(pos_final, &p_initial_, &rho, gamma, &energy);
       } 
 
       return w_1*normindSq + w_2*normrohSq + w_3* normESq + w_4* normVSq + w_4_H1* FnormGradVSq + w_p*pDiffSq;
@@ -1580,9 +1585,9 @@ public:
                   p_initial_.GetValues(e, p0_vals);
                   energy.GetValues(Tr, ir, e_vals);
 
-                  double pressureDiff = 0.4 *rho_vals(q) * e_vals(q) - p0_vals(q);
+                  double pressureDiff = gamma *rho_vals(q) * e_vals(q) - p0_vals(q);
 
-                  pGradRho[s_offset+q] = 0.4*w * pressureDiff * e_vals(q);
+                  pGradRho[s_offset+q] = gamma*w * pressureDiff * e_vals(q);
                }
             }
          }
@@ -2127,6 +2132,7 @@ double Integrate_e_minus_e0(const Vector &pos,
 double IntegratePressureDiff(const Vector &pos,
                            const QuadratureFunction *p0_,
                            const QuadratureFunction *rho_,
+                           const double gamma,
                            const ParGridFunction *e_) const
 {
    MFEM_VERIFY(rho_ && p0_ && e_, "All function must be specified.");
@@ -2155,7 +2161,7 @@ double IntegratePressureDiff(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         double pressureDiff = 0.4 * rho_vals(q) * e_vals(q) - p0_vals(q);
+         double pressureDiff = gamma * rho_vals(q) * e_vals(q) - p0_vals(q);
          integral += 0.5 * Tr.Weight() * ip.weight * pressureDiff * pressureDiff;
       }
    }
@@ -3200,7 +3206,7 @@ void CalcConstraint(const int constNumber,
       Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
       v_0.SetFromTrueDofs(v_0_true);
 
-               std::cout<<"constNumber  " << constNumber<<std::endl;
+               //std::cout<<"constNumber  " << constNumber<<std::endl;
 
       if( constNumber == 0)
       {
@@ -3208,7 +3214,7 @@ void CalcConstraint(const int constNumber,
                                        &ind_0, &rho_0, &energy, &v_0);
 
          constVal[0] = tot_energy - targetEnergy;
-         std::cout<<"Const  " << constVal[0]<<std::endl;
+         //std::cout<<"Const  " << constVal[0]<<std::endl;
       }
       else{mfem_error("Constraint index does not exist.");}
    };

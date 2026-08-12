@@ -29,6 +29,7 @@ void InitializeQuadratureFunction(Coefficient &c,
 
 void ComputePressureQF(const QuadratureFunction &rho,
                        const ParGridFunction &energy,
+                       const double gamma, 
                        QuadratureFunction &p);
 
 void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
@@ -140,6 +141,7 @@ private:
                           const QuadratureFunction &rho_interp_qf,
                           const Vector &pos_final,
                           const Vector &ind_max,
+                          const double gamma,
                           Vector &e_min, Vector &e_max);
 
    void UpdateEInterp(ParGridFunction &e_interp,
@@ -157,6 +159,7 @@ private:
    void ComputePressure(const Vector &pos,
                         const QuadratureFunction &rho_,
                         const ParGridFunction &e_,
+                        const double gamma,
                         QuadratureFunction &pressure);
 
    // Diffuse the indicator in the mixed zones by L2 FCT-projection.
@@ -194,6 +197,7 @@ public:
    void RemapHydro(const Vector &ind_rho_e_v_0,
                    bool remap_v, bool p_control,
                    const QuadratureFunction &p_0,
+                   const double gamma,
                    Array<bool> &active_el_0,
                    const Vector &pos_final,
                    Vector &ind_rho_e_v, int opt_type,
