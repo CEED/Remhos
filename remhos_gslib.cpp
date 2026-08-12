@@ -61,6 +61,7 @@ void InitializeQuadratureFunction(Coefficient &c,
 
 void ComputePressureQF(const QuadratureFunction &rho,
                        const ParGridFunction &energy,
+                       const double gamma,
                        QuadratureFunction &p)
 {
    auto qspace = dynamic_cast<QuadratureSpace *>(p.GetSpace());
@@ -77,9 +78,57 @@ void ComputePressureQF(const QuadratureFunction &rho,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         p(e*nip + q) = rho(e*nip + q) * energy.GetValue(Tr, ip);
+         p(e*nip + q) = gamma * rho(e*nip + q) * energy.GetValue(Tr, ip);
       }
    }
+}
+
+void MarkBoundViolations(const Vector &u,
+                         const Vector &u_min,
+                         const Vector &u_max,
+                         Vector &violations,
+                         real_t tol = 1e-12)
+{
+   MFEM_VERIFY(u.Size() == u_min.Size() &&
+               u.Size() == u_max.Size(),
+               "Size mismatch in bound violation check.");
+
+   violations.SetSize(u.Size());
+   for (int i = 0; i < u.Size(); i++)
+   {
+      violations(i) = (u(i) < u_min(i) - tol ||
+                       u(i) > u_max(i) + tol) ? 1.0 : 0.0;
+
+                     //   if( violations(i) == 1.0)
+                     //   {
+                     //       std::cout << "Bound violation at index " << i
+                     //                   << ": u = " << u(i)
+                     //                   << ", u_min = " << u_min(i)
+                     //                   << ", u_max = " << u_max(i) << std::endl;
+                     //   }
+   }
+}
+
+QuadratureFunction MakeBoundViolationQF(QuadratureSpace &qspace,
+                                        const Vector &u,
+                                        const Vector &u_min,
+                                        const Vector &u_max,
+                                        real_t tol = 1e-12)
+{
+   QuadratureFunction violations(qspace);
+   MarkBoundViolations(u, u_min, u_max, violations, tol);
+   return violations;
+}
+
+ParGridFunction MakeBoundViolationGF(ParFiniteElementSpace &pfes,
+                                     const Vector &u,
+                                     const Vector &u_min,
+                                     const Vector &u_max,
+                                     real_t tol = 1e-12)
+{
+   ParGridFunction violations(&pfes);
+   MarkBoundViolations(u, u_min, u_max, violations, tol);
+   return violations;
 }
 
 void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
@@ -642,6 +691,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
 void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     bool remap_v, bool p_control,
                                     const QuadratureFunction &p_0,
+                                    const double gamma,
                                     Array<bool> &active_el_0,
                                     const Vector &pos_final,
                                     Vector &ind_rho_e_v, int opt_type,
@@ -1147,8 +1197,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          Vector e_max_p;
 
          CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
-                           p_max, p_min, rho_opt, pos_final, ind_max,
+                           p_max, p_min, rho_opt, pos_final, ind_max, gamma,
                            e_min_p, e_max_p);
+
+         e_min = e_min_p;
+         e_max = e_max_p;
 
          delete ot_prob;
 
@@ -1207,9 +1260,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
             {
                hiop->w_1 = 1.0;
                hiop->w_2 = 1.0;
-               hiop->w_3 = 1.0;
+               hiop->w_3 = 0.0;
                hiop->w_4 = 0.0;
-               hiop->w_p = 1e3;
+               hiop->w_p = 1e6;
+               hiop->w_4_H1 = 0.0;
+               hiop->gamma = gamma;
             }
 
             ot_prob = hiop;
@@ -1229,6 +1284,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
                weightedSpace);
+
+            dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->gamma = gamma;
          }
          optsolver->SetOptimizationProblem(*ot_prob);
          optsolver->SetMaxIter(max_iter);
@@ -1255,7 +1312,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
          ParGridFunction    e_opt  (&pfes_e_final,
                                     T_vector_design.GetBlock(2).GetData());
-         ComputePressure( pos_final, rho_opt, e_opt, pressure_opt);
+         ComputePressure( pos_final, rho_opt, e_opt, gamma, pressure_opt);
 
          ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
          pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1511,10 +1568,23 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
    if (p_control)
    {
-      QuadratureFunction p(qspace);
-      ComputePressureQF(rho, e, p);
+      QuadratureFunction p(qspace_final);
+      ComputePressureQF(rho, e, gamma, p);
       if (Mpi::Root()) { std::cout << "*\nPressure violations: \n"; }
       CheckBounds(pmesh_init.GetMyRank(), p, p_min, p_max);
+
+      QuadratureFunction violations_p = MakeBoundViolationQF(qspace_final, p, p_min, p_max);
+      QuadratureFunction violations_e = MakeBoundViolationQF(qspace_final, e, e_min, e_max);
+
+      ParaViewDataCollection pvdc("bound_violations", &pmesh_final);
+      pvdc.SetDataFormat(VTKFormat::BINARY32);
+      pvdc.SetCycle(0);
+      pvdc.SetTime(1.0);
+      pvdc.RegisterQField("p_viol", &violations_p);
+      pvdc.RegisterQField("e_viol", &violations_e);
+      pvdc.RegisterQField("p", &p);
+      pvdc.Save();
+
    }
    if (remap_v)
    {
@@ -2124,6 +2194,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
                                           const QuadratureFunction &rho_interp_qf,
                                           const Vector &pos_final,
                                           const Vector &ind_max,
+                                          const double gamma,
                                           Vector &e_min, Vector &e_max)
 {
    const double eps = 1e-12;
@@ -2172,8 +2243,9 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
             double pval_max = p_qf_max(e*nqp + q);
             double pval_min = p_qf_min(e*nqp + q);
 
-            double e_val_max = pval_max / ( rho_val_min);
-            double e_val_min = pval_min / ( rho_val_max);
+            double rhoval = rho_interp_qf(e*nqp + q);
+            double e_val_max = pval_max / ( gamma* rho_val_min);
+            double e_val_min = pval_min / ( gamma* rho_val_max);
 
             if( e_val_max < e_interp_qf(e*nqp + q) || e_val_min > e_interp_qf(e*nqp + q))
             {
@@ -2298,6 +2370,7 @@ void InterpolationRemap::CheckBounds(int myid, const Vector &v,
 void InterpolationRemap::ComputePressure(const Vector &pos,
       const QuadratureFunction &rho_,
       const ParGridFunction &e_,
+      const double gamma,
       QuadratureFunction &pressure)
 {
    const QuadratureSpace *qspace = dynamic_cast<const QuadratureSpace *>
@@ -2325,7 +2398,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
       {
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
-         pressure[counter] = 0.4* rho_vals(q) * e_vals(q);
+         pressure[counter] = gamma* rho_vals(q) * e_vals(q);
          counter++;
       }
    }
