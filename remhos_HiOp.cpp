@@ -401,12 +401,12 @@ void PressureDiffGradEIntegrator::AssembleRHSElementVect(
 
     // evaluate gaussian integration weight
     double w = ip.weight * T.Weight();
-    double pressureDiff = 0.4 * rho_vals(i) * e_vals(i) - p0_vals(i);
+    double pressureDiff = rho_vals(i) * e_vals(i) - p0_vals(i);
 
     //std::cout<<pressureDiff<<std::endl;
     el.CalcShape(ip, N);
 
-    elvect.Add( 0.4* w * pressureDiff * rho_vals[i], N);
+    elvect.Add(w * pressureDiff * rho_vals[i], N);
   }
 }
 

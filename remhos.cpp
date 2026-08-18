@@ -155,6 +155,7 @@ int main(int argc, char *argv[])
    int order = 3;
    int mesh_order = 2;
    int ode_solver_type = 3;
+   double gamma = 1.0;
    HOSolverType ho_type           = HOSolverType::LocalInverse;
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
@@ -260,6 +261,8 @@ int main(int argc, char *argv[])
                   "                   1 - Bounds violation of the LO sltn.");
    args.AddOption(&dt, "-dt", "--time-step",
                   "Initial time step size (dt might change based on -dtc).");
+   args.AddOption(&gamma, "-g", "--gamma",
+                  "Specific gamma ratio for the pressure computation.");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -1099,7 +1102,7 @@ int main(int argc, char *argv[])
 
       // Compute initial pressure.
       QuadratureFunction p_0(&qspace);
-      ComputePressureQF(rho_0, e_0, p_0);
+      ComputePressureQF(rho_0, e_0, gamma, p_0);
 
       // Visualize initial values.
       if (visualization)
@@ -1152,7 +1155,7 @@ int main(int argc, char *argv[])
       interpolator.SetVelocityFESpace(pfes_v);
       const bool e_ho_interp = false;
       const bool adjust_diff = false;
-      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0,
+      interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0, gamma,
                               ind_0_bool_el, x_final,
                               ind_rho_e, optimization_type,
                               e_ho_interp, adjust_diff,remap_staggered);
@@ -1164,7 +1167,7 @@ int main(int argc, char *argv[])
 
       // Compute final pressure.
       QuadratureFunction p(&qspace);
-      ComputePressureQF(rho, e, p);
+      ComputePressureQF(rho, e, gamma, p);
 
       // Visualize final values.
       if (visualization)

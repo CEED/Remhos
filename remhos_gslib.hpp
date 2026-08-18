@@ -142,7 +142,8 @@ private:
                           const Vector &pos_final,
                           const Vector &ind_max,
                           const double gamma,
-                          Vector &e_min, Vector &e_max);
+                          Vector &e_min, Vector &e_max,
+                          Vector &p_max_ele, Vector &p_min_ele);
 
    void UpdateEInterp(ParGridFunction &e_interp,
                       Vector &e_min, Vector &e_max);
