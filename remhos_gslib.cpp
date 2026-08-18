@@ -712,15 +712,18 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    // Visualize the initial LOR GridFunctions.
    if (visualization)
    {
+      const std::string pp = "p" + std::to_string(problem_id) + " ";
+      const std::string ti = pp + "ind_0 LOR", tr = pp + "rho_0 LOR";
       socketstream sock_ind, sock_rho;
-      VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, "ind_0 LOR",
+      VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, ti.c_str(),
                      0, 500, 350, 350);
-      VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, "rho_0 LOR",
+      VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, tr.c_str(),
                      350, 500, 350, 350);
       if (p_control)
       {
+         const std::string tp = pp + "p_0 LOR";
          socketstream sock_p;
-         VisualizeField(sock_p, "localhost", 19916, p_0_lor, "p_0 LOR",
+         VisualizeField(sock_p, "localhost", 19916, p_0_lor, tp.c_str(),
                         1050, 500, 350, 350);
       }
    }
@@ -748,7 +751,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    if (p_control)
    {
       finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
-      VisQuadratureFunction(pmesh_final, p_interp, "p QF interpolated", 1050, 900);
+      // The interpolation above feeds the pressure box and must always run; the
+      // GLVis view is optional and gated so headless runs open no socket.
+      if (visualization)
+      {
+         const std::string t = "p" + std::to_string(problem_id) +
+                               " p QF interpolated";
+         VisQuadratureFunction(pmesh_final, p_interp, t, 1050, 900);
+      }
    }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
@@ -1567,6 +1577,38 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                       rho(&qspace_final, ind_rho_e_v.GetData() + size_qf);
    ParGridFunction e(&pfes_e_final, ind_rho_e_v.GetData() + 2*size_qf);
    ParGridFunction v(&pfes_v_final, ind_rho_e_v.GetData() + 2*size_qf + size_gf_e);
+
+   // Remap-state output: the interpolated and the OPTIMIZED (final) fields side
+   // by side -- indicator, density, energy, velocity, and the pressure
+   // p = rho*e postprocessed from the optimized density and energy. Written to
+   // ParaView only; the final fields are already shown live by the driver's
+   // remapped-state GLVis, so duplicating them on-screen here just floods GLVis.
+   // Runs after the optimization branch, so it is identical for every opt_type
+   // (HiOp and LVPP alike). Gated so headless runs write no files.
+   if (visualization)
+   {
+      QuadratureFunction p_final(&qspace_final);
+      ComputePressureQF(rho, e, p_final);
+      const std::string ptag = "p" + std::to_string(problem_id);
+
+      ParaViewDataCollection pvdc("remap_" + ptag, &pmesh_final);
+      pvdc.SetDataFormat(VTKFormat::BINARY32);
+      pvdc.SetCycle(0);
+      pvdc.SetTime(1.0);
+      // Final (optimized) fields.
+      pvdc.RegisterQField("ind_final",   &ind);
+      pvdc.RegisterQField("rho_final",   &rho);
+      pvdc.RegisterField ("e_final",     &e);
+      pvdc.RegisterField ("v_final",     &v);
+      pvdc.RegisterQField("pressure_final", &p_final);
+      // Interpolated (pre-optimization) fields, for comparison.
+      pvdc.RegisterQField("ind_interp",  &ind_interp);
+      pvdc.RegisterQField("rho_interp",  &rho_interp);
+      pvdc.RegisterField ("e_interp",    &e_interp);
+      pvdc.RegisterField ("v_interp",    &v_interp);
+      if (p_control) { pvdc.RegisterQField("pressure_interp", &p_interp); }
+      pvdc.Save();
+   }
 
    // Print conservation errors.
    const double volume_f_opt = Integrate(pos_final, &ind, nullptr, nullptr,

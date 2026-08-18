@@ -1108,19 +1108,22 @@ int main(int argc, char *argv[])
       // Visualize initial values.
       if (visualization)
       {
-         VisQuadratureFunction(pmesh, ind_0, "ind_0 QF", 0, 0);
-         VisQuadratureFunction(pmesh, rho_0, "rho_0 QF", 350, 0);
+         const std::string pp = "p" + std::to_string(problem_num) + " ";
+         VisQuadratureFunction(pmesh, ind_0, pp + "ind_0 QF", 0, 0);
+         VisQuadratureFunction(pmesh, rho_0, pp + "rho_0 QF", 350, 0);
          socketstream sock_e;
-         VisualizeField(sock_e, "localhost", 19916, e_0, "e_0 GF",
+         const std::string te0 = pp + "e_0 GF";
+         VisualizeField(sock_e, "localhost", 19916, e_0, te0.c_str(),
                         700, 0, 350, 350);
          if (p_control)
          {
-            VisQuadratureFunction(pmesh, p_0, "p_0 QF", 1050, 0);
+            VisQuadratureFunction(pmesh, p_0, pp + "p_0 QF", 1050, 0);
          }
          if (remap_v)
          {
             socketstream sock_v;
-            VisualizeField(sock_v, "localhost", 19916, v_0, "v_0 GF",
+            const std::string tv0 = pp + "v_0 GF";
+            VisualizeField(sock_v, "localhost", 19916, v_0, tv0.c_str(),
                            1400, 0, 350, 350, "", true);
          }
 
@@ -1152,6 +1155,7 @@ int main(int argc, char *argv[])
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       interpolator.p_control_rho_margin = p_control_rho_margin;
+      interpolator.problem_id    = problem_num;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
@@ -1175,19 +1179,22 @@ int main(int argc, char *argv[])
       if (visualization)
       {
          x = x_final;
-         VisQuadratureFunction(pmesh, ind, "ind QF", 0, 500);
-         VisQuadratureFunction(pmesh, rho, "rho QF", 350, 500);
+         const std::string pp = "p" + std::to_string(problem_num) + " ";
+         VisQuadratureFunction(pmesh, ind, pp + "ind QF", 0, 500);
+         VisQuadratureFunction(pmesh, rho, pp + "rho QF", 350, 500);
          socketstream sock_f;
-         VisualizeField(sock_f, "localhost", 19916, e, "e GF",
+         const std::string tef = pp + "e GF";
+         VisualizeField(sock_f, "localhost", 19916, e, tef.c_str(),
                         700, 500, 350, 350);
          if (p_control)
          {
-            VisQuadratureFunction(pmesh, p, "p QF", 1050, 500);
+            VisQuadratureFunction(pmesh, p, pp + "p QF", 1050, 500);
          }
          if (remap_v)
          {
             socketstream sock_v;
-            VisualizeField(sock_v, "localhost", 19916, v, "v GF",
+            const std::string tvf = pp + "v GF";
+            VisualizeField(sock_v, "localhost", 19916, v, tvf.c_str(),
                            1400, 500, 350, 350, "", true);
          }
 

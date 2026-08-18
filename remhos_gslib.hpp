@@ -213,6 +213,8 @@ public:
    // constraint at the cost of density leaving its strict DMP bounds. Default
    // matches the historical hard-coded 0.1.
    real_t p_control_rho_margin = 0.1;
+   // Problem id, used only to label the pressure visualization output.
+   int problem_id = -1;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 };

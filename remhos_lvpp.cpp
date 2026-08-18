@@ -466,9 +466,8 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
       const real_t dmp_lo = e_min(i), dmp_hi = e_max(i);
       const real_t dmp_w  = dmp_hi - dmp_lo;
       if (dmp_w <= 0.0) { continue; }
-      // No material, or a density so small that p = rho*e is insensitive to e:
-      // the pressure bound is not a constraint here, keep the DMP box.
-      if (ind_d(i) <= ind_tol || rho_d(i) <= rho_floor) { continue; }
+      // EXPERIMENT: eta check removed; only skip where rho is negligible.
+      if (rho_d(i) <= rho_floor) { continue; }
 
       // Pressure requirement at this dof, using its nearest quadrature point's
       // density (see the header note: heuristic, not a pointwise guarantee).
@@ -912,8 +911,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
          pcoup.EvalAtQuads(e_int_k, e_q);
          for (int i = 0; i < size_qf; i++)
          {
-            const bool informative = ind_star(i) > opts.ind_tol &&
-                                     rho_star(i) > rho_floor;
+            const bool informative = rho_star(i) > rho_floor; // EXPERIMENT: no eta
             g_quad(i) = informative ? p_star(i) / (gm1 * rho_star(i)) : e_q(i);
          }
          // Carry g to the energy dofs by an L2 (mass) projection. Note this
