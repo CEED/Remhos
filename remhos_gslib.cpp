@@ -1181,8 +1181,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
          optsolver->SetOptimizationProblem(*ot_prob);
          optsolver->SetMaxIter(max_iter);
-         optsolver->SetAbsTol(1e-7);
-         optsolver->SetRelTol(1e-7);
+         optsolver->SetAbsTol(1e-6);
+         optsolver->SetRelTol(1e-6);
          optsolver->SetPrintLevel(3);
 
          if (subprob)
@@ -1508,7 +1508,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          // CalcRhoBounds, so p_interp satisfies it by construction and would
          // make this test always pass.
          QuadratureFunction p_implied(&qspace_final);
-         ComputePressureQF(rho_interp, e_interp, p_implied);
+         ComputePressureQF(rho_interp, e_interp, gamma, p_implied);
          real_t pviol_in = 0.0;
          for (int i = 0; i < size_qf; i++)
          {
@@ -1543,7 +1543,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                      x_initial.GetBlock(1).GetData());
             QuadratureFunction e_p_qf(&qspace_final);
             ParGridFunction e_p(&pfes_e_final, x_initial.GetBlock(2).GetData());
-            ComputePressureQF(rho_p, e_p, e_p_qf);
+            ComputePressureQF(rho_p, e_p, gamma, e_p_qf);
             real_t pviol_out = 0.0;
             for (int i = 0; i < size_qf; i++)
             {
@@ -1648,7 +1648,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    if (visualization)
    {
       QuadratureFunction p_final(&qspace_final);
-      ComputePressureQF(rho, e, p_final);
+      ComputePressureQF(rho, e, gamma, p_final);
       const std::string ptag = "p" + std::to_string(problem_id);
 
       ParaViewDataCollection pvdc("remap_" + ptag, &pmesh_final);
@@ -2414,6 +2414,8 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
       {
          MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
 
+         double rho_min = + std::numeric_limits<double>::infinity();
+
          for (int q = 0; q < nqp; q++)
          {
             const int idx = e*nqp + q;
@@ -2439,6 +2441,8 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
 
             el_min_p = std::min(el_min_p, pval_min);
             el_max_p = std::max(el_max_p, pval_max);
+
+            rho_min = std::min(rho_min, rho);
          }
 
          bool is_collapsed = false;
@@ -2457,7 +2461,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
                       << myid << ", element " << e << ": ["
                       << empty_el_min << ", " << empty_el_max << "], gap = "
                       << empty_el_min - empty_el_max
-                      << ". Setting both energy bounds to "
+                      << ", min rho "<<rho_min<<". Setting both energy bounds to "
                       << collapsed_bound << '.' << std::endl;
          }
 
