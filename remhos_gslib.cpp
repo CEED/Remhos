@@ -813,8 +813,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    UpdateRhoInterp(rho_interp, rho_min, rho_max);
    if (p_control)
    {
-      rho_min -= 0.1;
-      rho_max += 0.1;
+      rho_min -= p_control_rho_margin;
+      rho_max += p_control_rho_margin;
    }
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
@@ -1411,7 +1411,143 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       Dykstra projector(pmesh_final.GetComm(), C, mass,
                         legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
-      projector.Project(x_initial);
+      if (!p_control) { projector.Project(x_initial); }
+      else
+      {
+         // Two-stage pressure control.
+         //
+         // Stage 1 projects (ind, rho, p, v): the specific internal energy is
+         // replaced by the pressure, which is then bounded by construction
+         // through the Fermi-Dirac generator. With p = rho*e the internal
+         // energy int eta*rho*e is just int eta*p, so that constraint is
+         // bilinear in (eta, p) rather than trilinear in (eta, rho, e).
+         //
+         // Stage 2 recovers e at frozen (ind, rho, v) inside the intersection
+         // of the energy DMP box with the pressure box converted at that
+         // density. No constraint ties (rho, e) to p, so the pressure box
+         // cannot render the feasible set empty the way it does when
+         // P(rho, e) is bounded directly.
+         MFEM_VERIFY(b_offsets.Last() == offsets.Last(),
+                     "Two-stage pressure control expects bounds on all blocks.");
+
+         // If the interpolated pressure already satisfies its bounds there is
+         // nothing to control, and a uniform pressure would give a zero-width
+         // box that pins p in stage 1 and leaves stage 2 no freedom.
+         // Compare the pressure *implied by the interpolated state*, rho*e,
+         // against the box. Not p_interp: the box is built from p_interp by
+         // CalcRhoBounds, so p_interp satisfies it by construction and would
+         // make this test always pass.
+         QuadratureFunction p_implied(&qspace_final);
+         ComputePressureQF(rho_interp, e_interp, p_implied);
+         real_t pviol_in = 0.0;
+         for (int i = 0; i < size_qf; i++)
+         {
+            if (ind_interp(i) <= 1e-6) { continue; }
+            pviol_in = std::max(pviol_in, std::max(p_implied(i) - p_max(i),
+                                                   p_min(i) - p_implied(i)));
+         }
+         pviol_in = allreduce(pmesh_final.GetComm(), pviol_in, MPI_MAX);
+
+         bool skip = (pviol_in <= atol);
+         if (skip)
+         {
+            // The interpolated pressure is already within bounds, so try the
+            // ordinary conservation-only projection. Keep the interpolated
+            // target so we can fall back to the two-stage solve if that
+            // projection moves the pressure out of bounds.
+            BlockVector x_interp_saved(x_initial);
+            if (Mpi::Root())
+            {
+               std::cout << "Pressure control: implied pressure rho*e already "
+                         << "within bounds at material points (max violation "
+                         << pviol_in << " <= " << atol << "); trying the plain "
+                         << "conservation projection." << std::endl;
+            }
+            projector.Project(x_initial);
+
+            // The plain projection enforces conservation and the DMP boxes, not
+            // the pressure box, so it can move rho and e. Measure rho*e of the
+            // projected state; if it left the pressure box, fall back to the
+            // full two-stage solve rather than returning a violating state.
+            QuadratureFunction rho_p(&qspace_final,
+                                     x_initial.GetBlock(1).GetData());
+            QuadratureFunction e_p_qf(&qspace_final);
+            ParGridFunction e_p(&pfes_e_final, x_initial.GetBlock(2).GetData());
+            ComputePressureQF(rho_p, e_p, e_p_qf);
+            real_t pviol_out = 0.0;
+            for (int i = 0; i < size_qf; i++)
+            {
+               if (ind_interp(i) <= 1e-6) { continue; }
+               pviol_out = std::max(pviol_out,
+                                    std::max(e_p_qf(i) - p_max(i),
+                                             p_min(i) - e_p_qf(i)));
+            }
+            pviol_out = allreduce(pmesh_final.GetComm(), pviol_out, MPI_MAX);
+
+            // Widest the pressure box gets at a material point. When this is
+            // ~0 (a spatially uniform pressure) the box pins p, so the two-stage
+            // solve has no freedom and cannot improve on the plain projection --
+            // and would in fact hit a degenerate, zero-width box. Fall back to
+            // the two-stage only when it can actually help.
+            real_t box_width = 0.0;
+            for (int i = 0; i < size_qf; i++)
+            {
+               if (ind_interp(i) <= 1e-6) { continue; }
+               box_width = std::max(box_width, p_max(i) - p_min(i));
+            }
+            box_width = allreduce(pmesh_final.GetComm(), box_width, MPI_MAX);
+
+            if (pviol_out > atol && box_width > pviol_out)
+            {
+               if (Mpi::Root())
+               {
+                  std::cout << "  The plain projection left the pressure out of "
+                            << "bounds (" << pviol_out << " > " << atol
+                            << "); running the two-stage solve." << std::endl;
+               }
+               x_initial = x_interp_saved;   // restore the interpolated target
+               skip = false;
+            }
+            else if (Mpi::Root() && pviol_out > atol)
+            {
+               std::cout << "  The plain projection left a pressure violation of "
+                         << pviol_out << ", but the pressure box is too narrow "
+                         << "(width " << box_width << ") for the two-stage solve "
+                         << "to improve it; keeping the plain projection."
+                         << std::endl;
+            }
+         }
+         if (!skip)
+         {
+            TwoStagePressureRemap::Options ts_opts;
+            ts_opts.gamma_minus_one = 1.0;   // this code uses p = rho*e
+            ts_opts.atol            = atol;
+            ts_opts.max_iter        = max_iter;
+
+            // This opt_type == 2 path is single-material; the two-stage
+            // solver supports more, but is only constructed and validated for
+            // one here.
+            const int num_materials = 1;
+            TwoStagePressureRemap two_stage(qspace_final, pfes_e_final,
+                                            pfes_v_scalar_final,
+                                            mass_q, mass_l2, mass_h1,
+                                            num_materials, dim, remap_v, ts_opts);
+
+            std::vector<Vector> p_min_all(1), p_max_all(1);
+            p_min_all[0] = p_min;
+            p_max_all[0] = p_max;
+
+            Vector volume_0_v(1), mass_0_v(1), energy_0_v(1), moment_0_v(dim);
+            volume_0_v(0) = volume_0;
+            mass_0_v(0)   = mass_0;
+            energy_0_v(0) = remap_v ? tot_en_0 : energy_0;
+            for (int d = 0; d < dim; d++) { moment_0_v(d) = moment_0[d]; }
+
+            two_stage.Solve(x_min_final, x_max_final, p_min_all, p_max_all,
+                            volume_0_v, mass_0_v, energy_0_v, moment_0_v,
+                            x_initial);
+         }
+      }
       BlockVector x_final_LVector(ind_rho_e_v, offset);
       for (int i=0; i<3; i++)
       {

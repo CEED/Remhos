@@ -172,6 +172,7 @@ int main(int argc, char *argv[])
    double dt = 0.005;
    bool visualization = true;
    bool p_control = false;
+   double p_control_rho_margin = 0.1;
    bool remap_staggered = false;
    bool visit = false;
    bool verify_bounds = false;
@@ -265,7 +266,10 @@ int main(int argc, char *argv[])
                   "Enable or disable GLVis visualization.");
    args.AddOption(&p_control, "-pc", "--pressure-control", "-no-pc",
                   "--no-pressure-control",
-                  "Enable or disable pressure control during hydro remap.");   
+                  "Enable or disable pressure control during hydro remap.");
+   args.AddOption(&p_control_rho_margin, "-pcrm", "--p-control-rho-margin",
+                  "Additive margin on the density DMP box under pressure "
+                  "control (density is frozen after stage 1; 0 = strict DMP).");
    args.AddOption(&remap_staggered, "-res", "--remap-staggered", "-no-res",
                   "--no-remap-staggered",
                   "Enable staggered remap during hydro remap.");
@@ -1147,6 +1151,7 @@ int main(int argc, char *argv[])
       interpolator.max_iter      = max_opt_iter;
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
+      interpolator.p_control_rho_margin = p_control_rho_margin;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
