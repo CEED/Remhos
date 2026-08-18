@@ -466,7 +466,12 @@ MassOperator::MassOperator(FiniteElementSpace &fespace)
             static_cast<HypreParMatrix&>(*M));
          static_cast<HyprePCG&>(*M_inv).SetAbsTol(1e-10);
          static_cast<HyprePCG&>(*M_inv).SetMaxIter(1e06);
-         static_cast<HyprePCG&>(*M_inv).iterative_mode = true;
+         // No caller of Riesz warm-starts the solve, so the result must not
+         // depend on the (caller-provided, often uninitialized) output vector.
+         // With iterative_mode = false the solver ignores it and starts from
+         // zero. Previously this was true, so an uninitialized y seeded the CG
+         // and could return NaN.
+         static_cast<HyprePCG&>(*M_inv).iterative_mode = false;
       }
    }
 #endif
@@ -497,6 +502,10 @@ MassOperator::MassOperator(FiniteElementSpace &fespace)
          static_cast<CGSolver&>(*M_inv).SetAbsTol(1e-10);
          static_cast<CGSolver&>(*M_inv).SetRelTol(1e-10);
          static_cast<CGSolver&>(*M_inv).SetMaxIter(1e06);
+         // Same reason as the parallel HyprePCG above: IterativeSolver defaults
+         // iterative_mode to true, so Riesz's uninitialized output vector would
+         // seed the solve. No caller warm-starts, so start from zero.
+         static_cast<CGSolver&>(*M_inv).iterative_mode = false;
       }
    }
 
@@ -664,6 +673,11 @@ MultiL2RieszMap::MultiL2RieszMap(QuadratureSpace &qspace,
          solver->SetPrintLevel(0);
          solver->SetPreconditioner(*mass_prec[i]);
          solver->SetOperator(static_cast<const HypreParMatrix&>(*mass[i]));
+         // HyprePCG defaults iterative_mode to true, i.e. it treats the output
+         // vector as the initial guess. Mult() below does not initialize it, so
+         // start from zero to keep the result independent of caller-supplied
+         // memory (see the matching note in MassOperator).
+         solver->iterative_mode = false;
       }
       else
       {
