@@ -1163,23 +1163,21 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
       OptimizationProblem *ot_prob = nullptr;
 
-      if(remap_staggered)
+      if (remap_staggered)
       {
-         auto hiop = new RemhosIndRhoVOpProblem(qspace_final,
-                                                pfes_e_final,
-                                                pfes_v_final,
-                                                pos_final,
-                                                initial_design,
-                                                initial_design_woE,
-                                                NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
-                                                volume_0, mass_0, moment_0, tot_en_0,
-                                                4, false, optProbInd, true,
-                                                subprob);
-         hiop->setWeightedSpaceType(weightedSpace);
+         RemhosIndRhoVOpProblem hiop(qspace_final,
+                                     pfes_e_final,
+                                     pfes_v_final,
+                                     pos_final,
+                                     initial_design,
+                                     initial_design_woE,
+                                     NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
+                                     volume_0, mass_0, moment_0, tot_en_0,
+                                     4, false, optProbInd, true,
+                                     subprob);
+         hiop.setWeightedSpaceType(weightedSpace);
 
-         ot_prob = hiop;
-
-         optsolver->SetOptimizationProblem(*ot_prob);
+         optsolver->SetOptimizationProblem(hiop);
          optsolver->SetMaxIter(max_iter);
          optsolver->SetAbsTol(1e-6);
          optsolver->SetRelTol(1e-6);
@@ -1216,24 +1214,15 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          e_min = e_min_p;
          e_max = e_max_p;
 
-         delete ot_prob;
+         RemhosEOpProblem hiop_2(qspace_final, pfes_e_final, pfes_v_final,
+                                 pos_final, initial_design,
+                                 e_target, e_target.Size(), e_min_p, e_max_p,
+                                 volume_0, mass_0, moment_0, tot_en_0,
+                                 1, false, optProbInd, true, subprob);
 
-         auto hiop_2 = new RemhosEOpProblem(qspace_final,
-                                                pfes_e_final,
-                                                pfes_v_final,
-                                                pos_final,
-                                                initial_design,
-                                                e_target,
-                                                e_target.Size(), e_min_p, e_max_p,
-                                                volume_0, mass_0, moment_0, tot_en_0,
-                                                1, false, optProbInd, true,
-                                                subprob);
+         hiop_2.setWeightedSpaceType(weightedSpace);
 
-         hiop_2->setWeightedSpaceType(weightedSpace);
-
-         ot_prob = hiop_2;
-
-         optsolver_2->SetOptimizationProblem(*ot_prob);
+         optsolver_2->SetOptimizationProblem(hiop_2);
          optsolver_2->SetMaxIter(max_iter);
          optsolver_2->SetAbsTol(1e-7);
          optsolver_2->SetRelTol(1e-7);
@@ -2625,7 +2614,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
          const IntegrationPoint &ip = ir.IntPoint(q);
          Tr.SetIntPoint(&ip);
 
-         pressure[counter] = gamma* rho_vals(q) * e_vals(q);
+         pressure[counter] = gamma * rho_vals(q) * e_vals(q);
 
          counter++;
       }

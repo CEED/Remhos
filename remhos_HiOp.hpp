@@ -92,7 +92,7 @@ protected:
 
    RemhosOptBase(int numConstraints,int numDesVar)
       : d_lo(numConstraints), d_hi(numConstraints), massvec(numConstraints),
-        numDesVar_(numDesVar_) { }
+        numDesVar_(numDesVar) { }
 
    RemhosOptBase(int numConstraints,int numDesVar, const mfem::Array<int> &optProbInd_,
                  bool sub = false)

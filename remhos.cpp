@@ -1167,7 +1167,7 @@ int main(int argc, char *argv[])
       interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0, gamma,
                               ind_0_bool_el, x_final,
                               ind_rho_e, optimization_type,
-                              e_ho_interp, adjust_diff,remap_staggered);
+                              e_ho_interp, adjust_diff, remap_staggered);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData());
