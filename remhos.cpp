@@ -1072,19 +1072,18 @@ int main(int argc, char *argv[])
 
       // Setup the BlockVector (ordered ind-rho-e-v).
       const int size_qf   = qspace.GetSize(),
-                size_gf_e = pfes.GetVSize(),
                 size_gf_v = pfes_v.GetVSize();
       Array<int> offset(5);
       offset[0] = 0;
       offset[1] = offset[0] + size_qf;
       offset[2] = offset[1] + size_qf;
-      offset[3] = offset[2] + size_gf_e;
+      offset[3] = offset[2] + size_qf;
       offset[4] = offset[3] + size_gf_v;
       BlockVector ind_rho_e_v_0(offset, Device::GetMemoryType());
 
       QuadratureFunction ind_0(&qspace, ind_rho_e_v_0.GetBlock(0).GetData()),
-                         rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData());
-      ParGridFunction e_0(&pfes, ind_rho_e_v_0.GetBlock(2).GetData());
+                         rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData()),
+                           e_0(&qspace, ind_rho_e_v_0.GetBlock(2).GetData());
       ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
       v_0.SetTrueVector();
 
@@ -1098,7 +1097,7 @@ int main(int argc, char *argv[])
       BoolFunctionCoefficient rho_0_coeff(s0_function, ind_0_bool_el),
                               e_0_coeff(q0_function, ind_0_bool_el);
       InitializeQuadratureFunction(rho_0_coeff, x0, rho_0, &ind_0_bool_dofs);
-      e_0.ProjectCoefficient(e_0_coeff);
+      InitializeQuadratureFunction(e_0_coeff, x0, e_0, &ind_0_bool_dofs);
 
       // Initialize velocity everywhere.
       VectorFunctionCoefficient v_0_coeff(dim, v0_function);
@@ -1114,10 +1113,7 @@ int main(int argc, char *argv[])
          const std::string pp = "p" + std::to_string(problem_num) + " ";
          VisQuadratureFunction(pmesh, ind_0, pp + "ind_0 QF", 0, 0);
          VisQuadratureFunction(pmesh, rho_0, pp + "rho_0 QF", 350, 0);
-         socketstream sock_e;
-         const std::string te0 = pp + "e_0 GF";
-         VisualizeField(sock_e, "localhost", 19916, e_0, te0.c_str(),
-                        700, 0, 350, 350);
+         VisQuadratureFunction(pmesh, e_0, pp + "e_0 QF", 700, 0);
          if (p_control)
          {
             VisQuadratureFunction(pmesh, p_0, pp + "p_0 QF", 1050, 0);
@@ -1145,7 +1141,7 @@ int main(int argc, char *argv[])
          pvdc1.SetTime(1.0);
          // pvdc.RegisterQField("ind", &ind);
          // pvdc.RegisterQField("rho", &rho);
-         pvdc1.RegisterField("energy", &e_0);
+         //pvdc1.RegisterField("energy", &e_0);
          pvdc1.Save();
       }
 
@@ -1170,8 +1166,8 @@ int main(int argc, char *argv[])
                               e_ho_interp, adjust_diff, remap_staggered);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
-                         rho(&qspace, ind_rho_e.GetBlock(1).GetData());
-      ParGridFunction e(&pfes, ind_rho_e.GetBlock(2).GetData());
+                         rho(&qspace, ind_rho_e.GetBlock(1).GetData()),
+                           e(&qspace, ind_rho_e.GetBlock(2).GetData());
       ParGridFunction v(&pfes_v, ind_rho_e.GetBlock(3).GetData());
 
       // Compute final pressure.
@@ -1185,10 +1181,7 @@ int main(int argc, char *argv[])
          const std::string pp = "p" + std::to_string(problem_num) + " ";
          VisQuadratureFunction(pmesh, ind, pp + "ind QF", 0, 500);
          VisQuadratureFunction(pmesh, rho, pp + "rho QF", 350, 500);
-         socketstream sock_f;
-         const std::string tef = pp + "e GF";
-         VisualizeField(sock_f, "localhost", 19916, e, tef.c_str(),
-                        700, 500, 350, 350);
+         VisQuadratureFunction(pmesh, e, pp + "e QF", 700, 500);
          if (p_control)
          {
             VisQuadratureFunction(pmesh, p, pp + "p QF", 1050, 500);
@@ -1216,7 +1209,7 @@ int main(int argc, char *argv[])
          pvdc1.SetTime(1.0);
          // pvdc.RegisterQField("ind", &ind);
          // pvdc.RegisterQField("rho", &rho);
-         pvdc1.RegisterField("energy", &e);
+         //pvdc1.RegisterField("energy", &e);
          pvdc1.RegisterField("velocity", &v);
          pvdc1.Save();
       }

@@ -28,7 +28,7 @@ void InitializeQuadratureFunction(Coefficient &c,
                                   const Array<bool> *bool_quads = nullptr);
 
 void ComputePressureQF(const QuadratureFunction &rho,
-                       const ParGridFunction &energy,
+                       const QuadratureFunction &energy,
                        const double gamma, 
                        QuadratureFunction &p);
 
@@ -90,7 +90,7 @@ private:
    // Uses the IntegrationRule of the QuadratureFunctions if these are given.
    double Integrate(const Vector &pos, const QuadratureFunction *ind,
                     const QuadratureFunction *rho,
-                    const ParGridFunction *e,
+                    const QuadratureFunction *e,
                     const ParGridFunction *v, int comp = 0);
 
    // Computes bounds for the DOFs of pfes, at the mesh positions given
