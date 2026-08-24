@@ -146,7 +146,8 @@ inline void p_energy_df(const Vector &u, Vector &grad_u, real_t gm1)
 struct EnergyBoxReport
 {
    real_t max_tighten = 0.0;  ///< largest shrinkage of the DMP box by pressure
-   real_t max_clip    = 0.0;  ///< largest gap when the two intervals do not overlap
+   real_t max_clip    =
+      0.0;  ///< largest gap when the two intervals do not overlap
    /// Largest distance the issued box reaches outside the DMP box (measured
    /// after widening and the non-negativity clamp), i.e. the energy-bound
    /// relaxation admitted in order to keep the pressure bounded.

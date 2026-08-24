@@ -415,7 +415,7 @@ public:
    CoefficientScaledLegendreFunction &SetAffine(Coefficient &s, Coefficient &sh)
    { return SetScale(s).SetShift(sh); }
    CoefficientScaledLegendreFunction &SetAffine(Coefficient *s, Coefficient *sh,
-         bool own_scale_ = false, bool own_shift_ = false)
+                                                bool own_scale_ = false, bool own_shift_ = false)
    { return SetScale(s, own_scale_).SetShift(sh, own_shift_); }
 
    ~CoefficientScaledLegendreFunction()

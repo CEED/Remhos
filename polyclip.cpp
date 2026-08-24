@@ -45,7 +45,7 @@ void SimplexAndBound(Vector &b_min, Vector &b_max, DenseMatrix &V,
 
    // 3. Use std::set to automatically discard duplicate vertices
    std::set<std::vector<real_t>, VectorComparator> unique_verts((VectorComparator(
-            tol)));
+                                                                    tol)));
 
    // Pre-allocate temporary variables
    Array<int> map_idx(dim - 1);

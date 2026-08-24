@@ -533,7 +533,8 @@ ts_shift_f(std::function<real_t(const Vector &)> f, int k, int num_vars)
 }
 
 static std::function<void(const Vector &, Vector &)>
-ts_shift_df(std::function<void(const Vector &, Vector &)> df, int k, int num_vars)
+ts_shift_df(std::function<void(const Vector &, Vector &)> df, int k,
+            int num_vars)
 {
    return [df, k, num_vars](const Vector &x, Vector &y) -> void
    {
@@ -575,7 +576,8 @@ void TwoStagePressureRemap::Solve(const Vector &x_min, const Vector &x_max,
    SolveStage2(x_min, x_max, p_min, p_max, energy_0, xp, e_interp, x);
 }
 
-void TwoStagePressureRemap::SolveStage1(const Vector &x_min, const Vector &x_max,
+void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
+                                        const Vector &x_max,
                                         const std::vector<Vector> &p_min,
                                         const std::vector<Vector> &p_max,
                                         const Vector &volume_0,
@@ -673,24 +675,24 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min, const Vector &x_max
       if (!remap_v)
       {
          make(f0 + 2,
-              [gm1](const Vector &u) { return remap::p_potential_f(u, gm1); },
-              [gm1](const Vector &u, Vector &g) { remap::p_potential_df(u, g, gm1); },
-              k, energy_0(k));
+         [gm1](const Vector &u) { return remap::p_potential_f(u, gm1); },
+         [gm1](const Vector &u, Vector &g) { remap::p_potential_df(u, g, gm1); },
+         k, energy_0(k));
       }
       else
       {
          vel_related[f0 + 2] = 1; master_mat[f0 + 2] = k;
          make(f0 + 2,
-              [gm1](const Vector &u) { return remap::p_energy_f(u, gm1); },
-              [gm1](const Vector &u, Vector &g) { remap::p_energy_df(u, g, gm1); },
-              k, energy_0(k));
+         [gm1](const Vector &u) { return remap::p_energy_f(u, gm1); },
+         [gm1](const Vector &u, Vector &g) { remap::p_energy_df(u, g, gm1); },
+         k, energy_0(k));
          for (int d = 0; d < dim; d++)
          {
             vel_related[f0 + 3 + d] = 1; master_mat[f0 + 3 + d] = k;
             make(f0 + 3 + d,
-                 [d](const Vector &u) { return remap::momentum_f(u, d); },
-                 [d](const Vector &u, Vector &g) { remap::momentum_df(u, g, d); },
-                 k, moment_0(k*dim + d));
+            [d](const Vector &u) { return remap::momentum_f(u, d); },
+            [d](const Vector &u, Vector &g) { remap::momentum_df(u, g, d); },
+            k, moment_0(k*dim + d));
          }
       }
    }
@@ -752,7 +754,8 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min, const Vector &x_max
    }
 }
 
-void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max,
+void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
+                                        const Vector &x_max,
                                         const std::vector<Vector> &p_min,
                                         const std::vector<Vector> &p_max,
                                         const Vector &energy_0, const Vector &xp,

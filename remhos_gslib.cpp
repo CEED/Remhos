@@ -367,7 +367,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    const int order = u_init.GetIntRule(0).GetOrder() / 2;
    const int ref_factor = order + 1;
    ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
-                       BasisType::ClosedGL);
+                                            BasisType::ClosedGL);
    L2_FECollection fec_lor(0, dim);
    ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
    ParGridFunction u_0_lor(&pfes_lor);
@@ -724,7 +724,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    const int order = qspace->GetIntRule(0).GetOrder() / 2;
    const int ref_factor = order + 1;
    ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
-                       BasisType::ClosedGL);
+                                            BasisType::ClosedGL);
    L2_FECollection fec_lor(0, dim);
    ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
    ParGridFunction ind_0_lor(&pfes_lor),
@@ -1382,7 +1382,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
       // Objective function: 0.5 * || u - u_initial ||^2
       remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
-            space_idx);
+                                                space_idx);
       // Constraint
       std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
 
@@ -1706,9 +1706,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       CheckBounds(pmesh_init.GetMyRank(), p, p_min_ele, p_max_ele);
 
       QuadratureFunction violations_p = MakeBoundViolationQF(qspace_final, p,
-                                        p_min_ele, p_max_ele);
+                                                             p_min_ele, p_max_ele);
       QuadratureFunction violations_e = MakeBoundViolationQF(qspace_final, e, e_min,
-                                        e_max);
+                                                             e_max);
 
       ParaViewDataCollection pvdc("bound_violations", &pmesh_final);
       pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1749,7 +1749,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 }
 
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
-      const Vector &pos_mesh, Vector &pos_dofs)
+                                         const Vector &pos_mesh, Vector &pos_dofs)
 {
    const int NE  = pfes.GetNE(), dim = pmesh_init.Dimension();
    const int nsp = pfes.GetFE(0)->GetNodes().GetNPoints();
@@ -1780,8 +1780,8 @@ void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
 }
 
 void InterpolationRemap::GetQuadPositions(const QuadratureSpace &qspace,
-      const Vector &pos_mesh,
-      Vector &pos_quads)
+                                          const Vector &pos_mesh,
+                                          Vector &pos_quads)
 {
    const int NE  = qspace.GetMesh()->GetNE(), dim = pmesh_init.Dimension();
    const int nsp = qspace.GetElementIntRule(0).GetNPoints();
@@ -1846,7 +1846,7 @@ real_t InterpolationRemap::ObjectiveGF(const ParGridFunction &g_interp,
 }
 
 real_t InterpolationRemap::ObjectiveVecGF(const ParGridFunction &g_interp,
-      const ParGridFunction &g)
+                                          const ParGridFunction &g)
 {
    VectorGridFunctionCoefficient ci(&g_interp);
    return g.ComputeL2Error(ci);
@@ -2069,9 +2069,9 @@ void InterpolationRemap::CalcQuadBounds(const QuadratureFunction &qf_init,
 }
 
 void InterpolationRemap::AdjustDiffusion(QuadratureFunction &ind_interp,
-      QuadratureFunction &rho_interp,
-      ParGridFunction &e_interp,
-      Array<bool> &active_el)
+                                         QuadratureFunction &rho_interp,
+                                         ParGridFunction &e_interp,
+                                         Array<bool> &active_el)
 {
    // Idea: if an element doesn't have ind > cutoff at least at one point,
    // then the values in this element come from diffusion. This is cleaned.
@@ -2105,7 +2105,7 @@ void InterpolationRemap::AdjustDiffusion(QuadratureFunction &ind_interp,
 }
 
 void InterpolationRemap::CleanEmptyZones(QuadratureFunction &ind_interp,
-      Vector &ind_min, Vector &ind_max)
+                                         Vector &ind_min, Vector &ind_max)
 {
    const double eps = 1e-12;
    const int s = ind_interp.Size();
@@ -2200,7 +2200,7 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 }
 
 void InterpolationRemap::UpdateRhoInterp(QuadratureFunction &rho_interp,
-      Vector &rho_min, Vector &rho_max)
+                                         Vector &rho_min, Vector &rho_max)
 {
    const int s = rho_interp.Size();
    for (int i = 0; i < s; i++)
@@ -2320,17 +2320,17 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
 }
 
 void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
-      Array<bool> &active_el_0,
-      const ParGridFunction &e_interp,
-      const QuadratureFunction &e_interp_qf,
-      const Vector &p_qf_max,
-      const Vector &p_qf_min,
-      const QuadratureFunction &rho_interp_qf,
-      const Vector &pos_final,
-      const Vector &ind_max,
-      const double gamma,
-      Vector &e_min, Vector &e_max,
-      Vector &p_max_ele, Vector &p_min_ele)
+                                           Array<bool> &active_el_0,
+                                           const ParGridFunction &e_interp,
+                                           const QuadratureFunction &e_interp_qf,
+                                           const Vector &p_qf_max,
+                                           const Vector &p_qf_min,
+                                           const QuadratureFunction &rho_interp_qf,
+                                           const Vector &pos_final,
+                                           const Vector &ind_max,
+                                           const double gamma,
+                                           Vector &e_min, Vector &e_max,
+                                           Vector &p_max_ele, Vector &p_min_ele)
 {
    const double eps = 1e-12;
 
@@ -2496,7 +2496,7 @@ void InterpolationRemap::CalcVBounds(const ParGridFunction &v_interp,
 }
 
 void InterpolationRemap::GetTargetValues(const Vector &interp,
-      const Vector &min, const Vector &max, Vector &target)
+                                         const Vector &min, const Vector &max, Vector &target)
 {
    int size = interp.Size();
 
@@ -2547,10 +2547,10 @@ void InterpolationRemap::CheckBounds(int myid, const Vector &v,
 }
 
 void InterpolationRemap::ComputePressure(const Vector &pos,
-      const QuadratureFunction &rho_,
-      const ParGridFunction &e_,
-      const double gamma,
-      QuadratureFunction &pressure)
+                                         const QuadratureFunction &rho_,
+                                         const ParGridFunction &e_,
+                                         const double gamma,
+                                         QuadratureFunction &pressure)
 {
    const QuadratureSpace *qspace = dynamic_cast<const QuadratureSpace *>
                                    (rho_.GetSpace());
@@ -2586,7 +2586,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
 }
 
 void InterpolationRemap::DiffuseIndicator(int diffused_ind_order,
-      QuadratureFunction &ind)
+                                          QuadratureFunction &ind)
 {
    if (diffused_ind_order <= 0) { return; }
 
