@@ -1168,42 +1168,42 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          Vector p_min, p_max;
          Vector e_min_p, e_max_p;
 
-         // CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
-         //                   p_max, p_min, rho_opt, pos_final, ind_max, gamma,
-         //                   e_min_p, e_max_p, p_max_ele, p_min_ele);
+         CalcEBoundsPBased(e_0, active_el_0, e_interp,
+                           p_max, p_min, rho_opt, pos_final, ind_max, gamma,
+                           e_min_p, e_max_p, p_max_ele, p_min_ele);
 
-         // e_min = e_min_p;
-         // e_max = e_max_p;
+         e_min = e_min_p;
+         e_max = e_max_p;
 
-//          RemhosEOpProblem hiop_2(qspace_final, pfes_v_final,
-//                                  pos_final, initial_design,
-//                                  e_target, e_target.Size(), e_min_p, e_max_p,
-//                                  volume_0, mass_0, moment_0, tot_en_0,
-//                                  1, false, optProbInd, true, subprob);
+         RemhosEOpProblem hiop_2(qspace_final, pfes_v_final,
+                                 pos_final, initial_design,
+                                 e_target, e_target.Size(), e_min_p, e_max_p,
+                                 volume_0, mass_0, moment_0, tot_en_0,
+                                 1, false, optProbInd, true, subprob);
 
-//          hiop_2.setWeightedSpaceType(weightedSpace);
+         hiop_2.setWeightedSpaceType(weightedSpace);
 
-//          optsolver_2->SetOptimizationProblem(hiop_2);
-//          optsolver_2->SetMaxIter(max_iter);
-//          optsolver_2->SetAbsTol(1e-7);
-//          optsolver_2->SetRelTol(1e-7);
-//          optsolver_2->SetPrintLevel(3);
+         optsolver_2->SetOptimizationProblem(hiop_2);
+         optsolver_2->SetMaxIter(max_iter);
+         optsolver_2->SetAbsTol(1e-7);
+         optsolver_2->SetRelTol(1e-7);
+         optsolver_2->SetPrintLevel(3);
 
-//          Vector y_out_E = e_target;
+         Vector y_out_E = e_target;
 
-//          if (subprob)
-//          {
-//             optsolver_2->Mult(initial_design_woE, y_out_sub);
-//             y_out_woE.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver_2->Mult(e_target, y_out_E); }
+         if (subprob)
+         {
+            optsolver_2->Mult(initial_design_woE, y_out_sub);
+            y_out_woE.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver_2->Mult(e_target, y_out_E); }
 
-//          initial_design.GetBlock(0) = ind_opt;
-//          initial_design.GetBlock(1) = rho_opt;
-//          initial_design.GetBlock(2) = y_out_E;
-//          initial_design.GetBlock(3) = vel_true_opt;
+         initial_design.GetBlock(0) = ind_opt;
+         initial_design.GetBlock(1) = rho_opt;
+         initial_design.GetBlock(2) = y_out_E;
+         initial_design.GetBlock(3) = vel_true_opt;
 
-//          y_out = initial_design;
+         y_out = initial_design;
       }
       else
       {
@@ -2265,10 +2265,9 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
    }
 }
 
-void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
+void InterpolationRemap::CalcEBoundsPBased(const QuadratureFunction &e_init,
                                            Array<bool> &active_el_0,
-                                           const ParGridFunction &e_interp,
-                                           const QuadratureFunction &e_interp_qf,
+                                           const QuadratureFunction &e_interp,
                                            const Vector &p_qf_max,
                                            const Vector &p_qf_min,
                                            const QuadratureFunction &rho_interp_qf,
@@ -2298,7 +2297,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
       for (int q = 0; q < nqp; q++)
       {
          if (ind_max(e*nqp + q) > 1e-12)           { el_has_ind = true; }
-         if (fabs(e_interp_qf(e*nqp + q)) > 1e-12) { el_has_e_value = true; }
+         if (fabs(e_interp(e*nqp + q)) > 1e-12) { el_has_e_value = true; }
       }
 
       // Compute min and max energy in the new mesh element.
@@ -2312,8 +2311,6 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
       else
       {
          MFEM_VERIFY(el_has_e_value == true, "No e values in the new element!");
-
-         double rho_min = + std::numeric_limits<double>::infinity();
 
          for (int q = 0; q < nqp; q++)
          {
@@ -2340,8 +2337,6 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
 
             el_min_p = std::min(el_min_p, pval_min);
             el_max_p = std::max(el_max_p, pval_max);
-
-            rho_min = std::min(rho_min, rho);
          }
 
          bool is_collapsed = false;
@@ -2360,7 +2355,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
                       << myid << ", element " << e << ": ["
                       << empty_el_min << ", " << empty_el_max << "], gap = "
                       << empty_el_min - empty_el_max
-                      << ", min rho "<<rho_min<<". Setting both energy bounds to "
+                      <<". Setting both energy bounds to "
                       << collapsed_bound << '.' << std::endl;
          }
 
@@ -2380,31 +2375,13 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
                p_max_ele(idx) = el_max_p;
                p_min_ele(idx) = el_min_p;
             }
+
+            e_min(idx) = el_min;
+            e_max(idx) = el_max;
          }
-
-         // // Taking bounds only at quad points can lead to clipping and reducing
-         // // the interpolation order.
-         // for (int i = 0; i < s; i++)
-         // {
-         //    double pval = p_interp_qf(s * e + i);
-         //    double rhoval = rho_interp_qf(s * e + i);
-         //    double e_val = pval / (rhoval);
-
-         //    if (e_val > eps)
-         //    {
-         //       el_min = std::min(el_min, e_val);
-         //       el_max = std::max(el_max, e_val);
-         //    }
-         // }
       }
 
-      // Set the bounds at the DOFs.
-      // When material is present, we set bounds at all energy DOFs.
-      for (int i = 0; i < s; i++)
-      {
-         e_min(s * e + i) = el_min;
-         e_max(s * e + i) = el_max;
-      }
+
    }
 }
 
