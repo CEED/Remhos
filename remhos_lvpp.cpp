@@ -383,58 +383,7 @@ void Dykstra::MapPrimal(const Vector &x_,
 
 
 
-QuadDofMap::QuadDofMap(const QuadratureSpace &qspace,
-                       const FiniteElementSpace &fes)
-{
-   NE = fes.GetNE();
-   MFEM_VERIFY(NE > 0, "QuadDofMap: empty mesh partition.");
-
-   const IntegrationRule &ir = qspace.GetIntRule(0);
-   const IntegrationRule &nodes = fes.GetFE(0)->GetNodes();
-   n_qp  = ir.GetNPoints();
-   n_dof = nodes.GetNPoints();
-
-   // All elements are assumed to share the rule and the element type; this is
-   // what the surrounding remap code already assumes (size / NE arithmetic).
-   for (int el = 1; el < NE; el++)
-   {
-      MFEM_VERIFY(qspace.GetIntRule(el).GetNPoints() == n_qp &&
-                  fes.GetFE(el)->GetNodes().GetNPoints() == n_dof,
-                  "QuadDofMap: mixed element types are not supported.");
-   }
-
-   dof2quad.SetSize(n_dof);
-   for (int i = 0; i < n_dof; i++)
-   {
-      const IntegrationPoint &nip = nodes.IntPoint(i);
-      real_t best = std::numeric_limits<real_t>::infinity();
-      int best_q = 0;
-      for (int q = 0; q < n_qp; q++)
-      {
-         const IntegrationPoint &qip = ir.IntPoint(q);
-         const real_t dx = nip.x - qip.x, dy = nip.y - qip.y, dz = nip.z - qip.z;
-         const real_t d2 = dx*dx + dy*dy + dz*dz;
-         if (d2 < best) { best = d2; best_q = q; }
-      }
-      dof2quad[i] = best_q;
-   }
-}
-
-void QuadDofMap::QuadToDof(const Vector &quad_vals, Vector &dof_vals) const
-{
-   MFEM_VERIFY(quad_vals.Size() == NE*n_qp, "QuadDofMap: bad quadrature size.");
-   dof_vals.SetSize(NE*n_dof);
-   for (int el = 0; el < NE; el++)
-   {
-      for (int i = 0; i < n_dof; i++)
-      {
-         dof_vals(el*n_dof + i) = quad_vals(el*n_qp + dof2quad[i]);
-      }
-   }
-}
-
 EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
-                                               const QuadDofMap &map,
                                                const Vector &rho_q,
                                                const Vector &p_min_q,
                                                const Vector &p_max_q,
@@ -444,14 +393,11 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
                                                Vector &e_min, Vector &e_max)
 {
    EnergyBoxReport rep;
-   Vector rho_d, pmin_d, pmax_d, ind_d;
-   map.QuadToDof(rho_q,   rho_d);
-   map.QuadToDof(p_min_q, pmin_d);
-   map.QuadToDof(p_max_q, pmax_d);
-   map.QuadToDof(ind_q,   ind_d);
-
+   // Energy and the pressure box share the quadrature points, so the pressure
+   // bound is applied at each point with that point's own density -- pointwise
+   // exact, no dof-to-quad association needed.
    const int n = e_min.Size();
-   MFEM_VERIFY(e_max.Size() == n && rho_d.Size() == n,
+   MFEM_VERIFY(e_max.Size() == n && rho_q.Size() == n,
                "IntersectEnergyBoxWithPressure: size mismatch.");
 
    real_t rho_scale = 0.0;
@@ -467,12 +413,11 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
       const real_t dmp_w  = dmp_hi - dmp_lo;
       if (dmp_w <= 0.0) { continue; }
       // EXPERIMENT: eta check removed; only skip where rho is negligible.
-      if (rho_d(i) <= rho_floor) { continue; }
+      if (rho_q(i) <= rho_floor) { continue; }
 
-      // Pressure requirement at this dof, using its nearest quadrature point's
-      // density (see the header note: heuristic, not a pointwise guarantee).
-      const real_t scale = 1.0 / (gm1 * rho_d(i));
-      const real_t p_lo = pmin_d(i) * scale, p_hi = pmax_d(i) * scale;
+      // Pressure requirement at this quadrature point, from its own density.
+      const real_t scale = 1.0 / (gm1 * rho_q(i));
+      const real_t p_lo = p_min_q(i) * scale, p_hi = p_max_q(i) * scale;
 
       real_t lo = std::max(dmp_lo, p_lo), hi = std::min(dmp_hi, p_hi);
       bool from_pressure = false;
@@ -528,61 +473,33 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
    return rep;
 }
 
-PressureCoupling::PressureCoupling(QuadratureSpace &qs,
-                                   ParFiniteElementSpace &fes,
-                                   real_t gamma_minus_1)
-   : qspace(qs), pfes_e(fes), gamma_minus_one(gamma_minus_1)
-   , e_at_quads(&qs)
-{}
-
-void PressureCoupling::EvalAtQuads(const Vector &e, QuadratureFunction &e_q) const
+// Pressure p = (gamma-1) * rho * e at the quadrature points, with rho and e
+// both quadrature functions (gamma-1 = 1 here). Pointwise, since e now lives at
+// the quadrature points next to rho.
+static void PressureQF(real_t gm1, const QuadratureFunction &rho,
+                       const Vector &e, QuadratureFunction &p)
 {
-   e_q.SetSize(qspace.GetSize());
-   ParGridFunction e_gf(&pfes_e, const_cast<real_t*>(e.GetData()));
-   const int NE = qspace.GetMesh()->GetNE();
-   Vector element_values;
-   int offset = 0;
-   for (int el = 0; el < NE; el++)
-   {
-      const IntegrationRule &ir = qspace.GetIntRule(el);
-      const int num_quad = ir.GetNPoints();
-      e_gf.GetValues(el, ir, element_values);
-      for (int q = 0; q < num_quad; q++) { e_q(offset + q) = element_values(q); }
-      offset += num_quad;
-   }
-}
-
-void PressureCoupling::Pressure(const QuadratureFunction &rho, const Vector &e,
-                                QuadratureFunction &p) const
-{
-   EvalAtQuads(e, e_at_quads);
    const int n = rho.Size();
    p.SetSize(n);
-   for (int i = 0; i < n; i++) { p(i) = gamma_minus_one * rho(i) * e_at_quads(i); }
+   for (int i = 0; i < n; i++) { p(i) = gm1 * rho(i) * e(i); }
 }
 
 TwoStagePressureRemap::TwoStagePressureRemap(
-   QuadratureSpace &qspace_, ParFiniteElementSpace &pfes_e_,
+   QuadratureSpace &qspace_,
    ParFiniteElementSpace &pfes_v_scalar_,
-   MassOperator &mass_q_, MassOperator &mass_l2_, MassOperator &mass_h1_,
+   MassOperator &mass_q_, MassOperator &mass_h1_,
    int num_materials_, int dim_, bool remap_v_, const Options &opts_)
-   : qspace(qspace_), pfes_e(pfes_e_), pfes_v_scalar(pfes_v_scalar_)
-   , mass_q(mass_q_), mass_l2(mass_l2_), mass_h1(mass_h1_)
+   : qspace(qspace_), pfes_v_scalar(pfes_v_scalar_)
+   , mass_q(mass_q_), mass_h1(mass_h1_)
    , num_materials(num_materials_), dim(dim_), remap_v(remap_v_), opts(opts_)
-   , size_qf(qspace_.GetSize()), size_e(pfes_e_.GetVSize())
+   , size_qf(qspace_.GetSize()), size_e(qspace_.GetSize())
    , size_v1(pfes_v_scalar_.GetTrueVSize())
    , num_vars(3 + dim_ * (int)remap_v_)
-   , fes({&pfes_e_, &pfes_v_scalar_})
-   , dof_map(qspace_, pfes_e_)
-   , pcoup(qspace_, pfes_e_, opts_.gamma_minus_one)
-   , qlf(qspace_, pfes_e_)
+   , fes({&pfes_v_scalar_})
 {
-   MFEM_VERIFY(dynamic_cast<const L2_FECollection*>(pfes_e.FEColl()) != nullptr,
-               "TwoStagePressureRemap: expecting L2_FECollection for the energy.");
-
-   // Per-material block sizes and space indices. The two layouts differ only
-   // in slot 2: the energy layout carries e (L2), the pressure layout carries
-   // p at the quadrature points, next to rho.
+   // Per-material block sizes and space indices. Both layouts differ only in
+   // slot 2: the energy layout carries e, the pressure layout carries p, and
+   // both now live at the quadrature points, next to rho.
    const int n_vel = dim * (int)remap_v;
    blk_e.Append(size_qf); blk_e.Append(size_qf); blk_e.Append(size_e);
    blk_p.Append(size_qf); blk_p.Append(size_qf); blk_p.Append(size_qf);
@@ -590,13 +507,15 @@ TwoStagePressureRemap::TwoStagePressureRemap(
    per_mat_e = blk_e.Sum();
    per_mat_p = blk_p.Sum();
 
+   // Space index -1 marks a quadrature function (eta, rho, e, p); velocity is
+   // the only finite-element variable, at index 0 in fes.
    for (int k = 0; k < num_materials; k++)
    {
-      space_idx_e.Append(-1); space_idx_e.Append(-1); space_idx_e.Append(0);
+      space_idx_e.Append(-1); space_idx_e.Append(-1); space_idx_e.Append(-1);
       space_idx_p.Append(-1); space_idx_p.Append(-1); space_idx_p.Append(-1);
       for (int d = 0; d < n_vel; d++)
       {
-         space_idx_e.Append(1); space_idx_p.Append(1);
+         space_idx_e.Append(0); space_idx_p.Append(0);
       }
    }
 }
@@ -666,7 +585,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min, const Vector &x_max
                                         const Vector &x_interp, Vector &xp)
 {
    const real_t gm1 = opts.gamma_minus_one;
-   MPI_Comm comm = pfes_e.GetComm();
+   MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
       out << "\n=== Pressure control, stage 1: project (ind, rho, p"
@@ -703,7 +622,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min, const Vector &x_max
 
       QuadratureFunction rho_k(&qspace, xi_b.GetBlock(b+1).GetData());
       QuadratureFunction p_init(&qspace);
-      pcoup.Pressure(rho_k, xi_b.GetBlock(b+2), p_init);
+      PressureQF(gm1, rho_k, xi_b.GetBlock(b+2), p_init);
 
       Vector &p0 = xp_b.GetBlock(b+2);
       const Vector &ind_k = xi_b.GetBlock(b+0);
@@ -840,7 +759,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
                                         const Vector &e_interp, Vector &x)
 {
    const real_t gm1 = opts.gamma_minus_one;
-   MPI_Comm comm = pfes_e.GetComm();
+   MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
       out << "\n=== Pressure control, stage 2: project e at frozen (ind, rho"
@@ -875,8 +794,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
    }
 
    EnergyBoxReport rep_all;
-   Vector g_quad(size_qf), rhs(size_e);
-   QuadratureFunction e_q(&qspace);
+   Vector g_quad(size_qf);
 
    for (int k = 0; k < num_materials; k++)
    {
@@ -894,31 +812,26 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
       rho_scale = allreduce(comm, rho_scale, MPI_MAX);
       const real_t rho_floor = opts.rho_tol_rel * rho_scale;
 
-      // Target first, since the box is required to keep it feasible.
-      // The energy consistent with the stage-1 pressure, transferred to the
-      // energy space by an L2 (mass) projection. Where the material is absent
-      // the pressure carries no information and the interpolated energy is
-      // used instead.
+      // Target first, since the box is required to keep it feasible. The energy
+      // consistent with the stage-1 pressure, evaluated at the quadrature
+      // points. Where the material is absent the pressure carries no
+      // information and the interpolated energy is used instead.
       Vector &e_k = x_b.GetBlock(b+2);
       const Vector e_int_k(const_cast<Vector&>(e_interp).GetData() + k*size_e,
                            size_e);
       if (opts.e_target_from_pressure)
       {
          // g = p/((gamma-1)*rho) at the quadrature points (gamma-1 = 1 here).
-         // Where the material is absent, or the density is negligible, p = rho*e says
-         // nothing about e and dividing by rho would give a wild target, so
-         // the interpolated energy is used there instead.
-         pcoup.EvalAtQuads(e_int_k, e_q);
+         // Where the material is absent, or the density is negligible, p = rho*e
+         // says nothing about e and dividing by rho would give a wild target, so
+         // the interpolated energy is used there instead. Energy lives at the
+         // quadrature points, so g is the target directly (no L2 projection).
          for (int i = 0; i < size_qf; i++)
          {
             const bool informative = rho_star(i) > rho_floor; // EXPERIMENT: no eta
-            g_quad(i) = informative ? p_star(i) / (gm1 * rho_star(i)) : e_q(i);
+            g_quad(i) = informative ? p_star(i) / (gm1 * rho_star(i)) : e_int_k(i);
          }
-         // Carry g to the energy dofs by an L2 (mass) projection. Note this
-         // overshoots across a material interface, where g jumps within a
-         // single element; the box below is what contains that.
-         qlf.Mult(g_quad, rhs);
-         mass_l2.Riesz(rhs, e_k);
+         e_k = g_quad;
       }
       else { e_k = e_int_k; }
 
@@ -927,7 +840,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
       e_lo = xn_b.GetBlock(b+2);
       e_hi = xx_b.GetBlock(b+2);
       const EnergyBoxReport r =
-         IntersectEnergyBoxWithPressure(comm, dof_map,
+         IntersectEnergyBoxWithPressure(comm,
                                         rho_star, p_min[k], p_max[k], ind_star,
                                         gm1, opts.box_min_width_rel,
                                         opts.ind_tol, opts.rho_tol_rel,
@@ -984,7 +897,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
    MultiMassOperator mass;
    for (int k = 0; k < num_materials; k++)
    {
-      mass.Append(mass_q); mass.Append(mass_q); mass.Append(mass_l2);
+      mass.Append(mass_q); mass.Append(mass_q); mass.Append(mass_q);
       if (remap_v) { for (int d = 0; d < dim; d++) { mass.Append(mass_h1); } }
    }
 
@@ -1006,7 +919,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min, const Vector &x_max
       const Vector &ind_k = x_b.GetBlock(b+0);
       QuadratureFunction rho_k(&qspace, x_b.GetBlock(b+1).GetData());
       QuadratureFunction P_k(&qspace);
-      pcoup.Pressure(rho_k, x_b.GetBlock(b+2), P_k);
+      PressureQF(gm1, rho_k, x_b.GetBlock(b+2), P_k);
       for (int i = 0; i < size_qf; i++)
       {
          const real_t v = std::max(P_k(i) - p_max[k](i), p_min[k](i) - P_k(i));

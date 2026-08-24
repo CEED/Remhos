@@ -95,13 +95,13 @@ void MarkBoundViolations(const Vector &u,
       violations(i) = (u(i) < u_min(i) - tol ||
                        u(i) > u_max(i) + tol) ? 1.0 : 0.0;
 
-                     //   if( violations(i) == 1.0)
-                     //   {
-                     //       std::cout << "Bound violation at index " << i
-                     //                   << ": u = " << u(i)
-                     //                   << ", u_min = " << u_min(i)
-                     //                   << ", u_max = " << u_max(i) << std::endl;
-                     //   }
+      //   if( violations(i) == 1.0)
+      //   {
+      //       std::cout << "Bound violation at index " << i
+      //                   << ": u = " << u(i)
+      //                   << ", u_min = " << u_min(i)
+      //                   << ", u_max = " << u_max(i) << std::endl;
+      //   }
    }
 }
 
@@ -711,7 +711,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    Vector *irev_ptr = const_cast<Vector *>(&ind_rho_e_v_0);
    QuadratureFunction ind_0(qspace, irev_ptr->GetData()),
                       rho_0(qspace, irev_ptr->GetData() + size_qf),
-                        e_0(qspace, irev_ptr->GetData() + 2*size_qf);
+                      e_0(qspace, irev_ptr->GetData() + 2*size_qf);
    ParGridFunction v_0(pfes_v, irev_ptr->GetData() + 3*size_qf);
 
    // Generate list of points where ire_initial will be interpolated.
@@ -773,7 +773,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    real_t *irev_data = ind_rho_e_v_interp.GetData();
    QuadratureFunction ind_interp(&qspace_final, irev_data),
                       rho_interp(&qspace_final, irev_data + size_qf),
-                        e_interp(&qspace_final, irev_data + 2*size_qf);
+                      e_interp(&qspace_final, irev_data + 2*size_qf);
    QuadratureFunction p_interp(&qspace_final);
    ParGridFunction v_interp(&pfes_v_final, irev_data + 3*size_qf);
    FindPointsGSLIB finder(pmesh_init.GetComm());
@@ -1005,591 +1005,588 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    {
       ind_rho_e_v = ind_rho_e_v_interp;
    }
-//    else if (opt_type == 1)
-//    {
-//       OptimizationSolver* optsolver = NULL;
-//       OptimizationSolver* optsolver_2 = NULL;
-//       {
-// #ifdef MFEM_USE_HIOP
-//          optsolver = new HiopNlpOptimizer(MPI_COMM_WORLD);
-//          optsolver_2 = new HiopNlpOptimizer(MPI_COMM_WORLD);
-// #else
-//          MFEM_ABORT("MFEM is not built with HiOp support!");
-// #endif
-//       }
-//       Array<int> offset_true(numBlocks);
-//       offset_true[0] = 0;
-//       offset_true[1] = offset_true[0] + size_qf;
-//       offset_true[2] = offset_true[1] + size_qf;
-//       offset_true[3] = offset_true[2] + size_gf_e;
-
-//       Array<int> offset_true_woE(numBlocks-1);
-//       offset_true_woE[0] = 0;
-//       offset_true_woE[1] = offset_true_woE[0] + size_qf;
-//       offset_true_woE[2] = offset_true_woE[1] + size_qf;
-
-//       if (remap_v)
-//       {
-//          offset_true[4] = offset_true[3] + size_gf_v_true;
-//          offset_true_woE[3] = offset_true_woE[2] + size_gf_v_true;
-//       }
-
-//       Vector rho_target, e_target, v_target;
-//       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
-//       GetTargetValues( e_interp, e_min, e_max, e_target );
-
-
-
-//       BlockVector initial_design(offset_true);
-//       BlockVector design_min    (offset_true);
-//       BlockVector design_max    (offset_true);
-//       BlockVector initial_design_woE(offset_true_woE);
-//       BlockVector design_min_woE    (offset_true_woE);
-//       BlockVector design_max_woE    (offset_true_woE);
-//       initial_design.GetBlock(0) = ind_interp;
-//       initial_design.GetBlock(1) = rho_target;
-//       initial_design.GetBlock(2) = e_target;
-//       design_min.GetBlock(0) = ind_min;
-//       design_min.GetBlock(1) = rho_min;
-//       design_min.GetBlock(2) = e_min;
-//       design_max.GetBlock(0) = ind_max;
-//       design_max.GetBlock(1) = rho_max;
-//       design_max.GetBlock(2) = e_max;
-//       initial_design_woE.GetBlock(0) = ind_interp;
-//       initial_design_woE.GetBlock(1) = rho_target;
-//       design_min_woE.GetBlock(0) = ind_min;
-//       design_min_woE.GetBlock(1) = rho_min;
-//       design_max_woE.GetBlock(0) = ind_max;
-//       design_max_woE.GetBlock(1) = rho_max;
-//       if (remap_v)
-//       {
-//          ParGridFunction vtmp_min(&pfes_v_final, v_min);
-//          ParGridFunction vtmp_max(&pfes_v_final, v_max);
-
-//          v_interp.SetTrueVector();
-//          vtmp_min.SetTrueVector();
-//          vtmp_max.SetTrueVector();
-
-//          mfem::Vector & true_v_interp = v_interp.GetTrueVector();
-//          mfem::Vector & true_v_min    = vtmp_min.GetTrueVector();
-//          mfem::Vector & true_v_max    = vtmp_max.GetTrueVector();
-
-//          initial_design.GetBlock(3) = true_v_interp;
-//          design_min    .GetBlock(3) = true_v_min;
-//          design_max    .GetBlock(3) = true_v_max;
-
-//          initial_design_woE.GetBlock(2) = true_v_interp;
-//          design_min_woE    .GetBlock(2) = true_v_min;
-//          design_max_woE    .GetBlock(2) = true_v_max;
-//       }
-
-//       int NumDesVar = initial_design.Size();
-//       int NumDesVar_woE = initial_design_woE.Size();
-//       BlockVector y_out(offset_true);
-//       BlockVector y_out_woE(offset_true_woE);
-
-//       y_out = initial_design;
-//       y_out_woE = initial_design_woE;
-
-//       mfem::Array<int> optProbInd;
-//       mfem::Vector ind_rho_e_sub;
-//       mfem::Vector y_out_sub;
-//       mfem::Vector minsub;
-//       mfem::Vector maxsub;
-//       mfem::Vector minsub_woE;
-//       mfem::Vector maxsub_woE;
-
-//       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
-//       Vector x_maxsub_woE(NumDesVar_woE), x_minsub_woE(NumDesVar_woE);
-
-//       if (subprob)
-//       {
-//          NumDesVar = GetSizeOptimizationSubset(design_min,design_max);
-//          GetOptimizationSubsetInd(design_min,design_max,optProbInd);
-//          //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
-//          initial_design.GetSubVector(optProbInd,ind_rho_e_sub);
-//          y_out.GetSubVector(optProbInd,y_out_sub);
-
-//          design_min.GetSubVector(optProbInd,minsub);
-//          design_max.GetSubVector(optProbInd,maxsub);
-
-//          x_maxsub.SetSize(NumDesVar);
-//          x_minsub.SetSize(NumDesVar);
-//          x_maxsub = maxsub;
-//          x_minsub = minsub;
-//       }
-//       else
-//       {
-//          x_maxsub = design_max;
-//          x_minsub = design_min;
-//          x_maxsub_woE = design_max_woE;
-//          x_minsub_woE = design_min_woE;
-//       }
-
-//       OptimizationProblem *ot_prob = nullptr;
-
-//       if (remap_staggered)
-//       {
-//          RemhosIndRhoVOpProblem hiop(qspace_final,
-//                                      pfes_e_final,
-//                                      pfes_v_final,
-//                                      pos_final,
-//                                      initial_design,
-//                                      initial_design_woE,
-//                                      NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
-//                                      volume_0, mass_0, moment_0, tot_en_0,
-//                                      4, false, optProbInd, true,
-//                                      subprob);
-//          hiop.setWeightedSpaceType(weightedSpace);
-
-//          optsolver->SetOptimizationProblem(hiop);
-//          optsolver->SetMaxIter(max_iter);
-//          optsolver->SetAbsTol(1e-6);
-//          optsolver->SetRelTol(1e-6);
-//          optsolver->SetPrintLevel(3);
-
-//          if (subprob)
-//          {
-//             optsolver->Mult(initial_design_woE, y_out_sub);
-//             y_out_woE.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver->Mult(initial_design_woE, y_out_woE); }
-
-//          //-------------------------------------------------------------------------
-         
-//          QuadratureFunction ind_opt(&qspace_final,
-//                                     y_out_woE.GetBlock(0).GetData());
-//          QuadratureFunction rho_opt(&qspace_final,
-//                                     y_out_woE.GetBlock(1).GetData());
-//          Vector vel_true_opt(y_out_woE.GetData() + 2*size_qf, size_gf_v_true);
-
-//          initial_design.GetBlock(0) = ind_opt;
-//          initial_design.GetBlock(1) = rho_opt;
-//          initial_design.GetBlock(2) = e_target;
-//          initial_design.GetBlock(3) = vel_true_opt;
-
-//          // Vector p_min, p_max;
-//          Vector e_min_p;
-//          Vector e_max_p;
-
-//          CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
-//                            p_max, p_min, rho_opt, pos_final, ind_max, gamma,
-//                            e_min_p, e_max_p, p_max_ele, p_min_ele);
-
-//          e_min = e_min_p;
-//          e_max = e_max_p;
-
-//          RemhosEOpProblem hiop_2(qspace_final, pfes_e_final, pfes_v_final,
-//                                  pos_final, initial_design,
-//                                  e_target, e_target.Size(), e_min_p, e_max_p,
-//                                  volume_0, mass_0, moment_0, tot_en_0,
-//                                  1, false, optProbInd, true, subprob);
-
-//          hiop_2.setWeightedSpaceType(weightedSpace);
-
-//          optsolver_2->SetOptimizationProblem(hiop_2);
-//          optsolver_2->SetMaxIter(max_iter);
-//          optsolver_2->SetAbsTol(1e-7);
-//          optsolver_2->SetRelTol(1e-7);
-//          optsolver_2->SetPrintLevel(3);
-
-//          Vector y_out_E = e_target;
-
-//          if (subprob)
-//          {
-//             optsolver_2->Mult(initial_design_woE, y_out_sub);
-//             y_out_woE.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver_2->Mult(e_target, y_out_E); }
-
-//          initial_design.GetBlock(0) = ind_opt;
-//          initial_design.GetBlock(1) = rho_opt;
-//          initial_design.GetBlock(2) = y_out_E;
-//          initial_design.GetBlock(3) = vel_true_opt;
-
-//          y_out = initial_design;
-//       }
-//       else
-//       {
-//          if (remap_v)
-//          {
-//             auto hiop = new RemhosHydroHiOpProblem(qspace_final,
-//                                                    pfes_e_final, pfes_v_final,
-//                                                    pos_final,
-//                                                    initial_design, p_interp,
-//                                                    NumDesVar, x_minsub, x_maxsub,
-//                                                    volume_0, mass_0, moment_0, tot_en_0,
-//                                                    5, false, optProbInd, true,
-//                                                    subprob, p_control);
-//             hiop->setWeightedSpaceType(weightedSpace);
-
-//             if (p_control)
-//             {
-//                hiop->w_1 = 1.0;
-//                hiop->w_2 = 1.0;
-//                hiop->w_3 = 0.0;
-//                hiop->w_4 = 0.0;
-//                hiop->w_p = 1e6;
-//                hiop->w_4_H1 = 0.0;
-//                hiop->gamma = gamma;
-//             }
-
-//             ot_prob = hiop;
-//          }
-//          else
-//          {
-//             ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final,
-//                                                    pfes_e_final,
-//                                                    pos_final,
-//                                                    initial_design,
-//                                                    p_interp,
-//                                                    NumDesVar,
-//                                                    x_minsub, x_maxsub,
-//                                                    volume_0, mass_0, energy_0,
-//                                                    3, false, optProbInd, true,
-//                                                    subprob, p_control);
-
-//             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
-//                weightedSpace);
-
-//             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->gamma = gamma;
-//          }
-//          optsolver->SetOptimizationProblem(*ot_prob);
-//          optsolver->SetMaxIter(max_iter);
-//          optsolver->SetAbsTol(1e-7);
-//          optsolver->SetRelTol(1e-7);
-//          optsolver->SetPrintLevel(3);
-
-//          if (subprob)
-//          {
-//             optsolver->Mult(ind_rho_e_sub, y_out_sub);
-//             y_out.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver->Mult(initial_design, y_out); }
-//       }
-
-//       BlockVector T_vector_design(offset_true);
-//       BlockVector L_vector_design(offset);
-
-//       T_vector_design = y_out;
-
-//       {
-//          QuadratureFunction rho_opt(&qspace_final,
-//                                     T_vector_design.GetBlock(1).GetData());
-//          QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
-//          ParGridFunction    e_opt  (&pfes_e_final,
-//                                     T_vector_design.GetBlock(2).GetData());
-//          ComputePressure( pos_final, rho_opt, e_opt, gamma, pressure_opt);
-
-//          ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
-//          pvdc.SetDataFormat(VTKFormat::BINARY32);
-//          pvdc.SetCycle(0);
-//          pvdc.SetTime(1.0);
-//          pvdc.RegisterQField("rho", &rho_opt);
-//          pvdc.RegisterQField("pressure", &pressure_opt);
-//          pvdc.RegisterQField("pressure_interp", &p_interp);
-//          pvdc.Save();
-
-//          ParaViewDataCollection pvdc1("IndRhoE_pressure_opt1", &pmesh_final);
-//          pvdc1.SetDataFormat(VTKFormat::BINARY32);
-//          pvdc1.SetCycle(0);
-//          pvdc1.SetTime(1.0);
-
-//          pvdc1.RegisterField("e", &e_opt);
-//          pvdc1.Save();
-//       }
-
-
-//       L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
-//       L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
-//       L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);
-
-//       if (remap_v)
-//       {
-//          ParGridFunction vel_final(&pfes_v_final);
-//          Vector vel_true(T_vector_design.GetData() + 2*size_qf + size_gf_e,
-//                          size_gf_v_true);
-//          vel_final.SetFromTrueDofs(vel_true);
-//          L_vector_design.GetBlock(3) = vel_final;
-//       }
-
-//       ind_rho_e_v = L_vector_design;
-
-//       delete optsolver;
-//       delete ot_prob;
-//    }
-   // else if (opt_type == 2)
-   // {
-   //    std::vector<ParFiniteElementSpace*> fes({&pfes_e_final, &pfes_v_scalar_final});
-
-   //    Array<int> space_idx({-1, -1, 0});
-   //    Array<int> offsets({0,
-   //                        qspace_final.GetSize(),
-   //                        qspace_final.GetSize(),
-   //                        pfes_e_final.GetTrueVSize()});
-   //    Array<int> b_offsets(offsets);
-   //    Array<bool> has_bounds({true, true, true});
-   //    if (remap_v)
+   //    else if (opt_type == 1)
    //    {
-   //       for (int i=0; i<dim; i++)
+   //       OptimizationSolver* optsolver = NULL;
+   //       OptimizationSolver* optsolver_2 = NULL;
    //       {
-   //          space_idx.Append(1);
-   //          offsets.Append(pfes_v_scalar_final.GetTrueVSize());
-   //          // // Bound constraint for v
-   //          b_offsets.Append(pfes_v_scalar_final.GetTrueVSize());
-   //          has_bounds.Append(true);
-   //          // No bound constraint for v
-   //          // b_offsets.Append(0);
-   //          // has_bounds.Append(false);
+   // #ifdef MFEM_USE_HIOP
+   //          optsolver = new HiopNlpOptimizer(MPI_COMM_WORLD);
+   //          optsolver_2 = new HiopNlpOptimizer(MPI_COMM_WORLD);
+   // #else
+   //          MFEM_ABORT("MFEM is not built with HiOp support!");
+   // #endif
    //       }
-   //    }
-   //    offsets.PartialSum();
-   //    b_offsets.PartialSum();
-   //    MFEM_VERIFY(dynamic_cast<const L2_FECollection*>(pfes_e_final.FEColl()) !=
-   //                nullptr,
-   //                "Expecting L2_FECollection for pfes_e_final.");
+   //       Array<int> offset_true(numBlocks);
+   //       offset_true[0] = 0;
+   //       offset_true[1] = offset_true[0] + size_qf;
+   //       offset_true[2] = offset_true[1] + size_qf;
+   //       offset_true[3] = offset_true[2] + size_gf_e;
 
-   //    BlockVector x_initial(offsets);
-   //    BlockVector x_initial_LVec(ind_rho_e_v_interp, offset);
-   //    // Since all functions other than v satisfy L-vector == T-vector,
-   //    // we can use the L-vector for bounds.
-   //    BlockVector x_min_final_LVec(x_min.GetData(), offset);
-   //    BlockVector x_max_final_LVec(x_max.GetData(), offset);
-   //    BlockVector x_min_final(b_offsets);
-   //    BlockVector x_max_final(b_offsets);
-   //    for (int i=0; i<3; i++)
-   //    {
-   //       x_initial.GetBlock(i) = x_initial_LVec.GetBlock(i);
-   //       x_min_final.GetBlock(i) = x_min_final_LVec.GetBlock(i);
-   //       x_max_final.GetBlock(i) = x_max_final_LVec.GetBlock(i);
-   //    }
-   //    if (remap_v)
-   //    {
-   //       ParGridFunction vtmp(&pfes_v_scalar_final, (real_t*)nullptr);
-   //       const int n = pfes_v_scalar_final.GetVSize();
-   //       MFEM_VERIFY(n*dim == pfes_v_final.GetVSize(),
-   //                   "Expecting 3*n dofs for pfes_v_scalar_final.");
-   //       for (int i=0; i<dim; i++)
+   //       Array<int> offset_true_woE(numBlocks-1);
+   //       offset_true_woE[0] = 0;
+   //       offset_true_woE[1] = offset_true_woE[0] + size_qf;
+   //       offset_true_woE[2] = offset_true_woE[1] + size_qf;
+
+   //       if (remap_v)
    //       {
-   //          vtmp.MakeRef(&pfes_v_scalar_final, x_initial_LVec.GetBlock(3), i*n);
-   //          vtmp.GetTrueDofs(x_initial.GetBlock(3+i));
-
-   //          if (!has_bounds[3 + i]) { continue; }
-   //          vtmp.MakeRef(&pfes_v_scalar_final, x_min_final_LVec.GetBlock(3), i*n);
-   //          vtmp.GetTrueDofs(x_min_final.GetBlock(3+i));
-
-   //          vtmp.MakeRef(&pfes_v_scalar_final, x_max_final_LVec.GetBlock(3), i*n);
-   //          vtmp.GetTrueDofs(x_max_final.GetBlock(3+i));
+   //          offset_true[4] = offset_true[3] + size_gf_v_true;
+   //          offset_true_woE[3] = offset_true_woE[2] + size_gf_v_true;
    //       }
-   //    }
 
-   //    // Objective function: 0.5 * || u - u_initial ||^2
-   //    remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
-   //          space_idx);
-   //    // Constraint
-   //    std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
+   //       Vector rho_target, e_target, v_target;
+   //       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
+   //       GetTargetValues( e_interp, e_min, e_max, e_target );
 
-   //    funcs[0] = std::make_unique<ComposedFunctional>(
-   //                  remap::volume_f, remap::volume_df, qspace_final, fes, space_idx);
-   //    funcs[0]->SetTarget(volume_0);
-   //    funcs[1] = std::make_unique<ComposedFunctional>(
-   //                  remap::mass_f, remap::mass_df, qspace_final, fes, space_idx);
-   //    funcs[1]->SetTarget(mass_0);
-   //    if (!remap_v) // use potential
-   //    {
-   //       funcs[2] = std::make_unique<ComposedFunctional>(
-   //                     remap::potential_f, remap::potential_df, qspace_final, fes, space_idx);
-   //       funcs[2]->SetTarget(energy_0);
-   //    }
-   //    else
-   //    {
-   //       for (int i=0; i<dim; i++)
+
+
+   //       BlockVector initial_design(offset_true);
+   //       BlockVector design_min    (offset_true);
+   //       BlockVector design_max    (offset_true);
+   //       BlockVector initial_design_woE(offset_true_woE);
+   //       BlockVector design_min_woE    (offset_true_woE);
+   //       BlockVector design_max_woE    (offset_true_woE);
+   //       initial_design.GetBlock(0) = ind_interp;
+   //       initial_design.GetBlock(1) = rho_target;
+   //       initial_design.GetBlock(2) = e_target;
+   //       design_min.GetBlock(0) = ind_min;
+   //       design_min.GetBlock(1) = rho_min;
+   //       design_min.GetBlock(2) = e_min;
+   //       design_max.GetBlock(0) = ind_max;
+   //       design_max.GetBlock(1) = rho_max;
+   //       design_max.GetBlock(2) = e_max;
+   //       initial_design_woE.GetBlock(0) = ind_interp;
+   //       initial_design_woE.GetBlock(1) = rho_target;
+   //       design_min_woE.GetBlock(0) = ind_min;
+   //       design_min_woE.GetBlock(1) = rho_min;
+   //       design_max_woE.GetBlock(0) = ind_max;
+   //       design_max_woE.GetBlock(1) = rho_max;
+   //       if (remap_v)
    //       {
-   //          funcs[3+i] = std::make_unique<ComposedFunctional>(
-   //          [i](const Vector &x) { return remap::momentum_f(x, i); },
-   //          [i](const Vector &x, Vector &g) { remap::momentum_df(x, g, i); },
-   //          qspace_final, fes, space_idx);
-   //          funcs[3+i]->SetTarget(moment_0[i]);
+   //          ParGridFunction vtmp_min(&pfes_v_final, v_min);
+   //          ParGridFunction vtmp_max(&pfes_v_final, v_max);
+
+   //          v_interp.SetTrueVector();
+   //          vtmp_min.SetTrueVector();
+   //          vtmp_max.SetTrueVector();
+
+   //          mfem::Vector & true_v_interp = v_interp.GetTrueVector();
+   //          mfem::Vector & true_v_min    = vtmp_min.GetTrueVector();
+   //          mfem::Vector & true_v_max    = vtmp_max.GetTrueVector();
+
+   //          initial_design.GetBlock(3) = true_v_interp;
+   //          design_min    .GetBlock(3) = true_v_min;
+   //          design_max    .GetBlock(3) = true_v_max;
+
+   //          initial_design_woE.GetBlock(2) = true_v_interp;
+   //          design_min_woE    .GetBlock(2) = true_v_min;
+   //          design_max_woE    .GetBlock(2) = true_v_max;
    //       }
-   //       funcs[2] = std::make_unique<ComposedFunctional>(
-   //                     remap::energy_f, remap::energy_df, qspace_final, fes, space_idx);
-   //       funcs[2]->SetTarget(tot_en_0);
-   //    }
 
-   //    StackedSharedFunctional C(offsets.Last());
-   //    for (auto &f : funcs)
-   //    {
-   //       f->SetComm(pmesh_final.GetComm());
-   //       C.AddFunctional(*f);
-   //    }
-   //    MassOperator mass_q(qspace_final), mass_l2(pfes_e_final),
-   //                 mass_h1(pfes_v_scalar_final);
-   //    MultiMassOperator mass;
-   //    mass.Append(mass_q);
-   //    mass.Append(mass_q);
-   //    mass.Append(mass_l2);
-   //    if (remap_v) { for (int i=0; i<dim; i++) { mass.Append(mass_h1); } }
-   //    PointwiseFermiDirac sigmoid(x_min_final, x_max_final);
-   //    Array<LegendreFunction*> legendre_funcs({&sigmoid});
-   //    Array<int> dummy_offset({0, x_min_final.Size()});
-   //    Dykstra projector(pmesh_final.GetComm(), C, mass,
-   //                      legendre_funcs, dummy_offset,
-   //                      x_min_final, x_max_final, atol, max_iter);
-   //    if (!p_control) { projector.Project(x_initial); }
-   //    else
-   //    {
-   //       // Two-stage pressure control.
-   //       //
-   //       // Stage 1 projects (ind, rho, p, v): the specific internal energy is
-   //       // replaced by the pressure, which is then bounded by construction
-   //       // through the Fermi-Dirac generator. With p = rho*e the internal
-   //       // energy int eta*rho*e is just int eta*p, so that constraint is
-   //       // bilinear in (eta, p) rather than trilinear in (eta, rho, e).
-   //       //
-   //       // Stage 2 recovers e at frozen (ind, rho, v) inside the intersection
-   //       // of the energy DMP box with the pressure box converted at that
-   //       // density. No constraint ties (rho, e) to p, so the pressure box
-   //       // cannot render the feasible set empty the way it does when
-   //       // P(rho, e) is bounded directly.
-   //       MFEM_VERIFY(b_offsets.Last() == offsets.Last(),
-   //                   "Two-stage pressure control expects bounds on all blocks.");
+   //       int NumDesVar = initial_design.Size();
+   //       int NumDesVar_woE = initial_design_woE.Size();
+   //       BlockVector y_out(offset_true);
+   //       BlockVector y_out_woE(offset_true_woE);
 
-   //       // If the interpolated pressure already satisfies its bounds there is
-   //       // nothing to control, and a uniform pressure would give a zero-width
-   //       // box that pins p in stage 1 and leaves stage 2 no freedom.
-   //       // Compare the pressure *implied by the interpolated state*, rho*e,
-   //       // against the box. Not p_interp: the box is built from p_interp by
-   //       // CalcRhoBounds, so p_interp satisfies it by construction and would
-   //       // make this test always pass.
-   //       QuadratureFunction p_implied(&qspace_final);
-   //       ComputePressureQF(rho_interp, e_interp, gamma, p_implied);
-   //       real_t pviol_in = 0.0;
-   //       for (int i = 0; i < size_qf; i++)
+   //       y_out = initial_design;
+   //       y_out_woE = initial_design_woE;
+
+   //       mfem::Array<int> optProbInd;
+   //       mfem::Vector ind_rho_e_sub;
+   //       mfem::Vector y_out_sub;
+   //       mfem::Vector minsub;
+   //       mfem::Vector maxsub;
+   //       mfem::Vector minsub_woE;
+   //       mfem::Vector maxsub_woE;
+
+   //       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
+   //       Vector x_maxsub_woE(NumDesVar_woE), x_minsub_woE(NumDesVar_woE);
+
+   //       if (subprob)
    //       {
-   //          if (ind_interp(i) <= 1e-6) { continue; }
-   //          pviol_in = std::max(pviol_in, std::max(p_implied(i) - p_max(i),
-   //                                                 p_min(i) - p_implied(i)));
+   //          NumDesVar = GetSizeOptimizationSubset(design_min,design_max);
+   //          GetOptimizationSubsetInd(design_min,design_max,optProbInd);
+   //          //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
+   //          initial_design.GetSubVector(optProbInd,ind_rho_e_sub);
+   //          y_out.GetSubVector(optProbInd,y_out_sub);
+
+   //          design_min.GetSubVector(optProbInd,minsub);
+   //          design_max.GetSubVector(optProbInd,maxsub);
+
+   //          x_maxsub.SetSize(NumDesVar);
+   //          x_minsub.SetSize(NumDesVar);
+   //          x_maxsub = maxsub;
+   //          x_minsub = minsub;
    //       }
-   //       pviol_in = allreduce(pmesh_final.GetComm(), pviol_in, MPI_MAX);
-
-   //       bool skip = (pviol_in <= atol);
-   //       if (skip)
+   //       else
    //       {
-   //          // The interpolated pressure is already within bounds, so try the
-   //          // ordinary conservation-only projection. Keep the interpolated
-   //          // target so we can fall back to the two-stage solve if that
-   //          // projection moves the pressure out of bounds.
-   //          BlockVector x_interp_saved(x_initial);
-   //          if (Mpi::Root())
+   //          x_maxsub = design_max;
+   //          x_minsub = design_min;
+   //          x_maxsub_woE = design_max_woE;
+   //          x_minsub_woE = design_min_woE;
+   //       }
+
+   //       OptimizationProblem *ot_prob = nullptr;
+
+   //       if (remap_staggered)
+   //       {
+   //          RemhosIndRhoVOpProblem hiop(qspace_final,
+   //                                      pfes_e_final,
+   //                                      pfes_v_final,
+   //                                      pos_final,
+   //                                      initial_design,
+   //                                      initial_design_woE,
+   //                                      NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
+   //                                      volume_0, mass_0, moment_0, tot_en_0,
+   //                                      4, false, optProbInd, true,
+   //                                      subprob);
+   //          hiop.setWeightedSpaceType(weightedSpace);
+
+   //          optsolver->SetOptimizationProblem(hiop);
+   //          optsolver->SetMaxIter(max_iter);
+   //          optsolver->SetAbsTol(1e-6);
+   //          optsolver->SetRelTol(1e-6);
+   //          optsolver->SetPrintLevel(3);
+
+   //          if (subprob)
    //          {
-   //             std::cout << "Pressure control: implied pressure rho*e already "
-   //                       << "within bounds at material points (max violation "
-   //                       << pviol_in << " <= " << atol << "); trying the plain "
-   //                       << "conservation projection." << std::endl;
+   //             optsolver->Mult(initial_design_woE, y_out_sub);
+   //             y_out_woE.SetSubVector(optProbInd, y_out_sub);
    //          }
-   //          projector.Project(x_initial);
+   //          else { optsolver->Mult(initial_design_woE, y_out_woE); }
 
-   //          // The plain projection enforces conservation and the DMP boxes, not
-   //          // the pressure box, so it can move rho and e. Measure rho*e of the
-   //          // projected state; if it left the pressure box, fall back to the
-   //          // full two-stage solve rather than returning a violating state.
-   //          QuadratureFunction rho_p(&qspace_final,
-   //                                   x_initial.GetBlock(1).GetData());
-   //          QuadratureFunction e_p_qf(&qspace_final);
-   //          ParGridFunction e_p(&pfes_e_final, x_initial.GetBlock(2).GetData());
-   //          ComputePressureQF(rho_p, e_p, gamma, e_p_qf);
-   //          real_t pviol_out = 0.0;
-   //          for (int i = 0; i < size_qf; i++)
+   //          //-------------------------------------------------------------------------
+
+   //          QuadratureFunction ind_opt(&qspace_final,
+   //                                     y_out_woE.GetBlock(0).GetData());
+   //          QuadratureFunction rho_opt(&qspace_final,
+   //                                     y_out_woE.GetBlock(1).GetData());
+   //          Vector vel_true_opt(y_out_woE.GetData() + 2*size_qf, size_gf_v_true);
+
+   //          initial_design.GetBlock(0) = ind_opt;
+   //          initial_design.GetBlock(1) = rho_opt;
+   //          initial_design.GetBlock(2) = e_target;
+   //          initial_design.GetBlock(3) = vel_true_opt;
+
+   //          // Vector p_min, p_max;
+   //          Vector e_min_p;
+   //          Vector e_max_p;
+
+   //          CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
+   //                            p_max, p_min, rho_opt, pos_final, ind_max, gamma,
+   //                            e_min_p, e_max_p, p_max_ele, p_min_ele);
+
+   //          e_min = e_min_p;
+   //          e_max = e_max_p;
+
+   //          RemhosEOpProblem hiop_2(qspace_final, pfes_e_final, pfes_v_final,
+   //                                  pos_final, initial_design,
+   //                                  e_target, e_target.Size(), e_min_p, e_max_p,
+   //                                  volume_0, mass_0, moment_0, tot_en_0,
+   //                                  1, false, optProbInd, true, subprob);
+
+   //          hiop_2.setWeightedSpaceType(weightedSpace);
+
+   //          optsolver_2->SetOptimizationProblem(hiop_2);
+   //          optsolver_2->SetMaxIter(max_iter);
+   //          optsolver_2->SetAbsTol(1e-7);
+   //          optsolver_2->SetRelTol(1e-7);
+   //          optsolver_2->SetPrintLevel(3);
+
+   //          Vector y_out_E = e_target;
+
+   //          if (subprob)
    //          {
-   //             if (ind_interp(i) <= 1e-6) { continue; }
-   //             pviol_out = std::max(pviol_out,
-   //                                  std::max(e_p_qf(i) - p_max(i),
-   //                                           p_min(i) - e_p_qf(i)));
+   //             optsolver_2->Mult(initial_design_woE, y_out_sub);
+   //             y_out_woE.SetSubVector(optProbInd, y_out_sub);
    //          }
-   //          pviol_out = allreduce(pmesh_final.GetComm(), pviol_out, MPI_MAX);
+   //          else { optsolver_2->Mult(e_target, y_out_E); }
 
-   //          // Widest the pressure box gets at a material point. When this is
-   //          // ~0 (a spatially uniform pressure) the box pins p, so the two-stage
-   //          // solve has no freedom and cannot improve on the plain projection --
-   //          // and would in fact hit a degenerate, zero-width box. Fall back to
-   //          // the two-stage only when it can actually help.
-   //          real_t box_width = 0.0;
-   //          for (int i = 0; i < size_qf; i++)
-   //          {
-   //             if (ind_interp(i) <= 1e-6) { continue; }
-   //             box_width = std::max(box_width, p_max(i) - p_min(i));
-   //          }
-   //          box_width = allreduce(pmesh_final.GetComm(), box_width, MPI_MAX);
+   //          initial_design.GetBlock(0) = ind_opt;
+   //          initial_design.GetBlock(1) = rho_opt;
+   //          initial_design.GetBlock(2) = y_out_E;
+   //          initial_design.GetBlock(3) = vel_true_opt;
 
-   //          if (pviol_out > atol && box_width > pviol_out)
+   //          y_out = initial_design;
+   //       }
+   //       else
+   //       {
+   //          if (remap_v)
    //          {
-   //             if (Mpi::Root())
+   //             auto hiop = new RemhosHydroHiOpProblem(qspace_final,
+   //                                                    pfes_e_final, pfes_v_final,
+   //                                                    pos_final,
+   //                                                    initial_design, p_interp,
+   //                                                    NumDesVar, x_minsub, x_maxsub,
+   //                                                    volume_0, mass_0, moment_0, tot_en_0,
+   //                                                    5, false, optProbInd, true,
+   //                                                    subprob, p_control);
+   //             hiop->setWeightedSpaceType(weightedSpace);
+
+   //             if (p_control)
    //             {
-   //                std::cout << "  The plain projection left the pressure out of "
-   //                          << "bounds (" << pviol_out << " > " << atol
-   //                          << "); running the two-stage solve." << std::endl;
+   //                hiop->w_1 = 1.0;
+   //                hiop->w_2 = 1.0;
+   //                hiop->w_3 = 0.0;
+   //                hiop->w_4 = 0.0;
+   //                hiop->w_p = 1e6;
+   //                hiop->w_4_H1 = 0.0;
+   //                hiop->gamma = gamma;
    //             }
-   //             x_initial = x_interp_saved;   // restore the interpolated target
-   //             skip = false;
+
+   //             ot_prob = hiop;
    //          }
-   //          else if (Mpi::Root() && pviol_out > atol)
+   //          else
    //          {
-   //             std::cout << "  The plain projection left a pressure violation of "
-   //                       << pviol_out << ", but the pressure box is too narrow "
-   //                       << "(width " << box_width << ") for the two-stage solve "
-   //                       << "to improve it; keeping the plain projection."
-   //                       << std::endl;
+   //             ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final,
+   //                                                    pfes_e_final,
+   //                                                    pos_final,
+   //                                                    initial_design,
+   //                                                    p_interp,
+   //                                                    NumDesVar,
+   //                                                    x_minsub, x_maxsub,
+   //                                                    volume_0, mass_0, energy_0,
+   //                                                    3, false, optProbInd, true,
+   //                                                    subprob, p_control);
+
+   //             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->setWeightedSpaceType(
+   //                weightedSpace);
+
+   //             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->gamma = gamma;
    //          }
+   //          optsolver->SetOptimizationProblem(*ot_prob);
+   //          optsolver->SetMaxIter(max_iter);
+   //          optsolver->SetAbsTol(1e-7);
+   //          optsolver->SetRelTol(1e-7);
+   //          optsolver->SetPrintLevel(3);
+
+   //          if (subprob)
+   //          {
+   //             optsolver->Mult(ind_rho_e_sub, y_out_sub);
+   //             y_out.SetSubVector(optProbInd, y_out_sub);
+   //          }
+   //          else { optsolver->Mult(initial_design, y_out); }
    //       }
-   //       if (!skip)
+
+   //       BlockVector T_vector_design(offset_true);
+   //       BlockVector L_vector_design(offset);
+
+   //       T_vector_design = y_out;
+
    //       {
-   //          TwoStagePressureRemap::Options ts_opts;
-   //          ts_opts.gamma_minus_one = 1.0;   // this code uses p = rho*e
-   //          ts_opts.atol            = atol;
-   //          ts_opts.max_iter        = max_iter;
+   //          QuadratureFunction rho_opt(&qspace_final,
+   //                                     T_vector_design.GetBlock(1).GetData());
+   //          QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
+   //          ParGridFunction    e_opt  (&pfes_e_final,
+   //                                     T_vector_design.GetBlock(2).GetData());
+   //          ComputePressure( pos_final, rho_opt, e_opt, gamma, pressure_opt);
 
-   //          // This opt_type == 2 path is single-material; the two-stage
-   //          // solver supports more, but is only constructed and validated for
-   //          // one here.
-   //          const int num_materials = 1;
-   //          TwoStagePressureRemap two_stage(qspace_final, pfes_e_final,
-   //                                          pfes_v_scalar_final,
-   //                                          mass_q, mass_l2, mass_h1,
-   //                                          num_materials, dim, remap_v, ts_opts);
+   //          ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
+   //          pvdc.SetDataFormat(VTKFormat::BINARY32);
+   //          pvdc.SetCycle(0);
+   //          pvdc.SetTime(1.0);
+   //          pvdc.RegisterQField("rho", &rho_opt);
+   //          pvdc.RegisterQField("pressure", &pressure_opt);
+   //          pvdc.RegisterQField("pressure_interp", &p_interp);
+   //          pvdc.Save();
 
-   //          std::vector<Vector> p_min_all(1), p_max_all(1);
-   //          p_min_all[0] = p_min;
-   //          p_max_all[0] = p_max;
+   //          ParaViewDataCollection pvdc1("IndRhoE_pressure_opt1", &pmesh_final);
+   //          pvdc1.SetDataFormat(VTKFormat::BINARY32);
+   //          pvdc1.SetCycle(0);
+   //          pvdc1.SetTime(1.0);
 
-   //          Vector volume_0_v(1), mass_0_v(1), energy_0_v(1), moment_0_v(dim);
-   //          volume_0_v(0) = volume_0;
-   //          mass_0_v(0)   = mass_0;
-   //          energy_0_v(0) = remap_v ? tot_en_0 : energy_0;
-   //          for (int d = 0; d < dim; d++) { moment_0_v(d) = moment_0[d]; }
-
-   //          two_stage.Solve(x_min_final, x_max_final, p_min_all, p_max_all,
-   //                          volume_0_v, mass_0_v, energy_0_v, moment_0_v,
-   //                          x_initial);
+   //          pvdc1.RegisterField("e", &e_opt);
+   //          pvdc1.Save();
    //       }
+
+
+   //       L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
+   //       L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
+   //       L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);
+
+   //       if (remap_v)
+   //       {
+   //          ParGridFunction vel_final(&pfes_v_final);
+   //          Vector vel_true(T_vector_design.GetData() + 2*size_qf + size_gf_e,
+   //                          size_gf_v_true);
+   //          vel_final.SetFromTrueDofs(vel_true);
+   //          L_vector_design.GetBlock(3) = vel_final;
+   //       }
+
+   //       ind_rho_e_v = L_vector_design;
+
+   //       delete optsolver;
+   //       delete ot_prob;
    //    }
-   //    BlockVector x_final_LVector(ind_rho_e_v, offset);
-   //    for (int i=0; i<3; i++)
-   //    {
-   //       x_final_LVector.GetBlock(i) = x_initial.GetBlock(i);
-   //    }
-   //    if (remap_v)
-   //    {
-   //       ParGridFunction vtmp(&pfes_v_final, x_final_LVector.GetBlock(3));
-   //       Vector v_final_TVector(x_initial.GetBlock(3).GetData(),
-   //                              pfes_v_final.GetTrueVSize());
-   //       vtmp.SetFromTrueDofs(v_final_TVector);
-   //    }
-   // }
+   else if (opt_type == 2)
+   {
+      std::vector<ParFiniteElementSpace*> fes({&pfes_v_scalar_final});
+
+      Array<int> space_idx({-1, -1, -1});
+      Array<int> offsets({0,
+                          qspace_final.GetSize(),
+                          qspace_final.GetSize(),
+                          qspace_final.GetSize(),
+                         });
+      Array<int> b_offsets(offsets);
+      Array<bool> has_bounds({true, true, true});
+      if (remap_v)
+      {
+         for (int i=0; i<dim; i++)
+         {
+            space_idx.Append(0);
+            offsets.Append(pfes_v_scalar_final.GetTrueVSize());
+            // // Bound constraint for v
+            b_offsets.Append(pfes_v_scalar_final.GetTrueVSize());
+            has_bounds.Append(true);
+            // No bound constraint for v
+            // b_offsets.Append(0);
+            // has_bounds.Append(false);
+         }
+      }
+      offsets.PartialSum();
+      b_offsets.PartialSum();
+      BlockVector x_initial(offsets);
+      BlockVector x_initial_LVec(ind_rho_e_v_interp, offset);
+      // Since all functions other than v satisfy L-vector == T-vector,
+      // we can use the L-vector for bounds.
+      BlockVector x_min_final_LVec(x_min.GetData(), offset);
+      BlockVector x_max_final_LVec(x_max.GetData(), offset);
+      BlockVector x_min_final(b_offsets);
+      BlockVector x_max_final(b_offsets);
+      for (int i=0; i<3; i++)
+      {
+         x_initial.GetBlock(i) = x_initial_LVec.GetBlock(i);
+         x_min_final.GetBlock(i) = x_min_final_LVec.GetBlock(i);
+         x_max_final.GetBlock(i) = x_max_final_LVec.GetBlock(i);
+      }
+      if (remap_v)
+      {
+         ParGridFunction vtmp(&pfes_v_scalar_final, (real_t*)nullptr);
+         const int n = pfes_v_scalar_final.GetVSize();
+         MFEM_VERIFY(n*dim == pfes_v_final.GetVSize(),
+                     "Expecting 3*n dofs for pfes_v_scalar_final.");
+         for (int i=0; i<dim; i++)
+         {
+            vtmp.MakeRef(&pfes_v_scalar_final, x_initial_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_initial.GetBlock(3+i));
+
+            if (!has_bounds[3 + i]) { continue; }
+            vtmp.MakeRef(&pfes_v_scalar_final, x_min_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_min_final.GetBlock(3+i));
+
+            vtmp.MakeRef(&pfes_v_scalar_final, x_max_final_LVec.GetBlock(3), i*n);
+            vtmp.GetTrueDofs(x_max_final.GetBlock(3+i));
+         }
+      }
+
+      // Objective function: 0.5 * || u - u_initial ||^2
+      remap::RemapObjectiveFunctional remap_obj(qspace_final, fes, x_initial,
+            space_idx);
+      // Constraint
+      std::vector<std::unique_ptr<ComposedFunctional>> funcs(3 + remap_v*dim);
+
+      funcs[0] = std::make_unique<ComposedFunctional>(
+                    remap::volume_f, remap::volume_df, qspace_final, fes, space_idx);
+      funcs[0]->SetTarget(volume_0);
+      funcs[1] = std::make_unique<ComposedFunctional>(
+                    remap::mass_f, remap::mass_df, qspace_final, fes, space_idx);
+      funcs[1]->SetTarget(mass_0);
+      if (!remap_v) // use potential
+      {
+         funcs[2] = std::make_unique<ComposedFunctional>(
+                       remap::potential_f, remap::potential_df, qspace_final, fes, space_idx);
+         funcs[2]->SetTarget(energy_0);
+      }
+      else
+      {
+         for (int i=0; i<dim; i++)
+         {
+            funcs[3+i] = std::make_unique<ComposedFunctional>(
+            [i](const Vector &x) { return remap::momentum_f(x, i); },
+            [i](const Vector &x, Vector &g) { remap::momentum_df(x, g, i); },
+            qspace_final, fes, space_idx);
+            funcs[3+i]->SetTarget(moment_0[i]);
+         }
+         funcs[2] = std::make_unique<ComposedFunctional>(
+                       remap::energy_f, remap::energy_df, qspace_final, fes, space_idx);
+         funcs[2]->SetTarget(tot_en_0);
+      }
+
+      StackedSharedFunctional C(offsets.Last());
+      for (auto &f : funcs)
+      {
+         f->SetComm(pmesh_final.GetComm());
+         C.AddFunctional(*f);
+      }
+      MassOperator mass_q(qspace_final),
+                   mass_h1(pfes_v_scalar_final);
+      MultiMassOperator mass;
+      mass.Append(mass_q);
+      mass.Append(mass_q);
+      mass.Append(mass_q);
+      if (remap_v) { for (int i=0; i<dim; i++) { mass.Append(mass_h1); } }
+      PointwiseFermiDirac sigmoid(x_min_final, x_max_final);
+      Array<LegendreFunction*> legendre_funcs({&sigmoid});
+      Array<int> dummy_offset({0, x_min_final.Size()});
+      Dykstra projector(pmesh_final.GetComm(), C, mass,
+                        legendre_funcs, dummy_offset,
+                        x_min_final, x_max_final, atol, max_iter);
+      if (!p_control) { projector.Project(x_initial); }
+      else
+      {
+         // Two-stage pressure control.
+         //
+         // Stage 1 projects (ind, rho, p, v): the specific internal energy is
+         // replaced by the pressure, which is then bounded by construction
+         // through the Fermi-Dirac generator. With p = rho*e the internal
+         // energy int eta*rho*e is just int eta*p, so that constraint is
+         // bilinear in (eta, p) rather than trilinear in (eta, rho, e).
+         //
+         // Stage 2 recovers e at frozen (ind, rho, v) inside the intersection
+         // of the energy DMP box with the pressure box converted at that
+         // density. No constraint ties (rho, e) to p, so the pressure box
+         // cannot render the feasible set empty the way it does when
+         // P(rho, e) is bounded directly.
+         MFEM_VERIFY(b_offsets.Last() == offsets.Last(),
+                     "Two-stage pressure control expects bounds on all blocks.");
+
+         // If the interpolated pressure already satisfies its bounds there is
+         // nothing to control, and a uniform pressure would give a zero-width
+         // box that pins p in stage 1 and leaves stage 2 no freedom.
+         // Compare the pressure *implied by the interpolated state*, rho*e,
+         // against the box. Not p_interp: the box is built from p_interp by
+         // CalcRhoBounds, so p_interp satisfies it by construction and would
+         // make this test always pass.
+         QuadratureFunction p_implied(&qspace_final);
+         ComputePressureQF(rho_interp, e_interp, gamma, p_implied);
+         real_t pviol_in = 0.0;
+         for (int i = 0; i < size_qf; i++)
+         {
+            if (ind_interp(i) <= 1e-6) { continue; }
+            pviol_in = std::max(pviol_in, std::max(p_implied(i) - p_max(i),
+                                                   p_min(i) - p_implied(i)));
+         }
+         pviol_in = allreduce(pmesh_final.GetComm(), pviol_in, MPI_MAX);
+
+         bool skip = (pviol_in <= atol);
+         if (skip)
+         {
+            // The interpolated pressure is already within bounds, so try the
+            // ordinary conservation-only projection. Keep the interpolated
+            // target so we can fall back to the two-stage solve if that
+            // projection moves the pressure out of bounds.
+            BlockVector x_interp_saved(x_initial);
+            if (Mpi::Root())
+            {
+               std::cout << "Pressure control: implied pressure rho*e already "
+                         << "within bounds at material points (max violation "
+                         << pviol_in << " <= " << atol << "); trying the plain "
+                         << "conservation projection." << std::endl;
+            }
+            projector.Project(x_initial);
+
+            // The plain projection enforces conservation and the DMP boxes, not
+            // the pressure box, so it can move rho and e. Measure rho*e of the
+            // projected state; if it left the pressure box, fall back to the
+            // full two-stage solve rather than returning a violating state.
+            QuadratureFunction rho_p(&qspace_final,
+                                     x_initial.GetBlock(1).GetData());
+            QuadratureFunction e_p(&qspace_final, x_initial.GetBlock(2).GetData());
+            QuadratureFunction p_p(&qspace_final);
+            ComputePressureQF(rho_p, e_p, gamma, p_p);
+            real_t pviol_out = 0.0;
+            for (int i = 0; i < size_qf; i++)
+            {
+               if (ind_interp(i) <= 1e-6) { continue; }
+               pviol_out = std::max(pviol_out,
+                                    std::max(p_p(i) - p_max(i),
+                                             p_min(i) - p_p(i)));
+            }
+            pviol_out = allreduce(pmesh_final.GetComm(), pviol_out, MPI_MAX);
+
+            // Widest the pressure box gets at a material point. When this is
+            // ~0 (a spatially uniform pressure) the box pins p, so the two-stage
+            // solve has no freedom and cannot improve on the plain projection --
+            // and would in fact hit a degenerate, zero-width box. Fall back to
+            // the two-stage only when it can actually help.
+            real_t box_width = 0.0;
+            for (int i = 0; i < size_qf; i++)
+            {
+               if (ind_interp(i) <= 1e-6) { continue; }
+               box_width = std::max(box_width, p_max(i) - p_min(i));
+            }
+            box_width = allreduce(pmesh_final.GetComm(), box_width, MPI_MAX);
+
+            if (pviol_out > atol && box_width > pviol_out)
+            {
+               if (Mpi::Root())
+               {
+                  std::cout << "  The plain projection left the pressure out of "
+                            << "bounds (" << pviol_out << " > " << atol
+                            << "); running the two-stage solve." << std::endl;
+               }
+               x_initial = x_interp_saved;   // restore the interpolated target
+               skip = false;
+            }
+            else if (Mpi::Root() && pviol_out > atol)
+            {
+               std::cout << "  The plain projection left a pressure violation of "
+                         << pviol_out << ", but the pressure box is too narrow "
+                         << "(width " << box_width << ") for the two-stage solve "
+                         << "to improve it; keeping the plain projection."
+                         << std::endl;
+            }
+         }
+         if (!skip)
+         {
+            TwoStagePressureRemap::Options ts_opts;
+            ts_opts.gamma_minus_one = 1.0;   // this code uses p = rho*e
+            ts_opts.atol            = atol;
+            ts_opts.max_iter        = max_iter;
+
+            // This opt_type == 2 path is single-material; the two-stage
+            // solver supports more, but is only constructed and validated for
+            // one here.
+            const int num_materials = 1;
+            TwoStagePressureRemap two_stage(qspace_final,
+                                            pfes_v_scalar_final,
+                                            mass_q, mass_h1,
+                                            num_materials, dim, remap_v, ts_opts);
+
+            std::vector<Vector> p_min_all(1), p_max_all(1);
+            p_min_all[0] = p_min;
+            p_max_all[0] = p_max;
+
+            Vector volume_0_v(1), mass_0_v(1), energy_0_v(1), moment_0_v(dim);
+            volume_0_v(0) = volume_0;
+            mass_0_v(0)   = mass_0;
+            energy_0_v(0) = remap_v ? tot_en_0 : energy_0;
+            for (int d = 0; d < dim; d++) { moment_0_v(d) = moment_0[d]; }
+
+            two_stage.Solve(x_min_final, x_max_final, p_min_all, p_max_all,
+                            volume_0_v, mass_0_v, energy_0_v, moment_0_v,
+                            x_initial);
+         }
+      }
+      BlockVector x_final_LVector(ind_rho_e_v, offset);
+      for (int i=0; i<3; i++)
+      {
+         x_final_LVector.GetBlock(i) = x_initial.GetBlock(i);
+      }
+      if (remap_v)
+      {
+         ParGridFunction vtmp(&pfes_v_final, x_final_LVector.GetBlock(3));
+         Vector v_final_TVector(x_initial.GetBlock(3).GetData(),
+                                pfes_v_final.GetTrueVSize());
+         vtmp.SetFromTrueDofs(v_final_TVector);
+      }
+   }
    else { MFEM_ABORT("not implemented!"); }
 
    QuadratureFunction ind(&qspace_final, ind_rho_e_v.GetData()),
                       rho(&qspace_final, ind_rho_e_v.GetData() + size_qf),
-                        e(&qspace_final, ind_rho_e_v.GetData() + 2*size_qf);
+                      e(&qspace_final, ind_rho_e_v.GetData() + 2*size_qf);
    ParGridFunction v(&pfes_v_final, ind_rho_e_v.GetData() + 3*size_qf);
 
    // Remap-state output: the interpolated and the OPTIMIZED (final) fields side
@@ -1708,8 +1705,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       if (Mpi::Root()) { std::cout << "*\nPressure violations: \n"; }
       CheckBounds(pmesh_init.GetMyRank(), p, p_min_ele, p_max_ele);
 
-      QuadratureFunction violations_p = MakeBoundViolationQF(qspace_final, p, p_min_ele, p_max_ele);
-      QuadratureFunction violations_e = MakeBoundViolationQF(qspace_final, e, e_min, e_max);
+      QuadratureFunction violations_p = MakeBoundViolationQF(qspace_final, p,
+                                        p_min_ele, p_max_ele);
+      QuadratureFunction violations_e = MakeBoundViolationQF(qspace_final, e, e_min,
+                                        e_max);
 
       ParaViewDataCollection pvdc("bound_violations", &pmesh_final);
       pvdc.SetDataFormat(VTKFormat::BINARY32);
@@ -1882,8 +1881,8 @@ double InterpolationRemap::Integrate(const Vector &pos,
    for (int j = 0; j < NE; j++)
    {
       const IntegrationRule &ir =
-          (qspace) ? qspace->GetElementIntRule(j)
-                   : IntRules.Get(v->ParFESpace()->GetFE(j)->GetGeomType(), 7);
+         (qspace) ? qspace->GetElementIntRule(j)
+         : IntRules.Get(v->ParFESpace()->GetFE(j)->GetGeomType(), 7);
       const int nqp = ir.GetNPoints();
 
       // Transformation w.r.t. the given mesh positions.
@@ -2070,9 +2069,9 @@ void InterpolationRemap::CalcQuadBounds(const QuadratureFunction &qf_init,
 }
 
 void InterpolationRemap::AdjustDiffusion(QuadratureFunction &ind_interp,
-                                         QuadratureFunction &rho_interp,
-                                         ParGridFunction &e_interp,
-                                         Array<bool> &active_el)
+      QuadratureFunction &rho_interp,
+      ParGridFunction &e_interp,
+      Array<bool> &active_el)
 {
    // Idea: if an element doesn't have ind > cutoff at least at one point,
    // then the values in this element come from diffusion. This is cleaned.
@@ -2321,17 +2320,17 @@ void InterpolationRemap::CalcEBounds(const ParGridFunction &e_init,
 }
 
 void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
-                                          Array<bool> &active_el_0,
-                                          const ParGridFunction &e_interp,
-                                          const QuadratureFunction &e_interp_qf,
-                                          const Vector &p_qf_max,
-                                          const Vector &p_qf_min,
-                                          const QuadratureFunction &rho_interp_qf,
-                                          const Vector &pos_final,
-                                          const Vector &ind_max,
-                                          const double gamma,
-                                          Vector &e_min, Vector &e_max,
-                                          Vector &p_max_ele, Vector &p_min_ele)
+      Array<bool> &active_el_0,
+      const ParGridFunction &e_interp,
+      const QuadratureFunction &e_interp_qf,
+      const Vector &p_qf_max,
+      const Vector &p_qf_min,
+      const QuadratureFunction &rho_interp_qf,
+      const Vector &pos_final,
+      const Vector &ind_max,
+      const double gamma,
+      Vector &e_min, Vector &e_max,
+      Vector &p_max_ele, Vector &p_min_ele)
 {
    const double eps = 1e-12;
 
@@ -2425,7 +2424,7 @@ void InterpolationRemap::CalcEBoundsPBased(const ParGridFunction &e_init,
 
             const double rho = rho_interp_qf(idx);
 
-            if(is_collapsed)
+            if (is_collapsed)
             {
                p_max_ele(idx) = gamma * rho * el_max;
                p_min_ele(idx) = gamma * rho * el_min;
