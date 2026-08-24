@@ -2183,11 +2183,9 @@ private:
    const Vector x_initial_design;
    const Vector &pos_final;
    QuadratureSpace & qspace_;
-   ParFiniteElementSpace & scalarfespace_;
    ParFiniteElementSpace & vectorfespace_;
 
    const int size_qf;
-   const int size_gf;
    const int size_gf_vec;
    const int size_gf_vec_true;
 
@@ -2252,7 +2250,6 @@ public:
    real_t w_p = 1e3;
 
    RemhosIndRhoVOpProblem(  QuadratureSpace        & qspace,
-                           ParFiniteElementSpace & scalarfespace,
                            ParFiniteElementSpace & vectorfespace,
                             const Vector          & pos_final_,
                             const Vector          & u_initial,
@@ -2272,9 +2269,8 @@ public:
       : OptimizationProblem(numDesVar, NULL, NULL),
         RemhosOptBase(numConstraints_, numDesVar, optProbInd_, sub),
         x_initial(u_initial), x_initial_design(u_initial_design), pos_final(pos_final_),
-        qspace_(qspace), scalarfespace_(scalarfespace),
-        vectorfespace_(vectorfespace),
-        size_qf(qspace.GetSize()), size_gf(scalarfespace.GetVSize()), size_gf_vec(vectorfespace.GetVSize()),
+        qspace_(qspace), vectorfespace_(vectorfespace),
+        size_qf(qspace.GetSize()), size_gf_vec(vectorfespace.GetVSize()),
         size_gf_vec_true(vectorfespace.GetTrueVSize()), offset_(4)
    {
       targetVol = initalvol;
@@ -2287,7 +2283,7 @@ public:
 
       SetSolutionBounds(xmin, xmax);
      
-      spatialDim = scalarfespace_.GetMesh()->SpaceDimension ();
+      spatialDim = vectorfespace_.GetMesh()->SpaceDimension ();
 
       offset_[0] = 0;
       offset_[1] = offset_[0] + size_qf;
@@ -2310,7 +2306,7 @@ public:
 
       ind_0 = QuadratureFunction(&qspace_, x_initial.GetData());
       rho_0 = QuadratureFunction(&qspace_, x_initial.GetData() + size_qf);
-      e_0.MakeRef(&scalarfespace_, x_initial.GetData() + 2*size_qf);
+      e_0   = QuadratureFunction(&qspace_, x_initial.GetData() + 2*size_qf);
    }
 
    void setWeightedSpaceType( hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace)
@@ -2349,7 +2345,7 @@ public:
       velocity.SetFromTrueDofs(vel_true);
 
       ParGridFunction v_0(&vectorfespace_);
-      Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      Vector v_0_true(x_initial.GetData() + 3*size_qf, size_gf_vec_true);
       v_0.SetFromTrueDofs(v_0_true);
 
       subtract( ind     , ind_0, ind_diff);
@@ -2431,7 +2427,7 @@ public:
       velocity.SetFromTrueDofs(vel_true);
 
       ParGridFunction v_0(&vectorfespace_);
-      Vector v_0_true(x_initial.GetData() + 2*size_qf + size_gf, size_gf_vec_true);
+      Vector v_0_true(x_initial.GetData() + 3*size_qf , size_gf_vec_true);
       v_0.SetFromTrueDofs(v_0_true);
 
       subtract( ind     , ind_0, ind_diff);
@@ -2471,10 +2467,8 @@ public:
 
       //------------------------------------------------------------------------
 
-      ParLinearForm dQdeta(&scalarfespace_);
       ParLinearForm dQdv(&vectorfespace_);
       ParLinearForm dQdvH1(&vectorfespace_);
-      ParGridFunction    p_e_grad(&scalarfespace_); p_e_grad = 0.0;
       Vector v_grad_true(size_gf_vec_true); v_grad_true = 0.0;
       Vector v_grad_true_h1(size_gf_vec_true); v_grad_true_h1 = 0.0;
       VectorGridFunctionCoefficient v_diff_coeff(&v_diff);
@@ -2514,66 +2508,64 @@ public:
 
 virtual void CalcObjectiveM(  std::vector<mfem::Vector> & diagMass, std::vector<HypreParMatrix *> & M_) const override
    {
-      if(subproblem)
-      {
-         mfem_error("CalcObjectiveHessian not implemented for subproblem option");
-      }
+      // if(subproblem)
+      // {
+      //    mfem_error("CalcObjectiveHessian not implemented for subproblem option");
+      // }
 
-      diagMass.resize(2);
-      M_.resize(1);
+      // diagMass.resize(2);
+      // M_.resize(1);
 
-      QuadratureFunction ind_w(&qspace_); ind_w = 1.0;
-      QuadratureFunction roh_w(&qspace_); roh_w = 1.0;
-      ParGridFunction    e_diff(&scalarfespace_);
+      // QuadratureFunction ind_w(&qspace_); ind_w = 1.0;
+      // QuadratureFunction roh_w(&qspace_); roh_w = 1.0;
+      // ParGridFunction    e_diff(&scalarfespace_);
 
-      diagMass[0].SetSize(ind_w.Size());
-      diagMass[1].SetSize(ind_w.Size());
-      //------------------------------------------------------------------------
+      // diagMass[0].SetSize(ind_w.Size());
+      // diagMass[1].SetSize(ind_w.Size());
+      // //------------------------------------------------------------------------
 
-      if(isL2_)
-      {
-         for (int e = 0; e < NE_; e++)
-         {
-            const int s_offset = offsetGP[e];
+      // if(isL2_)
+      // {
+      //    for (int e = 0; e < NE_; e++)
+      //    {
+      //       const int s_offset = offsetGP[e];
 
-            IsoparametricTransformation Tr;
-            mesh_->GetElementTransformation(e, pos_final, &Tr);
+      //       IsoparametricTransformation Tr;
+      //       mesh_->GetElementTransformation(e, pos_final, &Tr);
 
-            const IntegrationRule &ir = qspace_.GetElementIntRule(e);
-            const int nqp = ir.GetNPoints();
+      //       const IntegrationRule &ir = qspace_.GetElementIntRule(e);
+      //       const int nqp = ir.GetNPoints();
 
-            for (int q = 0; q < nqp; q++)
-            {
-               const IntegrationPoint &ip = ir.IntPoint(q);
-               Tr.SetIntPoint(&ip);
-               real_t w = Tr.Weight() * ip.weight;
+      //       for (int q = 0; q < nqp; q++)
+      //       {
+      //          const IntegrationPoint &ip = ir.IntPoint(q);
+      //          Tr.SetIntPoint(&ip);
+      //          real_t w = Tr.Weight() * ip.weight;
 
-               ind_w[s_offset+q] *= w;
-               roh_w[s_offset+q] *= w;
-            }
-         }
-      }
-      diagMass[0] = ind_w;
-      diagMass[1] = roh_w;
+      //          ind_w[s_offset+q] *= w;
+      //          roh_w[s_offset+q] *= w;
+      //       }
+      //    }
+      // }
+      // diagMass[0] = ind_w;
+      // diagMass[1] = roh_w;
 
-      delete(mass_form);
-      mass_form = new ParBilinearForm(&scalarfespace_);
-      auto *blfi = new MassIntegrator();
-      mass_form->AddDomainIntegrator(blfi);
-      mass_form->Assemble();
-      mass_form->Finalize();
+      // delete(mass_form);
+      // mass_form = new ParBilinearForm(&scalarfespace_);
+      // auto *blfi = new MassIntegrator();
+      // mass_form->AddDomainIntegrator(blfi);
+      // mass_form->Assemble();
+      // mass_form->Finalize();
 
-      M_[0] = mass_form->ParallelAssemble();
+      // M_[0] = mass_form->ParallelAssemble();
 
-      delete mass_form;
+      // delete mass_form;
    }
 
    void CalcConstraintGrad(const int constNumber,
                            const Vector &x, Vector &grad) const override
    {
-      Vector x_interpolated(offset_[3]);  
-
-
+      Vector x_interpolated(offset_[3]); 
 
       if(subproblem)
       {

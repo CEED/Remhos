@@ -1005,105 +1005,103 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    {
       ind_rho_e_v = ind_rho_e_v_interp;
    }
-//    else if (opt_type == 1)
-//    {
-//       OptimizationSolver* optsolver = NULL;
-//       OptimizationSolver* optsolver_2 = NULL;
-//       {
-// #ifdef MFEM_USE_HIOP
-//          optsolver = new HiopNlpOptimizer(MPI_COMM_WORLD);
-//          optsolver_2 = new HiopNlpOptimizer(MPI_COMM_WORLD);
-// #else
-//          MFEM_ABORT("MFEM is not built with HiOp support!");
-// #endif
-//       }
-//       Array<int> offset_true(numBlocks);
-//       offset_true[0] = 0;
-//       offset_true[1] = offset_true[0] + size_qf;
-//       offset_true[2] = offset_true[1] + size_qf;
-//       offset_true[3] = offset_true[2] + size_gf_e;
+   else if (opt_type == 1)
+   {
+      OptimizationSolver* optsolver = NULL;
+      OptimizationSolver* optsolver_2 = NULL;
+      {
+#ifdef MFEM_USE_HIOP
+         optsolver = new HiopNlpOptimizer(MPI_COMM_WORLD);
+         optsolver_2 = new HiopNlpOptimizer(MPI_COMM_WORLD);
+#else
+         MFEM_ABORT("MFEM is not built with HiOp support!");
+#endif
+      }
+      Array<int> offset_true(numBlocks);
+      offset_true[0] = 0;
+      offset_true[1] = offset_true[0] + size_qf;
+      offset_true[2] = offset_true[1] + size_qf;
+      offset_true[3] = offset_true[2] + size_qf;
 
-//       Array<int> offset_true_woE(numBlocks-1);
-//       offset_true_woE[0] = 0;
-//       offset_true_woE[1] = offset_true_woE[0] + size_qf;
-//       offset_true_woE[2] = offset_true_woE[1] + size_qf;
+      Array<int> offset_true_woE(numBlocks-1);
+      offset_true_woE[0] = 0;
+      offset_true_woE[1] = offset_true_woE[0] + size_qf;
+      offset_true_woE[2] = offset_true_woE[1] + size_qf;
 
-//       if (remap_v)
-//       {
-//          offset_true[4] = offset_true[3] + size_gf_v_true;
-//          offset_true_woE[3] = offset_true_woE[2] + size_gf_v_true;
-//       }
+      if (remap_v)
+      {
+         offset_true[4] = offset_true[3] + size_gf_v_true;
+         offset_true_woE[3] = offset_true_woE[2] + size_gf_v_true;
+      }
 
-//       Vector rho_target, e_target, v_target;
-//       GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
-//       GetTargetValues( e_interp, e_min, e_max, e_target );
+      Vector rho_target, e_target, v_target;
+      GetTargetValues( rho_interp, rho_min, rho_max, rho_target );
+      GetTargetValues( e_interp, e_min, e_max, e_target );
 
+      BlockVector initial_design(offset_true);
+      BlockVector design_min    (offset_true);
+      BlockVector design_max    (offset_true);
+      BlockVector initial_design_woE(offset_true_woE);
+      BlockVector design_min_woE    (offset_true_woE);
+      BlockVector design_max_woE    (offset_true_woE);
+      initial_design.GetBlock(0) = ind_interp;
+      initial_design.GetBlock(1) = rho_target;
+      initial_design.GetBlock(2) = e_target;
+      design_min.GetBlock(0) = ind_min;
+      design_min.GetBlock(1) = rho_min;
+      design_min.GetBlock(2) = e_min;
+      design_max.GetBlock(0) = ind_max;
+      design_max.GetBlock(1) = rho_max;
+      design_max.GetBlock(2) = e_max;
+      initial_design_woE.GetBlock(0) = ind_interp;
+      initial_design_woE.GetBlock(1) = rho_target;
+      design_min_woE.GetBlock(0) = ind_min;
+      design_min_woE.GetBlock(1) = rho_min;
+      design_max_woE.GetBlock(0) = ind_max;
+      design_max_woE.GetBlock(1) = rho_max;
+      if (remap_v)
+      {
+         ParGridFunction vtmp_min(&pfes_v_final, v_min);
+         ParGridFunction vtmp_max(&pfes_v_final, v_max);
 
+         v_interp.SetTrueVector();
+         vtmp_min.SetTrueVector();
+         vtmp_max.SetTrueVector();
 
-//       BlockVector initial_design(offset_true);
-//       BlockVector design_min    (offset_true);
-//       BlockVector design_max    (offset_true);
-//       BlockVector initial_design_woE(offset_true_woE);
-//       BlockVector design_min_woE    (offset_true_woE);
-//       BlockVector design_max_woE    (offset_true_woE);
-//       initial_design.GetBlock(0) = ind_interp;
-//       initial_design.GetBlock(1) = rho_target;
-//       initial_design.GetBlock(2) = e_target;
-//       design_min.GetBlock(0) = ind_min;
-//       design_min.GetBlock(1) = rho_min;
-//       design_min.GetBlock(2) = e_min;
-//       design_max.GetBlock(0) = ind_max;
-//       design_max.GetBlock(1) = rho_max;
-//       design_max.GetBlock(2) = e_max;
-//       initial_design_woE.GetBlock(0) = ind_interp;
-//       initial_design_woE.GetBlock(1) = rho_target;
-//       design_min_woE.GetBlock(0) = ind_min;
-//       design_min_woE.GetBlock(1) = rho_min;
-//       design_max_woE.GetBlock(0) = ind_max;
-//       design_max_woE.GetBlock(1) = rho_max;
-//       if (remap_v)
-//       {
-//          ParGridFunction vtmp_min(&pfes_v_final, v_min);
-//          ParGridFunction vtmp_max(&pfes_v_final, v_max);
+         mfem::Vector & true_v_interp = v_interp.GetTrueVector();
+         mfem::Vector & true_v_min    = vtmp_min.GetTrueVector();
+         mfem::Vector & true_v_max    = vtmp_max.GetTrueVector();
 
-//          v_interp.SetTrueVector();
-//          vtmp_min.SetTrueVector();
-//          vtmp_max.SetTrueVector();
+         initial_design.GetBlock(3) = true_v_interp;
+         design_min    .GetBlock(3) = true_v_min;
+         design_max    .GetBlock(3) = true_v_max;
 
-//          mfem::Vector & true_v_interp = v_interp.GetTrueVector();
-//          mfem::Vector & true_v_min    = vtmp_min.GetTrueVector();
-//          mfem::Vector & true_v_max    = vtmp_max.GetTrueVector();
+         initial_design_woE.GetBlock(2) = true_v_interp;
+         design_min_woE    .GetBlock(2) = true_v_min;
+         design_max_woE    .GetBlock(2) = true_v_max;
+      }
 
-//          initial_design.GetBlock(3) = true_v_interp;
-//          design_min    .GetBlock(3) = true_v_min;
-//          design_max    .GetBlock(3) = true_v_max;
+      int NumDesVar = initial_design.Size();
+      int NumDesVar_woE = initial_design_woE.Size();
+      BlockVector y_out(offset_true);
+      BlockVector y_out_woE(offset_true_woE);
 
-//          initial_design_woE.GetBlock(2) = true_v_interp;
-//          design_min_woE    .GetBlock(2) = true_v_min;
-//          design_max_woE    .GetBlock(2) = true_v_max;
-//       }
+      y_out = initial_design;
+      y_out_woE = initial_design_woE;
 
-//       int NumDesVar = initial_design.Size();
-//       int NumDesVar_woE = initial_design_woE.Size();
-//       BlockVector y_out(offset_true);
-//       BlockVector y_out_woE(offset_true_woE);
+      mfem::Array<int> optProbInd;
+      mfem::Vector ind_rho_e_sub;
+      mfem::Vector y_out_sub;
+      mfem::Vector minsub;
+      mfem::Vector maxsub;
+      mfem::Vector minsub_woE;
+      mfem::Vector maxsub_woE;
 
-//       y_out = initial_design;
-//       y_out_woE = initial_design_woE;
+      Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
+      Vector x_maxsub_woE(NumDesVar_woE), x_minsub_woE(NumDesVar_woE);
 
-//       mfem::Array<int> optProbInd;
-//       mfem::Vector ind_rho_e_sub;
-//       mfem::Vector y_out_sub;
-//       mfem::Vector minsub;
-//       mfem::Vector maxsub;
-//       mfem::Vector minsub_woE;
-//       mfem::Vector maxsub_woE;
-
-//       Vector x_maxsub(NumDesVar), x_minsub(NumDesVar);
-//       Vector x_maxsub_woE(NumDesVar_woE), x_minsub_woE(NumDesVar_woE);
-
-//       if (subprob)
-//       {
+      if (subprob)
+      {
 //          NumDesVar = GetSizeOptimizationSubset(design_min,design_max);
 //          GetOptimizationSubsetInd(design_min,design_max,optProbInd);
 //          //ind_rho_e_v.GetSubVector(optProbInd,ind_rho_e_sub);
@@ -1117,69 +1115,67 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 //          x_minsub.SetSize(NumDesVar);
 //          x_maxsub = maxsub;
 //          x_minsub = minsub;
-//       }
-//       else
-//       {
-//          x_maxsub = design_max;
-//          x_minsub = design_min;
-//          x_maxsub_woE = design_max_woE;
-//          x_minsub_woE = design_min_woE;
-//       }
+      }
+      else
+      {
+         x_maxsub = design_max;
+         x_minsub = design_min;
+         x_maxsub_woE = design_max_woE;
+         x_minsub_woE = design_min_woE;
+      }
 
-//       OptimizationProblem *ot_prob = nullptr;
+      OptimizationProblem *ot_prob = nullptr;
 
-//       if (remap_staggered)
-//       {
-//          RemhosIndRhoVOpProblem hiop(qspace_final,
-//                                      pfes_e_final,
-//                                      pfes_v_final,
-//                                      pos_final,
-//                                      initial_design,
-//                                      initial_design_woE,
-//                                      NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
-//                                      volume_0, mass_0, moment_0, tot_en_0,
-//                                      4, false, optProbInd, true,
-//                                      subprob);
-//          hiop.setWeightedSpaceType(weightedSpace);
+      if (remap_staggered)
+      {
+         RemhosIndRhoVOpProblem hiop(qspace_final,
+                                     pfes_v_final,
+                                     pos_final,
+                                     initial_design,
+                                     initial_design_woE,
+                                     NumDesVar_woE, x_minsub_woE, x_maxsub_woE,
+                                     volume_0, mass_0, moment_0, tot_en_0,
+                                     4, false, optProbInd, true,
+                                     subprob);
+         hiop.setWeightedSpaceType(weightedSpace);
 
-//          optsolver->SetOptimizationProblem(hiop);
-//          optsolver->SetMaxIter(max_iter);
-//          optsolver->SetAbsTol(1e-6);
-//          optsolver->SetRelTol(1e-6);
-//          optsolver->SetPrintLevel(3);
+         optsolver->SetOptimizationProblem(hiop);
+         optsolver->SetMaxIter(max_iter);
+         optsolver->SetAbsTol(1e-6);
+         optsolver->SetRelTol(1e-6);
+         optsolver->SetPrintLevel(3);
 
-//          if (subprob)
-//          {
-//             optsolver->Mult(initial_design_woE, y_out_sub);
-//             y_out_woE.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver->Mult(initial_design_woE, y_out_woE); }
+         if (subprob)
+         {
+            optsolver->Mult(initial_design_woE, y_out_sub);
+            y_out_woE.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver->Mult(initial_design_woE, y_out_woE); }
 
-//          //-------------------------------------------------------------------------
+         //-------------------------------------------------------------------------
          
-//          QuadratureFunction ind_opt(&qspace_final,
-//                                     y_out_woE.GetBlock(0).GetData());
-//          QuadratureFunction rho_opt(&qspace_final,
-//                                     y_out_woE.GetBlock(1).GetData());
-//          Vector vel_true_opt(y_out_woE.GetData() + 2*size_qf, size_gf_v_true);
+         QuadratureFunction ind_opt(&qspace_final,
+                                    y_out_woE.GetBlock(0).GetData());
+         QuadratureFunction rho_opt(&qspace_final,
+                                    y_out_woE.GetBlock(1).GetData());
+         Vector vel_true_opt(y_out_woE.GetData() + 2*size_qf, size_gf_v_true);
 
-//          initial_design.GetBlock(0) = ind_opt;
-//          initial_design.GetBlock(1) = rho_opt;
-//          initial_design.GetBlock(2) = e_target;
-//          initial_design.GetBlock(3) = vel_true_opt;
+         initial_design.GetBlock(0) = ind_opt;
+         initial_design.GetBlock(1) = rho_opt;
+         initial_design.GetBlock(2) = e_target;
+         initial_design.GetBlock(3) = vel_true_opt;
 
-//          // Vector p_min, p_max;
-//          Vector e_min_p;
-//          Vector e_max_p;
+         Vector p_min, p_max;
+         Vector e_min_p, e_max_p;
 
-//          CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
-//                            p_max, p_min, rho_opt, pos_final, ind_max, gamma,
-//                            e_min_p, e_max_p, p_max_ele, p_min_ele);
+         // CalcEBoundsPBased(e_0, active_el_0, e_interp, e_interp_qf,
+         //                   p_max, p_min, rho_opt, pos_final, ind_max, gamma,
+         //                   e_min_p, e_max_p, p_max_ele, p_min_ele);
 
-//          e_min = e_min_p;
-//          e_max = e_max_p;
+         // e_min = e_min_p;
+         // e_max = e_max_p;
 
-//          RemhosEOpProblem hiop_2(qspace_final, pfes_e_final, pfes_v_final,
+//          RemhosEOpProblem hiop_2(qspace_final, pfes_v_final,
 //                                  pos_final, initial_design,
 //                                  e_target, e_target.Size(), e_min_p, e_max_p,
 //                                  volume_0, mass_0, moment_0, tot_en_0,
@@ -1208,9 +1204,9 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 //          initial_design.GetBlock(3) = vel_true_opt;
 
 //          y_out = initial_design;
-//       }
-//       else
-//       {
+      }
+      else
+      {
 //          if (remap_v)
 //          {
 //             auto hiop = new RemhosHydroHiOpProblem(qspace_final,
@@ -1266,7 +1262,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 //             y_out.SetSubVector(optProbInd, y_out_sub);
 //          }
 //          else { optsolver->Mult(initial_design, y_out); }
-//       }
+      }
 
 //       BlockVector T_vector_design(offset_true);
 //       BlockVector L_vector_design(offset);
@@ -1317,7 +1313,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
 //       delete optsolver;
 //       delete ot_prob;
-//    }
+   }
    // else if (opt_type == 2)
    // {
    //    std::vector<ParFiniteElementSpace*> fes({&pfes_e_final, &pfes_v_scalar_final});
