@@ -22,10 +22,10 @@ namespace mfem
 {
 
 SmoothnessIndicator::SmoothnessIndicator(int type_id,
-      ParMesh &subcell_mesh,
-      ParFiniteElementSpace &pfes_DG_,
-      ParGridFunction &u,
-      DofInfo &dof_info)
+                                         ParMesh &subcell_mesh,
+                                         ParFiniteElementSpace &pfes_DG_,
+                                         ParGridFunction &u,
+                                         DofInfo &dof_info)
    : type(type_id), param(type == 1 ? 5.0 : 3.0),
      fec_sub(1, pfes_DG_.GetMesh()->Dimension(), BasisType::Positive),
      pfes_CG_sub(&subcell_mesh, &fec_sub),
@@ -148,7 +148,7 @@ SmoothnessIndicator::~SmoothnessIndicator()
 }
 
 void SmoothnessIndicator::ComputeSmoothnessIndicator(const Vector &u,
-      ParGridFunction &si_vals_u)
+                                                     ParGridFunction &si_vals_u)
 {
    si_vals_u.SetSpace(&pfes_CG_sub);
 
@@ -235,7 +235,7 @@ void SmoothnessIndicator::ComputeVariationalMatrix(DofInfo &dof_info)
 }
 
 void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
-      ParGridFunction &y)
+                                               ParGridFunction &y)
 {
    const int nd = pfes_DG.GetFE(0)->GetDof(), ne = pfes_DG.GetMesh()->GetNE();
    int k, i, j, N = lumpedMH1.Size();
@@ -323,8 +323,8 @@ void SmoothnessIndicator::ApproximateLaplacian(const Vector &x,
 }
 
 void SmoothnessIndicator::ComputeFromSparsity(const SparseMatrix &K,
-      const ParGridFunction &x,
-      Vector &x_min, Vector &x_max)
+                                              const ParGridFunction &x,
+                                              Vector &x_min, Vector &x_max)
 {
    const int *I = K.GetI(), *J = K.GetJ(), loc_size = K.Size();
    int end;
@@ -375,9 +375,9 @@ DofInfo::DofInfo(ParFiniteElementSpace &pfes_sltn, int btype)
 }
 
 void DofInfo::ComputeMatrixSparsityBounds(const Vector &el_min,
-      const Vector &el_max,
-      Vector &dof_min, Vector &dof_max,
-      Array<bool> *active_el)
+                                          const Vector &el_max,
+                                          Vector &dof_min, Vector &dof_max,
+                                          Array<bool> *active_el)
 {
    ParMesh *pmesh = pfes.GetParMesh();
    L2_FECollection fec_bounds(0, pmesh->Dimension());
@@ -546,7 +546,7 @@ void DofInfo::FillNeighborDofs()
          {
             // Index of fdof_id in the current orientation.
             const int ori_fdof_id = GetLocalFaceDofIndex(dim, face_id, ori,
-                                    fdof_id, dof1D_cnt);
+                                                         fdof_id, dof1D_cnt);
             fdof_ids(ori)(ori_fdof_id, face_id) = BdrDofs(fdof_id, face_id);
          }
       }

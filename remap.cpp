@@ -68,7 +68,7 @@ void QuadratureDomainLFIntegrator::AssembleRHSElementVect(
 // QuadratureFunction to dual vector, <qf, v> = \int qf v dx
 // The returned vector is a T-vector in dual space.
 QuadratureLinearForm::QuadratureLinearForm(QuadratureSpace &qs,
-      FiniteElementSpace &fes)
+                                           FiniteElementSpace &fes)
    : Operator(fes.GetTrueVSize(), qs.GetSize())
    , qspace(qs)
    , fespace(fes)
@@ -496,9 +496,9 @@ MassOperator::MassOperator(FiniteElementSpace &fespace)
          M_inv = std::make_unique<CGSolver>();
          static_cast<CGSolver&>(*M_inv).SetPrintLevel(0);
          static_cast<CGSolver&>(*M_inv).SetPreconditioner(static_cast<GSSmoother&>
-               (*M_prec));
+                                                          (*M_prec));
          static_cast<CGSolver&>(*M_inv).SetOperator(static_cast<const SparseMatrix&>
-               (*M));
+                                                    (*M));
          static_cast<CGSolver&>(*M_inv).SetAbsTol(1e-10);
          static_cast<CGSolver&>(*M_inv).SetRelTol(1e-10);
          static_cast<CGSolver&>(*M_inv).SetMaxIter(1e06);
@@ -620,7 +620,7 @@ real_t MultiMassOperator::InnerProduct(const Vector &x, const Vector &y) const
 }
 // ||(x-y)||_M^2 = sqrt((x-y)^T*M*(x-y))^2
 real_t MultiMassOperator::DistanceSquaredTo(const Vector &x,
-      const Vector &y) const
+                                            const Vector &y) const
 {
    const BlockVector x_block(x.GetData(), offsets);
    const BlockVector y_block(y.GetData(), offsets);
@@ -664,7 +664,7 @@ MultiL2RieszMap::MultiL2RieszMap(QuadratureSpace &qspace,
                FiniteElement::VALUE)
       {
          mass_prec[i] = std::make_unique<HypreBoomerAMG>(static_cast<HypreParMatrix&>
-                        (*mass[i]));
+                                                         (*mass[i]));
          projector[i] = std::make_unique<HyprePCG>(fespace[i]->GetComm());
          HyprePCG *solver = static_cast<HyprePCG*>(projector[i].get());
          mass_prec[i]->SetPrintLevel(0);
@@ -818,9 +818,9 @@ void remap_functionals(const int optType, const int dim,
 /// that is, \nabla F = u - target
 /// Riesz map can be applied to another derivatives using ApplyRieszMap()
 RemapObjectiveFunctional::RemapObjectiveFunctional(QuadratureSpace &qspace,
-      const std::vector<FiniteElementSpace*> &fes,
-      const Vector &target,
-      const Array<int> &space_idx)
+                                                   const std::vector<FiniteElementSpace*> &fes,
+                                                   const Vector &target,
+                                                   const Array<int> &space_idx)
    : Functional(target.Size())
    , qspace(qspace)
    , fespace(fes)
@@ -831,9 +831,9 @@ RemapObjectiveFunctional::RemapObjectiveFunctional(QuadratureSpace &qspace,
    Initialize();
 }
 RemapObjectiveFunctional::RemapObjectiveFunctional(QuadratureSpace &qspace,
-      const std::vector<ParFiniteElementSpace*> &fes,
-      const Vector &target,
-      const Array<int> &space_idx)
+                                                   const std::vector<ParFiniteElementSpace*> &fes,
+                                                   const Vector &target,
+                                                   const Array<int> &space_idx)
    : Functional(target.Size())
    , qspace(qspace)
    , target(target)
@@ -869,7 +869,7 @@ void RemapObjectiveFunctional::Mult(const Vector &x, Vector &y) const
 
 // return M * (x - target)
 void RemapObjectiveFunctional::EvalGradient(const Vector &x,
-      Vector &y) const
+                                            Vector &y) const
 {
    MFEM_VERIFY(x.Size() == width && offsets.Last() == width &&
                target.Size() == width,

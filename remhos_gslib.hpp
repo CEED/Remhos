@@ -29,7 +29,7 @@ void InitializeQuadratureFunction(Coefficient &c,
 
 void ComputePressureQF(const QuadratureFunction &rho,
                        const QuadratureFunction &energy,
-                       const double gamma, 
+                       const double gamma,
                        QuadratureFunction &p);
 
 void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
@@ -136,8 +136,8 @@ private:
                           Array<bool> &active_el_0,
                           const ParGridFunction &e_interp,
                           const QuadratureFunction &e_interp_qf,
-                           const Vector &p_qf_max,
-                           const Vector &p_qf_min,
+                          const Vector &p_qf_max,
+                          const Vector &p_qf_min,
                           const QuadratureFunction &rho_interp_qf,
                           const Vector &pos_final,
                           const Vector &ind_max,

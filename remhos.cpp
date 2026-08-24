@@ -45,13 +45,17 @@ using namespace mfem;
 
 enum class HOSolverType {None, Neumann, CG, LocalInverse};
 enum class FCTSolverType {None, FluxBased, ClipScale,
-                          NonlinearPenalty, FCTProject};
+                          NonlinearPenalty, FCTProject
+                         };
 enum class LOSolverType {None,    DiscrUpwind,    DiscrUpwindPrec,
-                         ResDist, ResDistSubcell, MassBased};
+                         ResDist, ResDistSubcell, MassBased
+                        };
 
 enum class MonolithicSolverType
-{ None, ResDistMono, ResDistMonoSubcell,
-  InterpolationGF, InterpolationQF, InterpolationIndRhoE, InterpolationHydro };
+{
+   None, ResDistMono, ResDistMonoSubcell,
+   InterpolationGF, InterpolationQF, InterpolationIndRhoE, InterpolationHydro
+};
 
 enum class TimeStepControl {FixedTimeStep, LOBoundsError};
 
@@ -182,7 +186,7 @@ int main(int argc, char *argv[])
    const char *device_config = "cpu";
    bool optRelevantSubset = false;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpaceType =
-       hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
+      hiop::hiopInterfaceBase::WeightedSpaceType::Euclidean;
 
    int precision = 8;
    cout.precision(precision);
@@ -1016,7 +1020,7 @@ int main(int argc, char *argv[])
    if (mono_type == MonolithicSolverType::InterpolationQF)
    {
       const IntegrationRule &ir =
-          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+         IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
       QuadratureFunction u_qf(qspace);
       InitializeQuadratureFunction(u0, x0, u_qf);
@@ -1064,7 +1068,7 @@ int main(int argc, char *argv[])
       const bool remap_v = (mono_type==MonolithicSolverType::InterpolationHydro);
 
       const IntegrationRule &ir =
-          IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+         IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
       QuadratureSpace qspace(pmesh, ir);
 
       H1_FECollection fec_v(order+1, dim, BasisType::GaussLobatto);
@@ -1083,7 +1087,7 @@ int main(int argc, char *argv[])
 
       QuadratureFunction ind_0(&qspace, ind_rho_e_v_0.GetBlock(0).GetData()),
                          rho_0(&qspace, ind_rho_e_v_0.GetBlock(1).GetData()),
-                           e_0(&qspace, ind_rho_e_v_0.GetBlock(2).GetData());
+                         e_0(&qspace, ind_rho_e_v_0.GetBlock(2).GetData());
       ParGridFunction v_0(&pfes_v, ind_rho_e_v_0.GetBlock(3).GetData());
       v_0.SetTrueVector();
 
@@ -1132,7 +1136,7 @@ int main(int argc, char *argv[])
          pvdc.SetTime(1.0);
          pvdc.RegisterQField("ind", &ind_0);
          pvdc.RegisterQField("rho", &rho_0);
-        // pvdc.RegisterField("energy", &e_0);
+         // pvdc.RegisterField("energy", &e_0);
          pvdc.Save();
 
          ParaViewDataCollection pvdc1("IndRhoE_before_opt1", &pmesh);
@@ -1167,7 +1171,7 @@ int main(int argc, char *argv[])
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData()),
-                           e(&qspace, ind_rho_e.GetBlock(2).GetData());
+                         e(&qspace, ind_rho_e.GetBlock(2).GetData());
       ParGridFunction v(&pfes_v, ind_rho_e.GetBlock(3).GetData());
 
       // Compute final pressure.
@@ -2201,7 +2205,7 @@ void v0_function(const Vector &x, Vector &v)
       case 34:
       case 38:
       case 39: v(0) =  sin(1.2*M_PI*x(0)) * cos(1.2*M_PI*x(1));
-               v(1) = -cos(1.2*M_PI*x(0)) * sin(1.2*M_PI*x(1)); break;
+         v(1) = -cos(1.2*M_PI*x(0)) * sin(1.2*M_PI*x(1)); break;
       default: MFEM_ABORT("v0 is not defined for this problem.");
    }
 }

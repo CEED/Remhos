@@ -142,33 +142,12 @@ inline void p_energy_df(const Vector &u, Vector &grad_u, real_t gm1)
 }
 } // namespace remap
 
-/// @brief Reference-space association of the energy dofs with the quadrature
-/// points of the same element: each dof is assigned the quadrature point
-/// closest to it in reference coordinates.
-///
-/// Used to evaluate quadrature-only fields (rho, the pressure box) at the
-/// energy dofs. The map depends only on the reference element, so it is
-/// computed once and is independent of the mesh geometry.
-class QuadDofMap
-{
-   Array<int> dof2quad;   // element-local dof -> element-local quadrature point
-   int n_qp = 0, n_dof = 0, NE = 0;
-public:
-   QuadDofMap(const QuadratureSpace &qspace, const FiniteElementSpace &fes);
-
-   int NumQuadPoints() const { return n_qp; }
-   int NumLocalDofs()  const { return n_dof; }
-   int operator[](int local_dof) const { return dof2quad[local_dof]; }
-
-   /// @brief Scatter a quadrature-sized field to the energy dofs.
-   void QuadToDof(const Vector &quad_vals, Vector &dof_vals) const;
-};
-
 /// @brief Report of the stage-2 energy box construction.
 struct EnergyBoxReport
 {
    real_t max_tighten = 0.0;  ///< largest shrinkage of the DMP box by pressure
-   real_t max_clip    = 0.0;  ///< largest gap when the two intervals do not overlap
+   real_t max_clip    =
+      0.0;  ///< largest gap when the two intervals do not overlap
    /// Largest distance the issued box reaches outside the DMP box (measured
    /// after widening and the non-negativity clamp), i.e. the energy-bound
    /// relaxation admitted in order to keep the pressure bounded.
@@ -185,21 +164,14 @@ struct EnergyBoxReport
 /// with the pressure box converted at fixed density, e = p / ((gamma-1)*rho),
 /// where gamma-1 = 1 (p = rho*e).
 ///
-/// HEURISTIC / NOT A POINTWISE GUARANTEE. Each energy dof is bounded using the
-/// density at its NEAREST quadrature point (via QuadDofMap). Because rho varies
-/// within an element, this does not prove p_min <= rho(x)*e(x) <= p_max at
-/// every quadrature point -- a dof's bound is only consistent with one point's
-/// density. It is used because it lets e vary within the element to track the
-/// spatially-varying pressure, which controls the pressure far better in
-/// practice than the element-uniform, provably-correct alternative (which
-/// forces e flat per element and is frequently infeasible). The trade was
-/// measured: element-uniform made the final pressure violation worse than no
-/// control at all on smooth test data.
+/// The energy now lives at the quadrature points, next to rho and the pressure
+/// box, so the bound is applied pointwise: p_min <= (gamma-1)*rho(x)*e(x) <=
+/// p_max at every quadrature point, using that point's own density. This is
+/// exact -- no dof-to-quad association is needed.
 ///
-/// When the per-dof intersection is empty the pressure bound wins, so e may
+/// When the per-point intersection is empty the pressure bound wins, so e may
 /// leave its DMP box.
 EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
-                                               const QuadDofMap &map,
                                                const Vector &rho_q,
                                                const Vector &p_min_q,
                                                const Vector &p_max_q,
@@ -207,30 +179,6 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
                                                real_t gm1, real_t min_width_rel,
                                                real_t ind_tol, real_t rho_tol_rel,
                                                Vector &e_min, Vector &e_max);
-
-/// @brief Pressure P(rho, e) = (gamma-1) * rho * e at the quadrature points
-/// (gamma-1 = 1 here), with rho a QuadratureFunction and e an L2 field. Provides
-/// evaluation of e at the quadrature points and of the pressure P(rho, e).
-class PressureCoupling
-{
-   QuadratureSpace &qspace;
-   ParFiniteElementSpace &pfes_e;
-   const real_t gamma_minus_one;
-   mutable QuadratureFunction e_at_quads;
-public:
-   /// @brief Construct from the quadrature space, the L2 energy space and gamma-1.
-   PressureCoupling(QuadratureSpace &qs, ParFiniteElementSpace &fes,
-                    real_t gamma_minus_1 = 1.0);
-
-   /// @brief Evaluate the L2 field @a e at the quadrature points.
-   void EvalAtQuads(const Vector &e, QuadratureFunction &e_q) const;
-
-   /// @brief Compute the pressure p = (gamma-1) * rho * e at the quadrature points.
-   void Pressure(const QuadratureFunction &rho, const Vector &e,
-                 QuadratureFunction &p) const;
-
-};
-
 
 /// @brief Two-stage pressure-controlled Bregman remap.
 ///
@@ -272,16 +220,13 @@ public:
       real_t rho_tol_rel       = 1e-6;
    };
 
-   /// @param qspace         final-mesh quadrature space (eta, rho, p live here).
-   /// @param pfes_e         final-mesh energy space (L2).
+   /// @param qspace         final-mesh quadrature space (eta, rho, e, p live here).
    /// @param pfes_v_scalar  final-mesh scalar velocity space (H1).
-   /// @param mass_q,mass_l2,mass_h1  matching mass operators, supplied by the
-   ///        caller so they are assembled once.
+   /// @param mass_q,mass_h1  matching mass operators, supplied by the caller so
+   ///        they are assembled once.
    TwoStagePressureRemap(QuadratureSpace &qspace,
-                         ParFiniteElementSpace &pfes_e,
                          ParFiniteElementSpace &pfes_v_scalar,
-                         MassOperator &mass_q, MassOperator &mass_l2,
-                         MassOperator &mass_h1,
+                         MassOperator &mass_q, MassOperator &mass_h1,
                          int num_materials, int dim, bool remap_v,
                          const Options &opts);
 
@@ -306,22 +251,20 @@ public:
 
 private:
    QuadratureSpace &qspace;
-   ParFiniteElementSpace &pfes_e, &pfes_v_scalar;
-   MassOperator &mass_q, &mass_l2, &mass_h1;
+   ParFiniteElementSpace &pfes_v_scalar;
+   MassOperator &mass_q, &mass_h1;
    const int num_materials, dim;
    const bool remap_v;
    const Options opts;
 
+   // With the energy at the quadrature points, size_e == size_qf; it is kept
+   // as a separate name only to mark the energy blocks.
    const int size_qf, size_e, size_v1;
    const int num_vars;               // per material: 3 + dim*remap_v
    int per_mat_e, per_mat_p;
    Array<int> space_idx_e, space_idx_p;
    Array<int> blk_e, blk_p;          // per-material block sizes
    std::vector<ParFiniteElementSpace*> fes;
-
-   QuadDofMap dof_map;
-   PressureCoupling pcoup;
-   mutable QuadratureLinearForm qlf;
 
    /// Stage 1: project (eta, rho, p, v). Returns the p-layout solution.
    void SolveStage1(const Vector &x_min, const Vector &x_max,
