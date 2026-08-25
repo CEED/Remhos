@@ -1470,6 +1470,22 @@ int main(int argc, char *argv[])
       }
    }
 
+   // Remap accuracy vs the analytic solution, for the advection-remap paths
+   // (mono 0/1/2). The interpolation-remap paths compute the same L1/L2 error
+   // themselves and return early, so this mirrors them for a fair comparison.
+   if (exec_mode == 1 && project_analytic)
+   {
+      x = x_final;
+      FunctionCoefficient fcoeff(u0_function);
+      const double e_L1 = u.ComputeL1Error(fcoeff);
+      const double e_L2 = u.ComputeL2Error(fcoeff);
+      if (myid == 0)
+      {
+         std::cout << "L1 error: " << e_L1 << std::endl;
+         std::cout << "L2 error: " << e_L2 << std::endl;
+      }
+   }
+
    // Compute errors, if the initial condition is equal to the final solution
    if (problem_num == 4) // solid body rotation
    {
