@@ -177,7 +177,6 @@ int main(int argc, char *argv[])
    double dt = 0.005;
    bool visualization = true;
    bool p_control = false;
-   double p_control_rho_margin = 0.1;
    bool remap_staggered = false;
    bool visit = false;
    bool verify_bounds = false;
@@ -274,9 +273,6 @@ int main(int argc, char *argv[])
    args.AddOption(&p_control, "-pc", "--pressure-control", "-no-pc",
                   "--no-pressure-control",
                   "Enable or disable pressure control during hydro remap.");
-   args.AddOption(&p_control_rho_margin, "-pcrm", "--p-control-rho-margin",
-                  "Additive margin on the density DMP box under pressure "
-                  "control (density is frozen after stage 1; 0 = strict DMP).");
    args.AddOption(&remap_staggered, "-res", "--remap-staggered", "-no-res",
                   "--no-remap-staggered",
                   "Enable staggered remap during hydro remap.");
@@ -1157,17 +1153,15 @@ int main(int argc, char *argv[])
       interpolator.max_iter      = max_opt_iter;
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
-      interpolator.p_control_rho_margin = p_control_rho_margin;
       interpolator.problem_id    = problem_num;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);
       const bool e_ho_interp = false;
-      const bool adjust_diff = false;
       interpolator.RemapHydro(ind_rho_e_v_0, remap_v, p_control, p_0, gamma,
                               ind_0_bool_el, x_final,
                               ind_rho_e, optimization_type,
-                              e_ho_interp, adjust_diff, remap_staggered);
+                              e_ho_interp, remap_staggered);
 
       QuadratureFunction ind(&qspace, ind_rho_e.GetBlock(0).GetData()),
                          rho(&qspace, ind_rho_e.GetBlock(1).GetData()),

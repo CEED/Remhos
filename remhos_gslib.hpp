@@ -202,7 +202,6 @@ public:
                    const Vector &pos_final,
                    Vector &ind_rho_e_v, int opt_type,
                    bool interpolate_e_HO,
-                   bool adjust_diffusion = false,
                    bool remap_staggered = false);
 
    bool visualization = true;
@@ -211,12 +210,7 @@ public:
    int  max_iter      = 100;
    real_t atol        = 1e-10;
    real_t rtol        = 1e-08;
-   // Additive margin by which the density DMP box is widened under pressure
-   // control. Density is frozen after stage 1, so this is the only slack it has
-   // to move; a wider box gives stage 1 more room to satisfy the pressure
-   // constraint at the cost of density leaving its strict DMP bounds. Default
-   // matches the historical hard-coded 0.1.
-   real_t p_control_rho_margin = 0.1;
+
    // Problem id, used only to label the pressure visualization output.
    int problem_id = -1;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =

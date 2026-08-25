@@ -692,7 +692,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
                                     const Vector &pos_final,
                                     Vector &ind_rho_e_v, int opt_type,
                                     bool interpolate_e_HO,
-                                    bool adjust_diffusion,
                                     bool remap_staggered)
 {
    const int dim = pmesh_init.Dimension();
@@ -836,11 +835,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    Vector rho_min, rho_max;
    CalcRhoBounds(rho_interp, ind_interp, ind_max, rho_min, rho_max);
    UpdateRhoInterp(rho_interp, rho_min, rho_max);
-   if (p_control)
-   {
-      rho_min -= p_control_rho_margin;
-      rho_max += p_control_rho_margin;
-   }
    // {
    //    QuadratureFunction gf_min(qspace), gf_max(qspace);
    //    gf_min = rho_min, gf_max = rho_max;
