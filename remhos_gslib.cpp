@@ -1165,9 +1165,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          initial_design.GetBlock(2) = e_target;
          initial_design.GetBlock(3) = vel_true_opt;
 
-         Vector p_min, p_max;
          Vector e_min_p, e_max_p;
-
          CalcEBoundsPBased(e_0, active_el_0, e_interp,
                            p_max, p_min, rho_opt, pos_final, ind_max, gamma,
                            e_min_p, e_max_p, p_max_ele, p_min_ele);
@@ -1264,55 +1262,52 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 //          else { optsolver->Mult(initial_design, y_out); }
       }
 
-//       BlockVector T_vector_design(offset_true);
-//       BlockVector L_vector_design(offset);
+      BlockVector T_vector_design(offset_true);
+      BlockVector L_vector_design(offset);
 
-//       T_vector_design = y_out;
+      T_vector_design = y_out;
 
-//       {
-//          QuadratureFunction rho_opt(&qspace_final,
-//                                     T_vector_design.GetBlock(1).GetData());
-//          QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
-//          ParGridFunction    e_opt  (&pfes_e_final,
-//                                     T_vector_design.GetBlock(2).GetData());
-//          ComputePressure( pos_final, rho_opt, e_opt, gamma, pressure_opt);
+      {
+         QuadratureFunction rho_opt(&qspace_final, T_vector_design.GetBlock(1).GetData());
+         QuadratureFunction pressure_opt(&qspace_final); pressure_opt = 0.0;
+         QuadratureFunction e_opt  (&qspace_final, T_vector_design.GetBlock(2).GetData());
+         ComputePressure( pos_final, rho_opt, e_opt, gamma, pressure_opt);
 
-//          ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
-//          pvdc.SetDataFormat(VTKFormat::BINARY32);
-//          pvdc.SetCycle(0);
-//          pvdc.SetTime(1.0);
-//          pvdc.RegisterQField("rho", &rho_opt);
-//          pvdc.RegisterQField("pressure", &pressure_opt);
-//          pvdc.RegisterQField("pressure_interp", &p_interp);
-//          pvdc.Save();
+         ParaViewDataCollection pvdc("IndRhoE_pressure_opt", &pmesh_final);
+         pvdc.SetDataFormat(VTKFormat::BINARY32);
+         pvdc.SetCycle(0);
+         pvdc.SetTime(1.0);
+         pvdc.RegisterQField("rho", &rho_opt);
+         pvdc.RegisterQField("pressure", &pressure_opt);
+         pvdc.RegisterQField("pressure_interp", &p_interp);
+         pvdc.RegisterQField("e", &e_opt);
+         pvdc.Save();
 
-//          ParaViewDataCollection pvdc1("IndRhoE_pressure_opt1", &pmesh_final);
-//          pvdc1.SetDataFormat(VTKFormat::BINARY32);
-//          pvdc1.SetCycle(0);
-//          pvdc1.SetTime(1.0);
-
-//          pvdc1.RegisterField("e", &e_opt);
-//          pvdc1.Save();
-//       }
+         ParaViewDataCollection pvdc1("IndRhoE_pressure_opt1", &pmesh_final);
+         pvdc1.SetDataFormat(VTKFormat::BINARY32);
+         pvdc1.SetCycle(0);
+         pvdc1.SetTime(1.0);
+         pvdc1.Save();
+      }
 
 
-//       L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
-//       L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
-//       L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);
+      L_vector_design.GetBlock(0) = T_vector_design.GetBlock(0);
+      L_vector_design.GetBlock(1) = T_vector_design.GetBlock(1);
+      L_vector_design.GetBlock(2) = T_vector_design.GetBlock(2);
 
-//       if (remap_v)
-//       {
-//          ParGridFunction vel_final(&pfes_v_final);
-//          Vector vel_true(T_vector_design.GetData() + 2*size_qf + size_gf_e,
-//                          size_gf_v_true);
-//          vel_final.SetFromTrueDofs(vel_true);
-//          L_vector_design.GetBlock(3) = vel_final;
-//       }
+      if (remap_v)
+      {
+         ParGridFunction vel_final(&pfes_v_final);
+         Vector vel_true(T_vector_design.GetData() + 3*size_qf,
+                         size_gf_v_true);
+         vel_final.SetFromTrueDofs(vel_true);
+         L_vector_design.GetBlock(3) = vel_final;
+      }
 
-//       ind_rho_e_v = L_vector_design;
+      ind_rho_e_v = L_vector_design;
 
-//       delete optsolver;
-//       delete ot_prob;
+      delete optsolver;
+      delete ot_prob;
    }
    else if (opt_type == 2)
    {
@@ -2471,7 +2466,7 @@ void InterpolationRemap::CheckBounds(int myid, const Vector &v,
 
 void InterpolationRemap::ComputePressure(const Vector &pos,
                                          const QuadratureFunction &rho_,
-                                         const ParGridFunction &e_,
+                                         const QuadratureFunction &e_,
                                          const double gamma,
                                          QuadratureFunction &pressure)
 {
@@ -2494,7 +2489,7 @@ void InterpolationRemap::ComputePressure(const Vector &pos,
 
       Vector rho_vals(nqp), e_vals(nqp);
       rho_.GetValues(e, rho_vals);
-      e_.GetValues(Tr, ir, e_vals);
+      e_.GetValues(e, e_vals);
 
       for (int q = 0; q < nqp; q++)
       {

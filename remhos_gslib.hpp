@@ -132,10 +132,9 @@ private:
                     const Vector &ind_max,
                     Vector &e_min, Vector &e_max, BoundsType bounds_type);
 
-   void CalcEBoundsPBased(const ParGridFunction &e_init,
+   void CalcEBoundsPBased(const QuadratureFunction &e_init,
                           Array<bool> &active_el_0,
-                          const ParGridFunction &e_interp,
-                          const QuadratureFunction &e_interp_qf,
+                          const QuadratureFunction &e_interp,
                           const Vector &p_qf_max,
                           const Vector &p_qf_min,
                           const QuadratureFunction &rho_interp_qf,
@@ -159,7 +158,7 @@ private:
 
    void ComputePressure(const Vector &pos,
                         const QuadratureFunction &rho_,
-                        const ParGridFunction &e_,
+                        const QuadratureFunction &e_,
                         const double gamma,
                         QuadratureFunction &pressure);
 
