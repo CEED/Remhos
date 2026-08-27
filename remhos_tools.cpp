@@ -468,12 +468,15 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       d_x_min_write[i] = cg_min;
       d_x_max_write[i] = cg_max;
    });
-   auto x_min_view = x_min.GetArrayView();
-   auto x_max_view = x_max.GetArrayView();
-   gcomm.Reduce(*x_min_view, GroupCommunicator::Min);
-   gcomm.Bcast(*x_min_view);
-   gcomm.Reduce(*x_max_view, GroupCommunicator::Max);
-   gcomm.Bcast(*x_max_view);
+
+   {
+      auto x_min_view = x_min.GetArrayView();
+      auto x_max_view = x_max.GetArrayView();
+      gcomm.Reduce(*x_min_view, GroupCommunicator::Min);
+      gcomm.Bcast(*x_min_view);
+      gcomm.Reduce(*x_max_view, GroupCommunicator::Max);
+      gcomm.Bcast(*x_max_view);
+   }
 
    // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
