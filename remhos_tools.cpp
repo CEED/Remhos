@@ -439,7 +439,7 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
 {
    const int NE = pfes.GetNE();
    const real_t inf = std::numeric_limits<double>::infinity();
-   const auto *dof_comm = pfes_bounds.GetDeviceSharedDofCommunicator();
+   GroupCommunicator &gcomm = pfes_bounds.GroupComm();
 
    // These Read() calls will stage the CSR arrays to device on first use, then
    // MFEM reuses the device copy until the host data changes.
@@ -468,8 +468,12 @@ void DofInfo::ComputeOverlapBounds(const Vector &el_min,
       d_x_min_write[i] = cg_min;
       d_x_max_write[i] = cg_max;
    });
-   dof_comm->ReduceAndBcast(x_min, DeviceSharedDofCommunicator::Op::Min);
-   dof_comm->ReduceAndBcast(x_max, DeviceSharedDofCommunicator::Op::Max);
+   auto x_min_view = x_min.GetArrayView();
+   auto x_max_view = x_max.GetArrayView();
+   gcomm.Reduce(*x_min_view, GroupCommunicator::Min);
+   gcomm.Bcast(*x_min_view);
+   gcomm.Reduce(*x_max_view, GroupCommunicator::Max);
+   gcomm.Bcast(*x_max_view);
 
    // Use (x_min, x_max) to fill (dof_min, dof_max) for each DG dof.
    const TensorBasisElement *fe_cg =
