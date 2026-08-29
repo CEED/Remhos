@@ -143,14 +143,6 @@ private:
    // NOTE: The mesh is assumed to consist of segments, quads or hexes.
    void FillSubcell2CellDof();
 
-   // Computes the admissible interval of values for each DG dof from the values
-   // of all elements that feature the dof at its physical location.
-   // A given DOF gets bounds from the elements it touches (in Gauss-Lobatto
-   // sense, i.e., a face dof touches two elements, vertex dofs can touch many).
-   void ComputeOverlapBounds(const Vector &el_min, const Vector &el_max,
-                             Vector &dof_min, Vector &dof_max,
-                             Array<bool> *active_el = NULL);
-
    // A given DOF gets bounds from its own element and its face-neighbors.
    void ComputeMatrixSparsityBounds(const Vector &el_min, const Vector &el_max,
                                     Vector &dof_min, Vector &dof_max,
@@ -166,6 +158,15 @@ public:
    int numBdrs, numFaceDofs, numSubcells, numDofsSubcell;
 
    DofInfo(ParFiniteElementSpace &pfes_sltn, int btype = 0);
+
+   // Computes the admissible interval of values for each DG dof from the values
+   // of all elements that feature the dof at its physical location.
+   // A given DOF gets bounds from the elements it touches (in Gauss-Lobatto
+   // sense, i.e., a face dof touches two elements, vertex dofs can touch many).
+   // This method needs to be public due to 'nvcc' restriction.
+   void ComputeOverlapBounds(const Vector &el_min, const Vector &el_max,
+                             Vector &dof_min, Vector &dof_max,
+                             Array<bool> *active_el = NULL);
 
    // Computes the admissible interval of values for each DG dof from the values
    // of all elements that feature the dof at its physical location.
