@@ -734,14 +734,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    ind_0_lor = ind_0;
    rho_0_lor = rho_0;
    e_0_lor = e_0;
-   // Pressure function (not part of the solution state).
-   ParGridFunction p_0_lor;
-   if (p_control)
-   {
-      p_0_lor.SetSpace(&pfes_lor);
-      MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
-      p_0_lor = p_0;
-   }
+   // Pressure function (not part of the solution state). Built always, so the
+   // pressure box is available for the violation report even without -pc.
+   ParGridFunction p_0_lor(&pfes_lor);
+   MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
+   p_0_lor = p_0;
 
    // Visualize the initial LOR GridFunctions.
    if (visualization)
@@ -784,18 +781,13 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
    // Interpolate e at the quadrature positions.
    finder.Interpolate(pos_quad_final, e_0_lor, e_interp);
-   // For control of p, interpolate p at the quadrature positions.
-   if (p_control)
+   // Interpolate p at the quadrature positions (feeds the pressure box).
+   finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+   if (visualization)
    {
-      finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
-      // The interpolation above feeds the pressure box and must always run; the
-      // GLVis view is optional and gated so headless runs open no socket.
-      if (visualization)
-      {
-         const std::string t = "p" + std::to_string(problem_id) +
-                               " p QF interpolated";
-         VisQuadratureFunction(pmesh_final, p_interp, t, 1050, 900);
-      }
+      const std::string t = "p" + std::to_string(problem_id) +
+                            " p QF interpolated";
+      VisQuadratureFunction(pmesh_final, p_interp, t, 1050, 900);
    }
    finder.Setup(pmesh_init);
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
@@ -864,9 +856,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    //                   300, 500, 300, 300);
    //    //MFEM_ABORT("e bounds");
    // }
+   // Pressure box. Used as the bound under pressure control, and for the
+   // violation report either way.
    Vector p_min, p_max;
    Vector p_min_ele, p_max_ele;
-   if (p_control)
    {
       // Same quad points, same procedure as density (based on the indicators).
       CalcRhoBounds(p_interp, ind_interp, ind_max, p_min, p_max);
