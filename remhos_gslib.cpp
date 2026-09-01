@@ -1679,6 +1679,211 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
 }
 
+// Joint multi-material remap: all materials are solved TOGETHER (not in
+// independent single-material passes) so the two-stage solver can enforce the
+// partition of unity sum_k eta_k = 1 (Dykstra::EnforceSumToOne) and tie the
+// per-material velocity blocks to one shared field (SetDuplicatedVelocity), both
+// of which the two-stage already does for num_materials > 1. Element-wise bounds
+// (same as RemapHydro), energy at the quadrature points. opt 2 only.
+void InterpolationRemap::RemapMultiMatHydro(
+   const std::vector<Vector> &ind_rho_e_v_0,
+   const std::vector<QuadratureFunction> &p_0,
+   const Vector &pos_final,
+   std::vector<Vector> &ind_rho_e_v, int opt_type)
+{
+   const int dim     = pmesh_init.Dimension();
+   const int num_mat = static_cast<int>(ind_rho_e_v_0.size());
+   MFEM_VERIFY(dim > 1, "Multi-material remap works only in 2D and 3D.");
+   MFEM_VERIFY(opt_type == 2, "Multi-material remap: two-stage (opt 2) only.");
+   MFEM_VERIFY(qspace && pfes_v, "Spaces are not specified.");
+   MFEM_VERIFY(num_mat >= 1 &&
+               static_cast<int>(p_0.size())         == num_mat &&
+               static_cast<int>(ind_rho_e_v.size()) == num_mat,
+               "RemapMultiMatHydro: per-material array sizes must match.");
+
+   pmesh_final.SetNodes(pos_final);
+   QuadratureSpace qspace_final(pmesh_final, qspace->GetIntRule(0));
+   ParFiniteElementSpace pfes_v_final(&pmesh_final, pfes_v->FEColl(), dim);
+   ParFiniteElementSpace pfes_v_scalar_final(&pmesh_final, pfes_v->FEColl());
+
+   const int size_qf = qspace->GetSize();
+   const int size_v1 = pfes_v_scalar_final.GetTrueVSize();
+
+   Vector pos_quad_final, pos_dof_v_final;
+   GetQuadPositions(qspace_final, pos_final, pos_quad_final);
+   GetDOFPositions(pfes_v_final, pos_final, pos_dof_v_final);
+
+   const int order = qspace->GetIntRule(0).GetOrder() / 2;
+   const int ref_factor = order + 1;
+   ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
+                                            BasisType::ClosedGL);
+   L2_FECollection fec_lor(0, dim);
+   ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
+
+   std::vector<Vector> irev_interp(num_mat);
+   for (int k = 0; k < num_mat; k++)
+   {
+      ind_rho_e_v[k].SetSize(ind_rho_e_v_0[k].Size());
+      irev_interp[k].SetSize(ind_rho_e_v_0[k].Size());
+   }
+   // Shared velocity: interpolated once, mirrored into every material's block 3.
+   ParGridFunction v_interp(&pfes_v_final, irev_interp[0].GetData() + 3*size_qf);
+
+   // --- Interpolate ind/rho/e/p per material via LOR, then the shared v. ---
+   FindPointsGSLIB finder(pmesh_init.GetComm());
+   finder.SetL2AvgType(FindPointsGSLIB::NONE);
+   finder.Setup(pmesh_lor);
+   std::vector<Vector> p_interp(num_mat);
+   ParGridFunction ind_0_lor(&pfes_lor), rho_0_lor(&pfes_lor), e_0_lor(&pfes_lor),
+                   p_0_lor(&pfes_lor);
+   for (int k = 0; k < num_mat; k++)
+   {
+      Vector *src = const_cast<Vector *>(&ind_rho_e_v_0[k]);
+      QuadratureFunction ind_0(qspace, src->GetData()),
+                         rho_0(qspace, src->GetData() + size_qf),
+                         e_0(qspace, src->GetData() + 2*size_qf);
+      ind_0_lor = ind_0; rho_0_lor = rho_0; e_0_lor = e_0; p_0_lor = p_0[k];
+      QuadratureFunction ind_i(&qspace_final, irev_interp[k].GetData()),
+                         rho_i(&qspace_final, irev_interp[k].GetData() + size_qf),
+                         e_i(&qspace_final, irev_interp[k].GetData() + 2*size_qf);
+      finder.Interpolate(pos_quad_final, ind_0_lor, ind_i);
+      finder.Interpolate(pos_quad_final, rho_0_lor, rho_i);
+      finder.Interpolate(pos_quad_final, e_0_lor, e_i);
+      p_interp[k].SetSize(size_qf);
+      finder.Interpolate(pos_quad_final, p_0_lor, p_interp[k]);
+   }
+   finder.Setup(pmesh_init);
+   finder.SetL2AvgType(FindPointsGSLIB::NONE);
+   {
+      ParGridFunction v_0(pfes_v,
+                          const_cast<Vector *>(&ind_rho_e_v_0[0])->GetData() + 3*size_qf);
+      Vector v_interp_vals(pos_dof_v_final.Size());
+      finder.Interpolate(pos_dof_v_final, v_0, v_interp_vals);
+      Array<int> vdofs;
+      const int nsp = pfes_v_final.GetFE(0)->GetNodes().GetNPoints();
+      const int NE  = pfes_v_final.GetNE();
+      Vector elem_dof_vals(nsp*dim);
+      for (int e = 0; e < NE; e++)
+      {
+         for (int j = 0; j < nsp; j++)
+            for (int d = 0; d < dim; d++)
+            { elem_dof_vals(d*nsp + j) = v_interp_vals(d*nsp*NE + e*nsp + j); }
+         pfes_v_final.GetElementVDofs(e, vdofs);
+         v_interp.SetSubVector(vdofs, elem_dof_vals);
+      }
+   }
+   finder.FreeData();
+
+   // --- Per-material element-wise bounds (same procedure as RemapHydro). ---
+   std::vector<Vector> ind_min(num_mat), ind_max(num_mat),
+       rho_min(num_mat), rho_max(num_mat), e_min(num_mat), e_max(num_mat),
+       p_min(num_mat), p_max(num_mat);
+   for (int k = 0; k < num_mat; k++)
+   {
+      Vector *src = const_cast<Vector *>(&ind_rho_e_v_0[k]);
+      QuadratureFunction ind_0(qspace, src->GetData());
+      QuadratureFunction ind_i(&qspace_final, irev_interp[k].GetData()),
+                         rho_i(&qspace_final, irev_interp[k].GetData() + size_qf),
+                         e_i(&qspace_final, irev_interp[k].GetData() + 2*size_qf),
+                         p_i(&qspace_final, p_interp[k].GetData());
+      CalcQuadBounds(ind_0, ind_i, pos_final, ind_min[k], ind_max[k], ELEM_FINAL);
+      CleanEmptyZones(ind_i, ind_min[k], ind_max[k]);
+      // clamp_interp: multi-material interpolation overshoots the element box at
+      // material-propagation points; clamp rather than abort (two-stage projects
+      // it in anyway).
+      CalcRhoBounds(rho_i, ind_i, ind_max[k], rho_min[k], rho_max[k], true);
+      UpdateRhoInterp(rho_i, rho_min[k], rho_max[k]);
+      CalcRhoBounds(e_i, ind_i, ind_max[k], e_min[k], e_max[k], true);
+      UpdateRhoInterp(e_i, e_min[k], e_max[k]);
+      CalcRhoBounds(p_i, ind_i, ind_max[k], p_min[k], p_max[k], true);
+      UpdateRhoInterp(p_i, p_min[k], p_max[k]);
+   }
+   Vector v_min, v_max;
+   CalcVBounds(v_interp, v_min, v_max);
+
+   // --- Per-material conservation targets (shared velocity in kinetic/momentum). ---
+   Vector volume_0_v(num_mat), mass_0_v(num_mat), energy_0_v(num_mat),
+          moment_0_v(num_mat*dim);
+   for (int k = 0; k < num_mat; k++)
+   {
+      Vector *src = const_cast<Vector *>(&ind_rho_e_v_0[k]);
+      QuadratureFunction ind_0(qspace, src->GetData()),
+                         rho_0(qspace, src->GetData() + size_qf),
+                         e_0(qspace, src->GetData() + 2*size_qf);
+      ParGridFunction v_0(pfes_v,
+                          const_cast<Vector *>(&ind_rho_e_v_0[0])->GetData() + 3*size_qf);
+      volume_0_v(k) = Integrate(pos_init, &ind_0, nullptr, nullptr, nullptr);
+      mass_0_v(k)   = Integrate(pos_init, &ind_0, &rho_0, nullptr, nullptr);
+      energy_0_v(k) = Integrate(pos_init, &ind_0, &rho_0, &e_0, &v_0);
+      for (int d = 0; d < dim; d++)
+      { moment_0_v(k*dim + d) = Integrate(pos_init, &ind_0, &rho_0, nullptr, &v_0, d); }
+   }
+
+   // --- Assemble the multi-material two-stage state: per material
+   //     [eta, rho, e, v(shared, true dofs, duplicated)]. ---
+   const int per_mat = 3*size_qf + dim*size_v1;
+   Vector x_initial(num_mat*per_mat), x_lo(num_mat*per_mat), x_hi(num_mat*per_mat);
+   std::vector<Vector> v_true(dim), vlo_true(dim), vhi_true(dim);
+   {
+      const int n = pfes_v_scalar_final.GetVSize();
+      ParGridFunction vtmp(&pfes_v_scalar_final, (real_t*)nullptr);
+      for (int d = 0; d < dim; d++)
+      {
+         vtmp.MakeRef(&pfes_v_scalar_final, v_interp, d*n); vtmp.GetTrueDofs(v_true[d]);
+         vtmp.MakeRef(&pfes_v_scalar_final, v_min,    d*n); vtmp.GetTrueDofs(vlo_true[d]);
+         vtmp.MakeRef(&pfes_v_scalar_final, v_max,    d*n); vtmp.GetTrueDofs(vhi_true[d]);
+      }
+   }
+   std::vector<Vector> p_min_all(num_mat), p_max_all(num_mat);
+   for (int k = 0; k < num_mat; k++)
+   {
+      real_t *xi = x_initial.GetData() + k*per_mat;
+      real_t *xl = x_lo.GetData()      + k*per_mat;
+      real_t *xh = x_hi.GetData()      + k*per_mat;
+      QuadratureFunction ind_i(&qspace_final, irev_interp[k].GetData()),
+                         rho_i(&qspace_final, irev_interp[k].GetData() + size_qf),
+                         e_i(&qspace_final, irev_interp[k].GetData() + 2*size_qf);
+      for (int i = 0; i < size_qf; i++)
+      {
+         xi[i]           = ind_i(i); xl[i]           = ind_min[k](i); xh[i]           = ind_max[k](i);
+         xi[size_qf+i]   = rho_i(i); xl[size_qf+i]   = rho_min[k](i); xh[size_qf+i]   = rho_max[k](i);
+         xi[2*size_qf+i] = e_i(i);   xl[2*size_qf+i] = e_min[k](i);   xh[2*size_qf+i] = e_max[k](i);
+      }
+      for (int d = 0; d < dim; d++)
+      {
+         real_t *xiv = xi + 3*size_qf + d*size_v1;
+         real_t *xlv = xl + 3*size_qf + d*size_v1;
+         real_t *xhv = xh + 3*size_qf + d*size_v1;
+         for (int i = 0; i < size_v1; i++)
+         { xiv[i] = v_true[d](i); xlv[i] = vlo_true[d](i); xhv[i] = vhi_true[d](i); }
+      }
+      p_min_all[k] = p_min[k];
+      p_max_all[k] = p_max[k];
+   }
+
+   // --- One joint two-stage solve; num_materials > 1 fires sum-to-one. ---
+   TwoStagePressureRemap::Options ts_opts;
+   ts_opts.gamma_minus_one = 1.0;   // p = rho*e
+   ts_opts.atol            = atol;
+   ts_opts.max_iter        = max_iter;
+   MassOperator mass_q(qspace_final), mass_h1(pfes_v_scalar_final);
+   TwoStagePressureRemap two_stage(qspace_final, pfes_v_scalar_final,
+                                   mass_q, mass_h1, num_mat, dim, true, ts_opts);
+   two_stage.Solve(x_lo, x_hi, p_min_all, p_max_all, volume_0_v, mass_0_v,
+                   energy_0_v, moment_0_v, x_initial);
+
+   // --- Scatter the optimized state back into the per-material outputs. ---
+   for (int k = 0; k < num_mat; k++)
+   {
+      const real_t *xf = x_initial.GetData() + k*per_mat;
+      real_t *out = ind_rho_e_v[k].GetData();
+      for (int i = 0; i < 3*size_qf; i++) { out[i] = xf[i]; }
+      ParGridFunction vtmp(&pfes_v_final, out + 3*size_qf);
+      Vector v_true_all(const_cast<real_t*>(xf) + 3*size_qf, dim*size_v1);
+      vtmp.SetFromTrueDofs(v_true_all);
+   }
+}
+
 void InterpolationRemap::GetDOFPositions(const ParFiniteElementSpace &pfes,
                                          const Vector &pos_mesh, Vector &pos_dofs)
 {
@@ -2051,10 +2256,11 @@ void InterpolationRemap::CleanEmptyZones(QuadratureFunction &ind_interp,
    }
 }
 
-void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
+void InterpolationRemap::CalcRhoBounds(QuadratureFunction &rho_interp,
                                        const QuadratureFunction &ind_interp,
                                        const Vector &ind_max,
-                                       Vector &rho_min, Vector &rho_max)
+                                       Vector &rho_min, Vector &rho_max,
+                                       bool clamp_interp)
 {
    const double eps = 1e-12;
 
@@ -2107,10 +2313,16 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 
             // Note that it's fine to be lower than the mininum, i.e., in
             // elements where the ind function propages due to small diffusion.
-            MFEM_VERIFY(rho_interp(el_e_idx + q) < el_max + eps,
-                        "Error: interpolated density is above upper bound: "
-                        << rho_interp(el_e_idx + q) << " "
-                        << rho_max(el_e_idx + q) );
+            if (rho_interp(el_e_idx + q) >= el_max + eps)
+            {
+               if (clamp_interp) { rho_interp(el_e_idx + q) = el_max; }
+               else
+               {
+                  MFEM_ABORT("Error: interpolated density is above upper bound: "
+                             << rho_interp(el_e_idx + q) << " "
+                             << rho_max(el_e_idx + q));
+               }
+            }
          }
          else
          {
@@ -2120,9 +2332,15 @@ void InterpolationRemap::CalcRhoBounds(const QuadratureFunction &rho_interp,
 
             // No material, but has density - must be checked.
             // In this case the interpolation will be out of bounds.
-            MFEM_VERIFY(fabs(rho_interp(el_e_idx + q)) < eps,
-                        "Error: nonzero density at an empty position: "
-                        << rho_interp(el_e_idx + q));
+            if (fabs(rho_interp(el_e_idx + q)) >= eps)
+            {
+               if (clamp_interp) { rho_interp(el_e_idx + q) = 0.0; }
+               else
+               {
+                  MFEM_ABORT("Error: nonzero density at an empty position: "
+                             << rho_interp(el_e_idx + q));
+               }
+            }
          }
       }
 

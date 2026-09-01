@@ -116,10 +116,16 @@ private:
    void CleanEmptyZones(QuadratureFunction &ind_interp,
                         Vector &ind_min, Vector &ind_max);
 
-   void CalcRhoBounds(const QuadratureFunction &rho_interp,
+   // clamp_interp: clamp an interpolated value that lands outside the element
+   // box (above the element max, or nonzero at an empty point) into the box
+   // instead of tripping the sanity assert. Needed for the joint multi-material
+   // remap, where density contrasts make the cross-mesh interpolation overshoot
+   // at material-propagation points; the two-stage projects it in anyway.
+   void CalcRhoBounds(QuadratureFunction &rho_interp,
                       const QuadratureFunction &ind_interp,
                       const Vector &ind_max,
-                      Vector &rho_min, Vector &rho_max);
+                      Vector &rho_min, Vector &rho_max,
+                      bool clamp_interp = false);
 
    void UpdateRhoInterp(QuadratureFunction &rho_interp,
                         Vector &rho_min, Vector &rho_max);
@@ -203,6 +209,14 @@ public:
                    Vector &ind_rho_e_v, int opt_type,
                    bool interpolate_e_HO,
                    bool remap_staggered = false);
+
+   // Joint multi-material remap: all materials solved together so the two-stage
+   // enforces sum_k eta_k = 1 with one shared velocity. Per-material [ind,rho,e,v]
+   // (v is the same shared field in every material). Two-stage (opt 2) only.
+   void RemapMultiMatHydro(const std::vector<Vector> &ind_rho_e_v_0,
+                           const std::vector<QuadratureFunction> &p_0,
+                           const Vector &pos_final,
+                           std::vector<Vector> &ind_rho_e_v, int opt_type);
 
    bool visualization = true;
    bool h1_seminorm   = false;
