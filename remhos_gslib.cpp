@@ -1476,6 +1476,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
             ts_opts.gamma_minus_one = gamma;
             ts_opts.atol            = atol;
             ts_opts.max_iter        = max_iter;
+            ts_opts.anderson_window = anderson_window;
+            ts_opts.anderson_beta   = anderson_beta;
 
             // This opt_type == 2 path is single-material; the two-stage solver
             // supports more, but is only constructed and validated for one here.
@@ -1864,6 +1866,8 @@ void InterpolationRemap::RemapMultiMatHydro(
    ts_opts.gamma_minus_one = 1.0;   // p = rho*e
    ts_opts.atol            = atol;
    ts_opts.max_iter        = max_iter;
+   ts_opts.anderson_window = anderson_window;
+   ts_opts.anderson_beta   = anderson_beta;
    MassOperator mass_q(qspace_final), mass_h1(pfes_v_scalar_final);
    TwoStagePressureRemap two_stage(qspace_final, pfes_v_scalar_final,
                                    mass_q, mass_h1, num_mat, dim, true, ts_opts);

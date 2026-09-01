@@ -178,6 +178,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool p_control = false;
    bool remap_staggered = false;
+   int  anderson_window = 0;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;
@@ -276,6 +277,9 @@ int main(int argc, char *argv[])
    args.AddOption(&remap_staggered, "-res", "--remap-staggered", "-no-res",
                   "--no-remap-staggered",
                   "Enable staggered remap during hydro remap.");
+   args.AddOption(&anderson_window, "-aa", "--anderson-window",
+                  "Anderson-acceleration window for the two-stage Dykstra "
+                  "projection (0 disables).");
    args.AddOption(&visit, "-visit", "--visit-datafiles", "-no-visit",
                   "--no-visit-datafiles",
                   "Save data files for VisIt (visit.llnl.gov) visualization.");
@@ -1154,6 +1158,7 @@ int main(int argc, char *argv[])
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       interpolator.problem_id    = problem_num;
+      interpolator.anderson_window = anderson_window;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);
       interpolator.SetVelocityFESpace(pfes_v);

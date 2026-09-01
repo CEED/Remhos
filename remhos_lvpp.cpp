@@ -21,6 +21,65 @@
 namespace mfem
 {
 
+void AndersonAccelerator::Step(const Vector &x_k, const Vector &g_k,
+                               Vector &x_next)
+{
+   const int n = x_k.Size();
+   Vector f_k(n);
+   subtract(g_k, x_k, f_k);            // f_k = g_k - x_k
+
+   // First call: no history yet, take the plain fixed-point step.
+   if (!have_prev)
+   {
+      x_next = g_k;
+      f_prev = f_k; g_prev = g_k;
+      have_prev = true;
+      return;
+   }
+
+   // Append the newest differences, keeping at most m columns.
+   {
+      Vector df(n), dg(n);
+      subtract(f_k, f_prev, df);
+      subtract(g_k, g_prev, dg);
+      dF.push_back(df); dG.push_back(dg);
+      if ((int)dF.size() > m) { dF.erase(dF.begin()); dG.erase(dG.begin()); }
+   }
+   f_prev = f_k; g_prev = g_k;
+
+   const int mk = (int)dF.size();
+
+   // Regularized normal equations for gamma = argmin || f_k - dF gamma ||:
+   //   (dF^T dF + reg*tr I) gamma = dF^T f_k, inner products MPI-reduced.
+   DenseMatrix A(mk, mk);
+   Vector rhs(mk), gamma(mk);
+   for (int i = 0; i < mk; i++)
+   {
+      rhs(i) = GlobalDot(comm, dF[i], f_k);
+      for (int j = i; j < mk; j++)
+      {
+         const real_t aij = GlobalDot(comm, dF[i], dF[j]);
+         A(i, j) = aij; A(j, i) = aij;
+      }
+   }
+   real_t trace = 0.0;
+   for (int i = 0; i < mk; i++) { trace += A(i, i); }
+   const real_t ridge = reg * (trace / mk + 1e-300);
+   for (int i = 0; i < mk; i++) { A(i, i) += ridge; }
+
+   DenseMatrixInverse Ainv(A);
+   Ainv.Mult(rhs, gamma);
+
+   // x_next = x_k + beta*f_k - sum_i gamma_i ( dG_i + (beta-1) dF_i ).
+   x_next = x_k;
+   x_next.Add(beta, f_k);
+   for (int i = 0; i < mk; i++)
+   {
+      x_next.Add(-gamma(i), dG[i]);
+      if (beta != 1.0) { x_next.Add(-gamma(i) * (beta - 1.0), dF[i]); }
+   }
+}
+
 void Dykstra::Project(Vector &projected_x)
 {
    const int num_con = constraints.NumRows();
@@ -67,11 +126,37 @@ void Dykstra::Project(Vector &projected_x)
    Vector merit_grad(N);
    Vector con_val(1);
    Vector con_sgn(num_con);
+
+   // Anderson acceleration setup (optional). The accelerated state packs psi
+   // and every correction vector q_i into one contiguous vector; one full
+   // Dykstra sweep is the fixed-point map. Each AA step is safeguarded against
+   // the plain sweep, so it never worsens the residual.
+   const bool use_aa = anderson_window > 0;
+   // Number of q-blocks folded into the accelerated state (0 = psi only).
+   const int  nq     = anderson_full_state ? num_con + enforce_sum_to_one : 0;
+   AndersonAccelerator acc(comm, anderson_window, anderson_beta);
+   Vector aa_w, aa_g, aa_cand, con_res_plain(num_con);
+   if (use_aa)
+   {
+      aa_w.SetSize((1+nq)*N); aa_g.SetSize((1+nq)*N); aa_cand.SetSize((1+nq)*N);
+   }
+   auto aa_pack = [&](Vector &w)
+   {
+      Vector v; v.MakeRef(w, 0, N); v = psi;
+      for (int i = 0; i < nq; i++) { v.MakeRef(w, (1+i)*N, N); v = *q[i]; }
+   };
+   auto aa_unpack = [&](Vector &w)
+   {
+      Vector v; v.MakeRef(w, 0, N); psi = v;
+      for (int i = 0; i < nq; i++) { v.MakeRef(w, (1+i)*N, N); *q[i] = v; }
+   };
+
    // return;
    for (int iter=0; iter<max_iter; iter++)
    {
       psi_full_prev = psi;
       x_full_prev = projected_x;
+      if (use_aa) { aa_pack(aa_w); }
       // Update residual before projection
       if (shared_constraints) { shared_constraints->Update(projected_x); }
       constraints.Mult(projected_x, con_res);
@@ -149,6 +234,41 @@ void Dykstra::Project(Vector &projected_x)
       if (shared_constraints) { shared_constraints->Update(projected_x); }
       constraints.Mult(projected_x, con_res);
 
+      // Anderson step: replace the plain sweep result by the accelerated
+      // iterate when it lowers the residual; otherwise keep the plain step.
+      bool aa_accepted = false;
+      if (use_aa)
+      {
+         con_res_plain = con_res;
+         const real_t plain_norm = con_res.Normlinf();
+         aa_pack(aa_g);
+         acc.Step(aa_w, aa_g, aa_cand);
+         aa_unpack(aa_cand);
+         MapLatent(psi, xmin, xmax, projected_x);
+         if (shared_constraints) { shared_constraints->Update(projected_x); }
+         constraints.Mult(projected_x, con_res);
+         const real_t cand_norm = con_res.Normlinf();
+         if (!anderson_safeguard || cand_norm < plain_norm)
+         {
+            aa_accepted = true;
+         }
+         else
+         {
+            // Reject the candidate but keep the plain step; crucially, do NOT
+            // clear the AA history -- it accelerates the actually-taken iterate
+            // sequence and needs several iterations to build a useful window.
+            // Restart only on a genuine blow-up (divergence / NaN).
+            aa_unpack(aa_g);
+            MapLatent(psi, xmin, xmax, projected_x);
+            if (shared_constraints) { shared_constraints->Update(projected_x); }
+            con_res = con_res_plain;
+            if (!std::isfinite(cand_norm) || cand_norm > 1e3 * plain_norm)
+            {
+               acc.Restart();
+            }
+         }
+      }
+
       if (Mpi::Root())
       {
          out << "  Dykstra iteration " << iter << ": constraint violations = (";
@@ -156,7 +276,9 @@ void Dykstra::Project(Vector &projected_x)
          {
             out << con_res[i] << " ";
          }
-         out << "\b)\n" << std::flush;
+         out << "\b)";
+         if (use_aa) { out << (aa_accepted ? " [AA]" : " [AA rej]"); }
+         out << "\n" << std::flush;
       }
       if (con_res.Normlinf() < tol)
       {
@@ -384,13 +506,13 @@ void Dykstra::MapPrimal(const Vector &x_,
 
 
 EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
-                                               const Vector &rho_q,
-                                               const Vector &p_min_q,
-                                               const Vector &p_max_q,
-                                               const Vector &ind_q,
-                                               real_t gm1,
-                                               real_t ind_tol, real_t rho_tol_rel,
-                                               Vector &e_min, Vector &e_max)
+      const Vector &rho_q,
+      const Vector &p_min_q,
+      const Vector &p_max_q,
+      const Vector &ind_q,
+      real_t gm1,
+      real_t ind_tol, real_t rho_tol_rel,
+      Vector &e_min, Vector &e_max)
 {
    EnergyBoxReport rep;
    // Energy and the pressure box share the quadrature points, so the pressure
@@ -448,7 +570,7 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
       rep.max_tighten = std::max(rep.max_tighten, dmp_w - (hi - lo));
       rep.max_dmp_excursion = std::max(rep.max_dmp_excursion,
                                        std::max(std::max(dmp_lo - lo, hi - dmp_hi),
-                                                0.0));
+                                             0.0));
       rep.max_p_excursion = std::max(rep.max_p_excursion,
                                      std::max(std::max(p_lo - lo, hi - p_hi),
                                               0.0));
@@ -576,8 +698,8 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
    MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
-      out << "\n=== Pressure control, stage 1: project (ind, rho, p"
-          << (remap_v ? ", v)" : ")") << " ===" << std::endl;
+      out << "\nPressure control, stage 1: project (ind, rho, p"
+          << (remap_v ? ", v)" : ")") << std::endl;
    }
 
    Array<int> gt_off({0}), gt_off_e({0});
@@ -638,7 +760,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
    // Conservation functionals in the (eta, rho, p, v) variables.
    const int funcs_per_mat = 3 + dim * (int)remap_v;
    std::vector<std::unique_ptr<ComposedFunctional>> funcs(funcs_per_mat *
-                                                          num_materials);
+         num_materials);
    Array<int> vel_related(funcs_per_mat*num_materials); vel_related = 0;
    Array<int> master_mat(funcs_per_mat*num_materials);  master_mat = -1;
 
@@ -698,6 +820,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
    Array<int> dummy_offset({0, xp.Size()});
    Dykstra projector(comm, C, mass, legendre_funcs, dummy_offset,
                      xp_min, xp_max, opts.atol, opts.max_iter);
+   projector.SetAndersonAcceleration(opts.anderson_window, opts.anderson_beta);
 
    // Sum-to-one couples the per-material indicators; with a single material it
    // would force eta == 1 everywhere, contradicting the volume constraint.
@@ -751,8 +874,8 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
    MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
-      out << "\n=== Pressure control, stage 2: project e at frozen (ind, rho"
-          << (remap_v ? ", v)" : ")") << " ===" << std::endl;
+      out << "\nPressure control, stage 2: project e at frozen (ind, rho"
+          << (remap_v ? ", v)" : ")") << std::endl;
    }
 
    Array<int> gt_off({0}), gt_off_p({0});
@@ -893,6 +1016,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
    Array<int> dummy_offset({0, x.Size()});
    Dykstra projector(comm, C, mass, legendre_funcs, dummy_offset,
                      e_min_all, e_max_all, opts.atol, opts.max_iter);
+   projector.SetAndersonAcceleration(opts.anderson_window, opts.anderson_beta);
 
    projector.Project(x);
 

@@ -3,6 +3,7 @@
 #include "mfem.hpp"
 #include "remap.hpp"
 #include "legendre.hpp"
+#include <vector>
 
 namespace mfem
 {
@@ -13,6 +14,36 @@ inline real_t allreduce(MPI_Comm comm, real_t val, MPI_Op op)
    MPI_Allreduce(&val, &recv, 1, MPITypeMap<real_t>::mpi_type, op, comm);
    return recv;
 }
+
+// MPI-global Euclidean inner product of two distributed vectors.
+inline real_t GlobalDot(MPI_Comm comm, const Vector &a, const Vector &b)
+{
+   return allreduce(comm, a * b, MPI_SUM);
+}
+
+// Anderson acceleration (type II, Walker-Ni difference form) for a fixed-point
+// iteration x <- G(x). Given the current iterate x_k and g_k = G(x_k), Step()
+// returns the accelerated iterate, mixing the last m residual/iterate
+// differences by solving a small regularized least-squares problem. Inner
+// products are MPI-reduced, so it works on distributed vectors. History is
+// cleared by Restart() (e.g. when a safeguard rejects the step).
+class AndersonAccelerator
+{
+   MPI_Comm comm;
+   int m;             // window (max stored differences)
+   real_t beta;       // relaxation (1.0 = no damping)
+   real_t reg;        // relative Tikhonov regularization of the normal matrix
+   std::vector<Vector> dF, dG; // columns Delta f_i, Delta g_i (newest at back)
+   Vector f_prev, g_prev;
+   bool have_prev = false;
+public:
+   AndersonAccelerator(MPI_Comm comm_, int m_, real_t beta_ = 1.0,
+                       real_t reg_ = 1e-12)
+      : comm(comm_), m(m_), beta(beta_), reg(reg_) { }
+   void Restart() { dF.clear(); dG.clear(); have_prev = false; }
+   // x_next = accelerated update from x_k and g_k = G(x_k).
+   void Step(const Vector &x_k, const Vector &g_k, Vector &x_next);
+};
 
 
 class Dykstra
@@ -33,6 +64,18 @@ class Dykstra
    bool enforce_sum_to_one = false;
    Array<int> sum_to_one_idx_start;
    int sum_to_one_block_size;
+
+   // Anderson acceleration of the outer fixed-point loop. Disabled when
+   // anderson_window == 0. The accelerated state is the full Dykstra state
+   // (psi and all correction vectors q_i); every AA step is safeguarded
+   // against the plain sweep, so it can only help.
+   int    anderson_window    = 0;
+   real_t anderson_beta      = 1.0;
+   bool   anderson_safeguard = true;
+   // Accelerate the full state (psi + all q_i) vs. psi only. Psi alone controls
+   // the constraint residual through MapLatent; the q_i keep adjusting at
+   // convergence, so including them makes AA chase the wrong residual.
+   bool   anderson_full_state = false;
 
    // TODO: Remove this when the input format is finalized.
    bool duplicated_velocity = false;
@@ -58,6 +101,15 @@ public:
       enforce_sum_to_one = true;
       sum_to_one_idx_start = idx_start;
       sum_to_one_block_size = block_size;
+   }
+
+   // Enable Anderson acceleration with the given window (0 disables it).
+   void SetAndersonAcceleration(int window, real_t beta = 1.0,
+                                bool safeguard = true)
+   {
+      anderson_window    = window;
+      anderson_beta      = beta;
+      anderson_safeguard = safeguard;
    }
 
    // TODO: Remove this after the input format is finalized.
@@ -215,6 +267,9 @@ public:
       /// the pressure bound carries no information about the energy (p = rho*e
       /// is insensitive to e there) and the DMP box is kept.
       real_t rho_tol_rel       = 1e-6;
+      /// Anderson-acceleration window for the Dykstra projection (0 disables).
+      int    anderson_window   = 0;
+      real_t anderson_beta     = 1.0;
    };
 
    /// @param qspace         final-mesh quadrature space (eta, rho, e, p live here).

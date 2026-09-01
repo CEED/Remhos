@@ -225,6 +225,10 @@ public:
    real_t atol        = 1e-10;
    real_t rtol        = 1e-08;
 
+   // Anderson acceleration of the two-stage Dykstra projection (0 disables).
+   int    anderson_window = 0;
+   real_t anderson_beta   = 1.0;
+
    // Problem id, used only to label the pressure visualization output.
    int problem_id = -1;
    hiop::hiopInterfaceBase::WeightedSpaceType weightedSpace =
