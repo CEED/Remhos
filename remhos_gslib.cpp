@@ -1633,11 +1633,17 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    CheckBounds(pmesh_init.GetMyRank(), rho, rho_min, rho_max);
    if (Mpi::Root()) { std::cout << "*\nInternal Energy violations: \n"; }
    CheckBounds(pmesh_init.GetMyRank(), e, e_min, e_max);
-   if (Mpi::Root()) { std::cout << "*\nPressure violations: \n"; }
-   QuadratureFunction p(qspace_final);
-   ComputePressureQF(rho, e, gamma, p);
-   CheckBounds(pmesh_init.GetMyRank(), p, p_min_ele, p_max_ele);
+   // The pressure box (p_min_ele/p_max_ele) is only computed under pressure
+   // control; without it there is nothing to check p against, and those vectors
+   // are empty -- so guard the whole pressure report (else CheckBounds derefs an
+   // unallocated bound and segfaults).
+   if (p_control)
    {
+      if (Mpi::Root()) { std::cout << "*\nPressure violations: \n"; }
+      QuadratureFunction p(qspace_final);
+      ComputePressureQF(rho, e, gamma, p);
+      CheckBounds(pmesh_init.GetMyRank(), p, p_min_ele, p_max_ele);
+
       QuadratureFunction violations_p = MakeBoundViolationQF(qspace_final, p,
                                                              p_min_ele, p_max_ele);
       QuadratureFunction violations_e = MakeBoundViolationQF(qspace_final, e, e_min,
@@ -1651,7 +1657,6 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       pvdc.RegisterQField("e_viol", &violations_e);
       pvdc.RegisterQField("p", &p);
       pvdc.Save();
-
    }
    if (remap_v)
    {
