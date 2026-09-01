@@ -1679,12 +1679,11 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    }
 }
 
-// Joint multi-material remap: all materials are solved TOGETHER (not in
-// independent single-material passes) so the two-stage solver can enforce the
-// partition of unity sum_k eta_k = 1 (Dykstra::EnforceSumToOne) and tie the
-// per-material velocity blocks to one shared field (SetDuplicatedVelocity), both
-// of which the two-stage already does for num_materials > 1. Element-wise bounds
-// (same as RemapHydro), energy at the quadrature points. opt 2 only.
+// Joint multi-material remap: all materials solved in one two-stage system so
+// it can enforce sum_k eta_k = 1 (Dykstra::EnforceSumToOne) and tie the
+// per-material velocity blocks to one shared field (SetDuplicatedVelocity),
+// both of which the two-stage does for num_materials > 1. Element-wise bounds
+// as in RemapHydro, energy at the quadrature points. opt 2 only.
 void InterpolationRemap::RemapMultiMatHydro(
    const std::vector<Vector> &ind_rho_e_v_0,
    const std::vector<QuadratureFunction> &p_0,
@@ -1729,7 +1728,7 @@ void InterpolationRemap::RemapMultiMatHydro(
    // Shared velocity: interpolated once, mirrored into every material's block 3.
    ParGridFunction v_interp(&pfes_v_final, irev_interp[0].GetData() + 3*size_qf);
 
-   // --- Interpolate ind/rho/e/p per material via LOR, then the shared v. ---
+   // Interpolate ind/rho/e/p per material via LOR, then the shared v.
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
    finder.Setup(pmesh_lor);
@@ -1774,7 +1773,7 @@ void InterpolationRemap::RemapMultiMatHydro(
    }
    finder.FreeData();
 
-   // --- Per-material element-wise bounds (same procedure as RemapHydro). ---
+   // Per-material element-wise bounds, same procedure as RemapHydro.
    std::vector<Vector> ind_min(num_mat), ind_max(num_mat),
        rho_min(num_mat), rho_max(num_mat), e_min(num_mat), e_max(num_mat),
        p_min(num_mat), p_max(num_mat);
@@ -1801,7 +1800,7 @@ void InterpolationRemap::RemapMultiMatHydro(
    Vector v_min, v_max;
    CalcVBounds(v_interp, v_min, v_max);
 
-   // --- Per-material conservation targets (shared velocity in kinetic/momentum). ---
+   // Per-material conservation targets (shared velocity in kinetic/momentum).
    Vector volume_0_v(num_mat), mass_0_v(num_mat), energy_0_v(num_mat),
           moment_0_v(num_mat*dim);
    for (int k = 0; k < num_mat; k++)
@@ -1819,8 +1818,8 @@ void InterpolationRemap::RemapMultiMatHydro(
       { moment_0_v(k*dim + d) = Integrate(pos_init, &ind_0, &rho_0, nullptr, &v_0, d); }
    }
 
-   // --- Assemble the multi-material two-stage state: per material
-   //     [eta, rho, e, v(shared, true dofs, duplicated)]. ---
+   // Assemble the multi-material two-stage state: per material
+   // [eta, rho, e, v(shared, true dofs, duplicated)].
    const int per_mat = 3*size_qf + dim*size_v1;
    Vector x_initial(num_mat*per_mat), x_lo(num_mat*per_mat), x_hi(num_mat*per_mat);
    std::vector<Vector> v_true(dim), vlo_true(dim), vhi_true(dim);
@@ -1861,7 +1860,7 @@ void InterpolationRemap::RemapMultiMatHydro(
       p_max_all[k] = p_max[k];
    }
 
-   // --- One joint two-stage solve; num_materials > 1 fires sum-to-one. ---
+   // One joint two-stage solve; num_materials > 1 fires sum-to-one.
    TwoStagePressureRemap::Options ts_opts;
    ts_opts.gamma_minus_one = 1.0;   // p = rho*e
    ts_opts.atol            = atol;
@@ -1872,7 +1871,7 @@ void InterpolationRemap::RemapMultiMatHydro(
    two_stage.Solve(x_lo, x_hi, p_min_all, p_max_all, volume_0_v, mass_0_v,
                    energy_0_v, moment_0_v, x_initial);
 
-   // --- Scatter the optimized state back into the per-material outputs. ---
+   // Scatter the optimized state back into the per-material outputs.
    for (int k = 0; k < num_mat; k++)
    {
       const real_t *xf = x_initial.GetData() + k*per_mat;

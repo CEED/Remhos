@@ -412,7 +412,8 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
       const real_t dmp_lo = e_min(i), dmp_hi = e_max(i);
       const real_t dmp_w  = dmp_hi - dmp_lo;
       if (dmp_w <= 0.0) { continue; }
-      // EXPERIMENT: eta check removed; only skip where rho is negligible.
+      // Skip only where rho is negligible; the pressure bound carries no
+      // information about e there (p = rho*e is insensitive to e).
       if (rho_q(i) <= rho_floor) { continue; }
 
       // Pressure requirement at this quadrature point, from its own density.
@@ -816,7 +817,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
          // quadrature points, so g is the target directly (no L2 projection).
          for (int i = 0; i < size_qf; i++)
          {
-            const bool informative = rho_star(i) > rho_floor; // EXPERIMENT: no eta
+            const bool informative = rho_star(i) > rho_floor;
             g_quad(i) = informative ? p_star(i) / (gm1 * rho_star(i)) : e_int_k(i);
          }
          e_k = g_quad;
