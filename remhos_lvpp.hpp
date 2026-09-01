@@ -152,12 +152,11 @@ struct EnergyBoxReport
    /// after widening and the non-negativity clamp), i.e. the energy-bound
    /// relaxation admitted in order to keep the pressure bounded.
    real_t max_dmp_excursion = 0.0;
-   /// Largest distance the issued box reaches outside the *pressure* interval
-   /// (from the min-width widening), i.e. the pressure-bound relaxation admitted
-   /// to keep the generator non-degenerate.
+   /// Largest distance the issued box reaches outside the *pressure* interval,
+   /// i.e. the pressure-bound relaxation admitted (only the non-negativity
+   /// clamp can produce one; expected to be ~0).
    real_t max_p_excursion = 0.0;
    int    n_empty     = 0;    ///< dofs where the intersection was empty
-   int    n_widened   = 0;    ///< dofs re-widened to the minimum box width
 };
 
 /// @brief Build the stage-2 energy box: the intersection of the energy DMP box
@@ -176,7 +175,7 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
                                                const Vector &p_min_q,
                                                const Vector &p_max_q,
                                                const Vector &ind_q,
-                                               real_t gm1, real_t min_width_rel,
+                                               real_t gm1,
                                                real_t ind_tol, real_t rho_tol_rel,
                                                Vector &e_min, Vector &e_max);
 
@@ -206,8 +205,6 @@ public:
       real_t gamma_minus_one   = 1.0;
       real_t atol              = 1e-10;
       int    max_iter          = 100;
-      /// Floor on the stage-2 energy box width, relative to the DMP width.
-      real_t box_min_width_rel = 1e-3;
       /// Project e toward p/((gamma-1)*rho) from stage 1 rather than toward
       /// the interpolated energy.
       bool   e_target_from_pressure = true;

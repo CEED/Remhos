@@ -388,7 +388,7 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
                                                const Vector &p_min_q,
                                                const Vector &p_max_q,
                                                const Vector &ind_q,
-                                               real_t gm1, real_t min_width_rel,
+                                               real_t gm1,
                                                real_t ind_tol, real_t rho_tol_rel,
                                                Vector &e_min, Vector &e_max)
 {
@@ -420,7 +420,6 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
       const real_t p_lo = p_min_q(i) * scale, p_hi = p_max_q(i) * scale;
 
       real_t lo = std::max(dmp_lo, p_lo), hi = std::min(dmp_hi, p_hi);
-      bool from_pressure = false;
       if (hi < lo)
       {
          // Incompatible: the pressure bound wins, so e leaves its DMP box
@@ -428,25 +427,11 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
          rep.n_empty++;
          rep.max_clip = std::max(rep.max_clip, lo - hi);
          lo = p_lo; hi = p_hi;
-         from_pressure = true;
       }
 
-      // Keep the generator non-degenerate.
-      const real_t w_min = min_width_rel * dmp_w;
-      if (hi - lo < w_min)
-      {
-         rep.n_widened++;
-         const real_t mid = 0.5*(lo + hi);
-         lo = mid - 0.5*w_min;
-         hi = mid + 0.5*w_min;
-         if (!from_pressure)
-         {
-            if (lo < dmp_lo) { hi += dmp_lo - lo; lo = dmp_lo; }
-            if (hi > dmp_hi) { lo -= hi - dmp_hi; hi = dmp_hi; }
-            lo = std::max(lo, dmp_lo);
-            hi = std::min(hi, dmp_hi);
-         }
-      }
+      // A thin or degenerate box is issued as is: the Fermi-Dirac generator
+      // handles zero width directly (diff <= tol -> the point is pinned), the
+      // same path the empty points [0,0] already take, so no widening is needed.
 
       // Internal energy is non-negative: e < 0 is a negative temperature and
       // gives a negative pressure. Applied only when the DMP box is itself
@@ -845,7 +830,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
       const EnergyBoxReport r =
          IntersectEnergyBoxWithPressure(comm,
                                         rho_star, p_min[k], p_max[k], ind_star,
-                                        gm1, opts.box_min_width_rel,
+                                        gm1,
                                         opts.ind_tol, opts.rho_tol_rel,
                                         e_lo, e_hi);
       rep_all.max_tighten = std::max(rep_all.max_tighten, r.max_tighten);
@@ -855,7 +840,6 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
       rep_all.max_p_excursion = std::max(rep_all.max_p_excursion,
                                          r.max_p_excursion);
       rep_all.n_empty    += r.n_empty;
-      rep_all.n_widened  += r.n_widened;
 
       for (int i = 0; i < size_e; i++)
       {
@@ -864,7 +848,6 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
    }
 
    int n_empty = (int)allreduce(comm, (real_t)rep_all.n_empty, MPI_SUM);
-   int n_wide  = (int)allreduce(comm, (real_t)rep_all.n_widened, MPI_SUM);
    real_t tighten = allreduce(comm, rep_all.max_tighten, MPI_MAX);
    real_t clip    = allreduce(comm, rep_all.max_clip, MPI_MAX);
    real_t excur   = allreduce(comm, rep_all.max_dmp_excursion, MPI_MAX);
@@ -873,10 +856,10 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
    {
       out << "  Energy box: max tightening by pressure = " << tighten
           << ", empty intersections = " << n_empty
-          << " (max gap " << clip << "), widened = " << n_wide << "\n"
+          << " (max gap " << clip << ")\n"
           << "  Energy box resolved in favour of pressure: max excursion "
           << "outside the energy DMP box = " << excur
-          << ", max excursion outside the pressure box (from widening) = "
+          << ", max excursion outside the pressure box = "
           << p_excur << std::endl;
    }
 
