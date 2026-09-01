@@ -244,6 +244,16 @@ void Dykstra::Project(Vector &projected_x)
          aa_pack(aa_g);
          acc.Step(aa_w, aa_g, aa_cand);
          aa_unpack(aa_cand);
+         // AA mixes psi linearly, which does NOT preserve the nonlinear
+         // sum-to-one manifold (a sum of sigmoids). Re-project the candidate
+         // back onto sum_k eta_k = 1 so an accepted step stays a physical
+         // partition of unity; sum-to-one is not part of con_res, so the
+         // safeguard below would not otherwise catch its violation.
+         if (enforce_sum_to_one)
+         {
+            Vector qzero(N); qzero = 0.0;
+            ProjectSumToOne(psi, qzero);
+         }
          MapLatent(psi, xmin, xmax, projected_x);
          if (shared_constraints) { shared_constraints->Update(projected_x); }
          constraints.Mult(projected_x, con_res);

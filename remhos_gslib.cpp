@@ -321,6 +321,7 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
                         legendre_funcs, offsets,
                         u_final_min, u_final_max, atol, max_iter);
+      projector.SetAndersonAcceleration(anderson_window, anderson_beta);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -483,6 +484,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
       Dykstra projector(pmesh_final.GetComm(), C, mass,
                         legendre_funcs, offsets,
                         u_min, u_max, atol, max_iter);
+      projector.SetAndersonAcceleration(anderson_window, anderson_beta);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -656,6 +658,7 @@ void InterpolationRemap::Remap(std::function<real_t(const Vector &)> func,
       Dykstra projector(u_interpolated.ParFESpace()->GetComm(), C, mass,
                         legendre_funcs, offsets,
                         u_final_min, u_final_max, atol, max_iter);
+      projector.SetAndersonAcceleration(anderson_window, anderson_beta);
       u_final = u_interpolated;
       projector.Project(u_final);
    }
@@ -1410,6 +1413,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       Dykstra projector(pmesh_final.GetComm(), C, mass,
                         legendre_funcs, dummy_offset,
                         x_min_final, x_max_final, atol, max_iter);
+      projector.SetAndersonAcceleration(anderson_window, anderson_beta);
       if (!p_control) { projector.Project(x_initial); }
       else
       {
