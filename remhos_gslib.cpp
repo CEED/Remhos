@@ -1470,7 +1470,10 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
             // constrain e, intersects the two boxes elsewhere, and falls back to
             // the pressure box where the intersection is empty.
             TwoStagePressureRemap::Options ts_opts;
-            ts_opts.gamma_minus_one = 1.0;   // this code uses p = rho*e
+            // The pressure coefficient is supplied by the caller: p =
+            // gamma * rho * e.  Laghos passes gamma - 1 here, while Remhos
+            // uses its pressure coefficient directly.
+            ts_opts.gamma_minus_one = gamma;
             ts_opts.atol            = atol;
             ts_opts.max_iter        = max_iter;
 
