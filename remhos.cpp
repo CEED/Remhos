@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
    bool visualization = true;
    bool p_control = false;
    bool remap_staggered = false;
-   int  anderson_window = 0;
+   int  anderson_window = 5;
    bool visit = false;
    bool verify_bounds = false;
    bool product_sync = false;

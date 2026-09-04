@@ -227,7 +227,7 @@ public:
    real_t rtol        = 1e-08;
 
    // Anderson acceleration of the two-stage Dykstra projection (0 disables).
-   int    anderson_window = 0;
+   int    anderson_window = 5;
    real_t anderson_beta   = 1.0;
 
    // Problem id, used only to label the pressure visualization output.

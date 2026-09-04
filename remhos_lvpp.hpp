@@ -69,7 +69,7 @@ class Dykstra
    // anderson_window == 0. The accelerated state is the full Dykstra state
    // (psi and all correction vectors q_i); every AA step is safeguarded
    // against the plain sweep, so it can only help.
-   int    anderson_window    = 0;
+   int    anderson_window    = 5;
    real_t anderson_beta      = 1.0;
    bool   anderson_safeguard = true;
    // Accelerate the full state (psi + all q_i) vs. psi only. Psi alone controls
@@ -264,7 +264,7 @@ public:
       /// is insensitive to e there) and the DMP box is kept.
       real_t rho_tol_rel       = 1e-6;
       /// Anderson-acceleration window for the Dykstra projection (0 disables).
-      int    anderson_window   = 0;
+      int    anderson_window   = 5;
       real_t anderson_beta     = 1.0;
    };
 
