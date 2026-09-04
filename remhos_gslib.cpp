@@ -1421,8 +1421,8 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
          //
          // Stage 1 projects (ind, rho, p, v): the specific internal energy is
          // replaced by the pressure, which is then bounded by construction
-         // through the Fermi-Dirac generator. With p = rho*e the internal
-         // energy int eta*rho*e is just int eta*p, so that constraint is
+         // through the Fermi-Dirac generator. With p = gm1*rho*e the internal
+         // energy int eta*rho*e is int eta*p/gm1, so that constraint is
          // bilinear in (eta, p) rather than trilinear in (eta, rho, e).
          //
          // Stage 2 recovers e at frozen (ind, rho, v) inside the intersection
@@ -1470,14 +1470,12 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
             // gambling on the plain projection and checking after, we optimize
             // the energy against both the DMP and pressure boxes directly.
             // Stage 2's box construction (IntersectEnergyBoxWithPressure) keeps
-            // the energy box where the density is too small for p = rho*e to
+            // the energy box where the density is too small for p to
             // constrain e, intersects the two boxes elsewhere, and falls back to
             // the pressure box where the intersection is empty.
             TwoStagePressureRemap::Options ts_opts;
-            // The pressure coefficient is supplied by the caller: p =
-            // gamma * rho * e.  Laghos passes gamma - 1 here, while Remhos
-            // uses its pressure coefficient directly.
-            ts_opts.gamma_minus_one = gamma;
+            // Pressure coefficient p = gamma * rho * e, supplied by the caller.
+            ts_opts.gamma_minus_one = Vector(1); ts_opts.gamma_minus_one = gamma;
             ts_opts.atol            = atol;
             ts_opts.max_iter        = max_iter;
             ts_opts.anderson_window = anderson_window;
@@ -1528,7 +1526,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 
    // Remap-state output: the interpolated and the OPTIMIZED (final) fields side
    // by side -- indicator, density, energy, velocity, and the pressure
-   // p = rho*e postprocessed from the optimized density and energy. Written to
+   // p = gm1*rho*e postprocessed from the optimized density and energy. Written to
    // ParaView only; the final fields are already shown live by the driver's
    // remapped-state GLVis, so duplicating them on-screen here just floods GLVis.
    // Runs after the optimization branch, so it is identical for every opt_type
@@ -1692,6 +1690,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 void InterpolationRemap::RemapMultiMatHydro(
    const std::vector<Vector> &ind_rho_e_v_0,
    const std::vector<QuadratureFunction> &p_0,
+   const Vector &gamma_minus_one,
    const Vector &pos_final,
    std::vector<Vector> &ind_rho_e_v, int opt_type)
 {
@@ -1867,7 +1866,7 @@ void InterpolationRemap::RemapMultiMatHydro(
 
    // One joint two-stage solve; num_materials > 1 fires sum-to-one.
    TwoStagePressureRemap::Options ts_opts;
-   ts_opts.gamma_minus_one = 1.0;   // p = rho*e
+   ts_opts.gamma_minus_one = gamma_minus_one;   // p = (gamma-1) rho e per material
    ts_opts.atol            = atol;
    ts_opts.max_iter        = max_iter;
    ts_opts.anderson_window = anderson_window;

@@ -151,16 +151,13 @@ private:
 namespace remap
 {
 /// @brief Conservation functionals in the (eta, rho, p, v) variables, i.e. with
-/// the specific internal energy e replaced by the pressure. This tree uses
-/// p = rho*e, so gm1 is 1 here; it is kept as a parameter to document the
-/// convention rather than hard-coding it.
+/// the specific internal energy e replaced by the pressure p = gm1*rho*e.
 /// The pointwise argument is u = [eta, rho, p, v_1, ..., v_dim].
 ///
-/// These mirror remap::potential_f / remap::energy_f, using the pointwise
-/// identity eta*rho*e = eta*p (this code uses p = rho*e). The internal energy becomes
-/// bilinear in (eta, p) instead of trilinear in (eta, rho, e).
+/// These mirror remap::potential_f / remap::energy_f via eta*rho*e = eta*p/gm1;
+/// the internal energy becomes bilinear in (eta, p) instead of trilinear.
 
-/// @brief int eta * p dx  (internal energy; p = rho*e so gm1 = 1)
+/// @brief int eta * p / gm1 dx  (internal energy)
 inline real_t p_potential_f(const Vector &u, real_t gm1)
 { return u[0]*u[2] / gm1; }
 inline void p_potential_df(const Vector &u, Vector &grad_u, real_t gm1)
@@ -212,8 +209,7 @@ struct EnergyBoxReport
 };
 
 /// @brief Build the stage-2 energy box: the intersection of the energy DMP box
-/// with the pressure box converted at fixed density, e = p / ((gamma-1)*rho),
-/// where gamma-1 = 1 (p = rho*e).
+/// with the pressure box converted at fixed density, e = p / (gm1*rho).
 ///
 /// The energy now lives at the quadrature points, next to rho and the pressure
 /// box, so the bound is applied pointwise: p_min <= (gamma-1)*rho(x)*e(x) <=
@@ -236,7 +232,7 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
 /// Stage 1 projects (eta, rho, p, v), i.e. the specific internal energy is
 /// replaced by the pressure p, which is then bounded by construction through
 /// the Fermi-Dirac generator. The internal energy enters conservation as
-/// int eta*p (gamma-1 = 1 here), the same quantity as int eta*rho*e but only
+/// int eta*p/gm1, the same quantity as int eta*rho*e but only
 /// bilinear. No constraint ties (rho, e) to p, so the pressure box constrains a
 /// primary variable and cannot make the feasible set empty (which it does when
 /// P(rho, e) is bounded directly, since rho, e and 0.4*rho*e are then coupled).
@@ -254,7 +250,7 @@ class TwoStagePressureRemap
 public:
    struct Options
    {
-      real_t gamma_minus_one   = 1.0;
+      Vector gamma_minus_one;   // pressure coefficient per material: p = (g-1) rho e
       real_t atol              = 1e-10;
       int    max_iter          = 100;
       /// Project e toward p/((gamma-1)*rho) from stage 1 rather than toward

@@ -591,9 +591,8 @@ EnergyBoxReport IntersectEnergyBoxWithPressure(MPI_Comm comm,
    return rep;
 }
 
-// Pressure p = (gamma-1) * rho * e at the quadrature points, with rho and e
-// both quadrature functions (gamma-1 = 1 here). Pointwise, since e now lives at
-// the quadrature points next to rho.
+// Pressure p = gm1 * rho * e at the quadrature points, with rho and e both
+// quadrature functions.
 static void PressureQF(real_t gm1, const QuadratureFunction &rho,
                        const Vector &e, QuadratureFunction &p)
 {
@@ -704,7 +703,6 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
                                         const Vector &moment_0,
                                         const Vector &x_interp, Vector &xp)
 {
-   const real_t gm1 = opts.gamma_minus_one;
    MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
@@ -742,7 +740,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
 
       QuadratureFunction rho_k(&qspace, xi_b.GetBlock(b+1).GetData());
       QuadratureFunction p_init(&qspace);
-      PressureQF(gm1, rho_k, xi_b.GetBlock(b+2), p_init);
+      PressureQF(opts.gamma_minus_one[k], rho_k, xi_b.GetBlock(b+2), p_init);
 
       Vector &p0 = xp_b.GetBlock(b+2);
       const Vector &ind_k = xi_b.GetBlock(b+0);
@@ -787,6 +785,7 @@ void TwoStagePressureRemap::SolveStage1(const Vector &x_min,
 
    for (int k = 0; k < num_materials; k++)
    {
+      const real_t gm1 = opts.gamma_minus_one[k];
       const int f0 = funcs_per_mat*k;
       make(f0 + 0, remap::volume_f, remap::volume_df, k, volume_0(k));
       make(f0 + 1, remap::mass_f,   remap::mass_df,   k, mass_0(k));
@@ -880,7 +879,6 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
                                         const Vector &energy_0, const Vector &xp,
                                         const Vector &e_interp, Vector &x)
 {
-   const real_t gm1 = opts.gamma_minus_one;
    MPI_Comm comm = pfes_v_scalar.GetComm();
    if (Mpi::Root())
    {
@@ -920,6 +918,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
 
    for (int k = 0; k < num_materials; k++)
    {
+      const real_t gm1 = opts.gamma_minus_one[k];
       const int b = k*num_vars;
       const Vector &ind_star = xp_b.GetBlock(b+0);
       const Vector &rho_star = xp_b.GetBlock(b+1);
@@ -943,11 +942,9 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
                            size_e);
       if (opts.e_target_from_pressure)
       {
-         // g = p/((gamma-1)*rho) at the quadrature points (gamma-1 = 1 here).
-         // Where the material is absent, or the density is negligible, p = rho*e
-         // says nothing about e and dividing by rho would give a wild target, so
-         // the interpolated energy is used there instead. Energy lives at the
-         // quadrature points, so g is the target directly (no L2 projection).
+         // g = p/((gamma-1)*rho) at the quadrature points. Where the material is
+         // absent or the density is negligible, p carries no info about e, so the
+         // interpolated energy is used there instead.
          for (int i = 0; i < size_qf; i++)
          {
             const bool informative = rho_star(i) > rho_floor;
@@ -1040,7 +1037,7 @@ void TwoStagePressureRemap::SolveStage2(const Vector &x_min,
       const Vector &ind_k = x_b.GetBlock(b+0);
       QuadratureFunction rho_k(&qspace, x_b.GetBlock(b+1).GetData());
       QuadratureFunction P_k(&qspace);
-      PressureQF(gm1, rho_k, x_b.GetBlock(b+2), P_k);
+      PressureQF(opts.gamma_minus_one[k], rho_k, x_b.GetBlock(b+2), P_k);
       for (int i = 0; i < size_qf; i++)
       {
          const real_t v = std::max(P_k(i) - p_max[k](i), p_min[k](i) - P_k(i));

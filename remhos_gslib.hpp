@@ -215,6 +215,7 @@ public:
    // (v is the same shared field in every material). Two-stage (opt 2) only.
    void RemapMultiMatHydro(const std::vector<Vector> &ind_rho_e_v_0,
                            const std::vector<QuadratureFunction> &p_0,
+                           const Vector &gamma_minus_one,
                            const Vector &pos_final,
                            std::vector<Vector> &ind_rho_e_v, int opt_type);
 
