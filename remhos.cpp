@@ -39,6 +39,7 @@
 #include "remhos_tools.hpp"
 #include "remhos_sync.hpp"
 #include "remhos_gslib.hpp"
+#include "remhos_nodal.hpp"
 
 using namespace std;
 using namespace mfem;
@@ -162,6 +163,8 @@ int main(int argc, char *argv[])
    MonolithicSolverType mono_type = MonolithicSolverType::None;
    bool project_analytic          = false;
    int optimization_type = 0;
+   bool bounded_transfer = false;
+   NodalRemapOptions nodal_options;
    bool h1_seminorm = false;
    int max_opt_iter = 100;
    int bounds_type = 0;
@@ -231,7 +234,39 @@ int main(int argc, char *argv[])
    args.AddOption(&optimization_type, "-opt", "--optimization-type",
                   "Optimization type: 0 - no optimization,\n\t"
                   "                   1 - HiOp,\n\t"
-                  "                   2 - LVPP.");
+                  "                   2 - LVPP,\n\t"
+                  "                   3 - Legacy alias for -bounds -opt 0,\n\t"
+                  "                   4 - Joint full-DOF bounded conservative QP (requires -bounds).");
+   args.AddOption(&bounded_transfer, "-bounds", "--bounded-transfer", "-no-bounds",
+                  "--no-bounded-transfer",
+                  "Nodal bounded L2 transfer: optional blending (-opt 1/2) or joint conservative QP (-opt 4).");
+   args.AddOption(&nodal_options.plbound, "-plb", "--plbound", "-no-plb",
+                  "--no-plbound", "With -bounds, add L*e >= 0 to nodal positivity.");
+   args.AddOption(&nodal_options.upper_constraint, "-ub", "--upper-bound-constraint",
+                  "-no-ub", "--no-upper-bound-constraint",
+                  "With -bounds, additionally impose U*e <= upper.");
+   args.AddOption(&nodal_options.upper, "-upper", "--upper-bound",
+                  "Upper bound for -bounds -ub.");
+   args.AddOption(&nodal_options.ncp, "-ncp", "--control-points",
+                  "PLBound control points per direction for -bounds.");
+   args.AddOption(&nodal_options.cp_type, "-cpt", "--control-point-type",
+                  "With -bounds: 0 = GL+endpoints, 1 = Chebyshev.");
+   args.AddOption(&nodal_options.quadrature_order, "-qo", "--quadrature-order",
+                  "Transfer quadrature order for -bounds; -1 selects 2*order+8.");
+   args.AddOption(&nodal_options.max_sweeps, "-ms", "--max-sweeps",
+                  "Maximum elementwise coordinate-descent sweeps for -bounds.");
+   args.AddOption(&nodal_options.abs_tol, "-atol", "--absolute-tolerance",
+                  "Absolute local solver tolerance for -bounds.");
+   args.AddOption(&nodal_options.rel_tol, "-rtol", "--relative-tolerance",
+                  "Relative local solver tolerance for -bounds.");
+   args.AddOption(&nodal_options.compare, "-cmp", "--compare-bases", "-no-cmp",
+                  "--no-compare-bases",
+                  "With -bounds, compare nodal-only, PLBound, and Bernstein fits "
+                  "of the same target; overrides -plb/-no-plb selection.");
+   args.AddOption(&nodal_options.repetitions, "-rep", "--fit-repetitions",
+                  "Timed fit repetitions per method for -cmp, after one warm-up; includes conservation with -opt 4.");
+   args.AddOption(&nodal_options.mass_tolerance, "-mtol", "--mass-tolerance",
+                  "Relative-to-max(1,source mass) mass tolerance with -bounds -opt 1/2/4.");
    args.AddOption(&h1_seminorm, "-h1s", "--h1semi", "-no-h1s",
                   "--no-h1semi",
                   "Use the H1-seminorm term in optimization.");
@@ -296,6 +331,12 @@ int main(int argc, char *argv[])
       if (myid == 0) { args.PrintUsage(cout); }
       return 1;
    }
+   if (optimization_type == 3)
+   {
+      bounded_transfer = true;
+      optimization_type = 0;
+      if (myid == 0) { out << "-opt 3 is now an alias for -bounds -opt 0.\n"; }
+   }
    if (myid == 0) { args.PrintOptions(cout); }
 
    // Enable hardware devices such as GPUs, and programming models such as
@@ -307,6 +348,22 @@ int main(int argc, char *argv[])
    exec_mode = (problem_num < 10) ? 0 : 1;
 
    const bool interpolation_remap = ((int)mono_type > 2);
+   if (bounded_transfer)
+   {
+      MFEM_VERIFY((optimization_type >= 0 && optimization_type <= 2) || optimization_type == 4,
+                  "Use -bounds with -opt 0, 1 (HiOp blend), 2 (LVPP blend), or 4 (joint QP).");
+      MFEM_VERIFY(mono_type == MonolithicSolverType::InterpolationGF && exec_mode == 1,
+                  "Nodal L2 fitting requires -mono 3 and a remap problem (-p >= 10).");
+      MFEM_VERIFY(!project_analytic && !product_sync && !visit && !h1_seminorm &&
+                  lo_type == LOSolverType::None && fct_type == FCTSolverType::None,
+                  "Nodal L2 fitting supports scalar discrete-field remap with GLVis; "
+                  "do not combine with -proj, -ps, -visit, -h1s, -lo, or -fct.");
+      MFEM_VERIFY(t_final >= 0 && std::isfinite(t_final) && dt != 0 && std::isfinite(dt),
+                  "Use a finite nonnegative final time and nonzero dt.");
+   }
+
+   MFEM_VERIFY(optimization_type != 4 || bounded_transfer,
+               "The joint conservative QP (-opt 4) requires -bounds.");
 
    // Read the serial mesh from the given mesh file on all processors.
    // Refine the mesh in serial to increase the resolution.
@@ -416,9 +473,10 @@ int main(int argc, char *argv[])
       double t = 0.0;
       while (t < t_final)
       {
-         t += dt;
          // Move the mesh nodes.
-         x.Add(std::min(dt, t_final-t), v);
+         const double step = std::min(dt, t_final-t);
+         x.Add(step, v);
+         t += step;
          // Update the node velocities.
          v.ProjectCoefficient(vcoeff);
       }
@@ -429,6 +487,19 @@ int main(int argc, char *argv[])
       // Return the mesh to the initial configuration.
       x_final = x;
       x = x0;
+   }
+
+   if (bounded_transfer)
+   {
+      nodal_options.order = order;
+      nodal_options.mass_solver = optimization_type;
+      nodal_options.mass_max_iterations = max_opt_iter;
+      FunctionCoefficient initial_condition(u0_function);
+      const int status = RemapNodalL2(pmesh, x_final, initial_condition,
+                                      nodal_options, visualization);
+      delete ode_solver;
+      delete mesh_fec;
+      return status;
    }
 
    // Define the discontinuous DG finite element space of the given

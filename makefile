@@ -24,6 +24,7 @@ Remhos makefile targets:
    make clean
    make distclean
    make style
+   make test-nodal-joint
 
 Examples:
 
@@ -107,12 +108,12 @@ Ccc  = $(strip $(CC) $(CFLAGS) $(GL_OPTS))
 
 SOURCE_FILES = remhos.cpp remhos_tools.cpp remhos_lo.cpp remhos_ho.cpp \
   remhos_fct.cpp remhos_mono.cpp remhos_sync.cpp remhos_gslib.cpp remhos_lvpp.cpp remhos_HiOp.cpp remap.cpp \
-	polyclip.cpp legendre.cpp
+	polyclip.cpp legendre.cpp remhos_nodal.cpp
 OBJECT_FILES1 = $(SOURCE_FILES:.cpp=.o)
 OBJECT_FILES = $(OBJECT_FILES1:.c=.o)
 HEADER_FILES = remhos_tools.hpp remhos_lo.hpp remhos_ho.hpp remhos_fct.hpp \
   remhos_mono.hpp remhos_sync.hpp remhos_gslib.hpp remhos_lvpp.hpp remhos_HiOp.hpp remap.hpp \
-	polyclip.hpp legendre.hpp
+	polyclip.hpp legendre.hpp remhos_nodal.hpp
 
 # Targets
 
@@ -129,6 +130,10 @@ remhos:	$(OBJECT_FILES) $(CONFIG_MK) $(MFEM_LIB_FILE)
 	$(CXX) $(MFEM_LINK_FLAGS) -o remhos $(OBJECT_FILES) $(LIBS)
 
 all: remhos
+
+test-nodal-joint: override MFEM_DIR = $(MFEM_DIR1)
+test-nodal-joint: test-nodal-joint.cpp remhos_nodal.o remhos_lvpp.o remap.o legendre.o $(CONFIG_MK) $(MFEM_LIB_FILE)
+	$(CXX) $(REMHOS_FLAGS) $(MFEM_LINK_FLAGS) -o $@ test-nodal-joint.cpp remhos_nodal.o remhos_lvpp.o remap.o legendre.o $(LIBS)
 
 opt:
 	$(MAKE) "REMHOS_DEBUG=NO"
