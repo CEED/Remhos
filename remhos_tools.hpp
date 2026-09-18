@@ -125,6 +125,10 @@ private:
    H1_FECollection fec_bounds;
    ParFiniteElementSpace pfes_bounds;
    ParGridFunction x_min, x_max;
+   // Cached connectivity for the bound space: element -> CG dofs.
+   const Table *el_to_dof_bounds;
+   // Cached inverse connectivity for the bound space: CG dof -> elements.
+   Table dof_to_el_bounds;
 
    // For each DOF on an element boundary, the global index of the DOF on the
    // opposite site is computed and stored in a list. This is needed for lumping
