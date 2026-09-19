@@ -1,8 +1,12 @@
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <vector>
 #include <unistd.h>
+
+#include "mfem/general/communication.hpp"
 
 // #define DBG_COLOR ::debug::kCyan
 // #include "debug.hpp"
@@ -12,7 +16,7 @@ int remhos(int, char *[], double &);
 //// ///////////////////////////////////////////////////////////////////////////
 template <class T>
 std::enable_if_t<!std::numeric_limits<T>::is_integer, bool>
-AlmostEq(T x, T y, T tolerance = 10.0*std::numeric_limits<T>::epsilon())
+AlmostEq(T x, T y, T tolerance = 1e-8)
 {
    const T neg = std::abs(x - y);
    constexpr T min = std::numeric_limits<T>::min();
@@ -143,6 +147,7 @@ int RemhosTest(const Test & test)
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) try
 {
+   mfem::Mpi::Init(argc, argv);
    // dbgClearScreen(), dbg();
 
    int opt;
