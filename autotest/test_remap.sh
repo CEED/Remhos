@@ -36,6 +36,13 @@ for method in "${methods[@]}"; do
                    -e 'Mass optimized diff:' -e 'L1 error:' >> $file
   printf "."
 
+  echo -e '\n'"- 2D scalar analytic smooth QuadratureFunction" >> $file
+  run_line=$command" -m ./data/inline-quad.mesh -p 13 -rs 2 -tf 0.75 -mono 4 -proj "$method
+  echo -e $run_line >> $file
+  $run_line | grep -e 'Mass initial' -e 'Mass interpolated diff:' \
+                   -e 'Mass optimized diff:' -e 'L1 error:' -e 'L2 error:' >> $file
+  printf "."
+
   echo -e '\n'"- 3D scalar GridFunction" >> $file
   run_line=$command" -m ./data/cube01_hex.mesh -p 10 -rs 2 -o 2 -tf 0.5 -mono 3 "$method
   echo -e $run_line >> $file

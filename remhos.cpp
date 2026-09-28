@@ -78,6 +78,11 @@ void v0_function(const Vector &x, Vector &v);
 
 double u0_total_mass();
 
+void ComputeQuadratureFunctionErrors(Coefficient &exact,
+                                     const Vector &pos_mesh,
+                                     const QuadratureFunction &qf,
+                                     double &error_l1, double &error_l2);
+
 // Inflow boundary condition
 double inflow_function(const Vector &x);
 
@@ -1019,11 +1024,19 @@ int main(int argc, char *argv[])
 
    if (mono_type == MonolithicSolverType::InterpolationQF)
    {
+      // A (2*order+1)-exact Gauss-Legendre rule has order+1 points in
+      // each coordinate direction, matching an order-th L2 GL space.
       const IntegrationRule &ir =
-         IntRules.Get(pmesh.GetElementBaseGeometry(0), 5);
+         IntRules.Get(pmesh.GetElementBaseGeometry(0), 2 * order + 1);
       QuadratureSpace qspace(pmesh, ir);
       QuadratureFunction u_qf(qspace);
       InitializeQuadratureFunction(u0, x0, u_qf);
+
+      if (myid == 0)
+      {
+         std::cout << "Remap of QF with " << ir.GetNPoints() << " quad pts. "
+                   << "Corresponding GF order is " << order << "." << std::endl;
+      }
 
       if (visualization)
       {
@@ -1055,6 +1068,20 @@ int main(int argc, char *argv[])
          sol_sock_res << "window_geometry 1200 0 400 400\n";
          sol_sock_res << "keys rmj\n";
          sol_sock_res.send();
+      }
+
+      if (project_analytic)
+      {
+         x = x_final;
+         FunctionCoefficient fcoeff(u0_function);
+         double e_L1, e_L2;
+         ComputeQuadratureFunctionErrors(fcoeff, x_final, uu_qf,
+                                         e_L1, e_L2);
+         if (myid == 0)
+         {
+            std::cout << "L1 error: " << e_L1 << std::endl;
+            std::cout << "L2 error: " << e_L2 << std::endl;
+         }
       }
 
       return 0;
@@ -2179,6 +2206,44 @@ double u0_total_mass()
       case 13: return 1.0 / (3.75 * M_PI * M_PI) + 1.0;
       default: MFEM_ABORT("Analytic mass is not computed for this problem.");
    }
+}
+
+void ComputeQuadratureFunctionErrors(Coefficient &exact,
+                                     const Vector &pos_mesh,
+                                     const QuadratureFunction &qf,
+                                     double &error_l1, double &error_l2)
+{
+   auto qspace = dynamic_cast<const QuadratureSpace *>(qf.GetSpace());
+   MFEM_VERIFY(qspace, "Broken QuadratureSpace.");
+   auto pmesh = dynamic_cast<const ParMesh *>(qspace->GetMesh());
+   MFEM_VERIFY(pmesh, "Expected a parallel mesh.");
+
+   error_l1 = 0.0;
+   error_l2 = 0.0;
+   for (int e = 0; e < qspace->GetNE(); e++)
+   {
+      const IntegrationRule &ir = qspace->GetElementIntRule(e);
+      IsoparametricTransformation Tr;
+      qspace->GetMesh()->GetElementTransformation(e, pos_mesh, &Tr);
+
+      Vector values;
+      qf.GetValues(e, values);
+      for (int q = 0; q < ir.GetNPoints(); q++)
+      {
+         const IntegrationPoint &ip = ir.IntPoint(q);
+         Tr.SetIntPoint(&ip);
+         const double error = values(q) - exact.Eval(Tr, ip);
+         const double weight = ip.weight * Tr.Weight();
+         error_l1 += weight * std::abs(error);
+         error_l2 += weight * error * error;
+      }
+   }
+
+   MPI_Allreduce(MPI_IN_PLACE, &error_l1, 1, MPI_DOUBLE, MPI_SUM,
+                 pmesh->GetComm());
+   MPI_Allreduce(MPI_IN_PLACE, &error_l2, 1, MPI_DOUBLE, MPI_SUM,
+                 pmesh->GetComm());
+   error_l2 = std::sqrt(error_l2);
 }
 
 double s0_function(const Vector &x)
