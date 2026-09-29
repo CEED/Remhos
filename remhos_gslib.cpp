@@ -364,29 +364,53 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    Vector pos_quad_final;
    GetQuadPositions(qspace_final, pos_final, pos_quad_final);
 
-   // The quadrature points are Gauss-Legendre nodes, so their values are the
-   // DOFs of an elementwise L2 Gauss-Legendre GridFunction of this order.
-   // For n points, the GF order is n-1, the quad exactness is 2n-1.
    const int order = u_init.GetIntRule(0).GetOrder() / 2;
-   L2_FECollection fec_gl(order, dim, BasisType::GaussLegendre);
-   ParFiniteElementSpace pfes_gl(&pmesh_init, &fec_gl);
-   ParGridFunction u_0_gl(&pfes_gl);
-   MFEM_VERIFY(u_init.Size() == u_0_gl.Size(), "Size mismatch");
-   // The QF and L2 Gauss-Legendre DOFs use the same tensor-product ordering.
-   u_0_gl = u_init;
-
-   // Visualize the initial Gauss-Legendre GridFunction.
-   if (visualization)
-   {
-      socketstream sock;
-      VisualizeField(sock, "localhost", 19916, u_0_gl, "u_0 GL", 800, 0, 400, 400);
-   }
-
-   // Interpolate u_initial from the constructed FE function.
    QuadratureFunction u_interpolated(qspace_final);
    FindPointsGSLIB finder(pmesh_init.GetComm());
-   finder.Setup(pmesh_init);
-   finder.Interpolate(pos_quad_final, u_0_gl, u_interpolated);
+
+   if (qf_interpolation_type == QFInterpolationType::LOR)
+   {
+      // One constant L2 DOF per subcell matches the quadrature-point layout.
+      const int ref_factor = order + 1;
+      ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
+                                               BasisType::ClosedGL);
+      L2_FECollection fec_lor(0, dim);
+      ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
+      ParGridFunction u_0_lor(&pfes_lor);
+      MFEM_VERIFY(u_init.Size() == u_0_lor.Size(), "Size mismatch");
+      u_0_lor = u_init;
+
+      if (visualization)
+      {
+         socketstream sock;
+         VisualizeField(sock, "localhost", 19916, u_0_lor, "u_0 LOR",
+                        800, 0, 400, 400);
+      }
+
+      finder.Setup(pmesh_lor);
+      finder.Interpolate(pos_quad_final, u_0_lor, u_interpolated);
+   }
+   else
+   {
+      // The Gauss-Legendre QF values are the DOFs of an elementwise L2
+      // Gauss-Legendre GridFunction. For n points, its order is n-1.
+      L2_FECollection fec_gl(order, dim, BasisType::GaussLegendre);
+      ParFiniteElementSpace pfes_gl(&pmesh_init, &fec_gl);
+      ParGridFunction u_0_gl(&pfes_gl);
+      MFEM_VERIFY(u_init.Size() == u_0_gl.Size(), "Size mismatch");
+      // Both layouts use the same tensor-product ordering.
+      u_0_gl = u_init;
+
+      if (visualization)
+      {
+         socketstream sock;
+         VisualizeField(sock, "localhost", 19916, u_0_gl, "u_0 GL",
+                        800, 0, 400, 400);
+      }
+
+      finder.Setup(pmesh_init);
+      finder.Interpolate(pos_quad_final, u_0_gl, u_interpolated);
+   }
    finder.FreeData();
 
    // Report mass error.

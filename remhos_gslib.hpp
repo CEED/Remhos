@@ -46,6 +46,8 @@ void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
 //             * this is the most diffusive approach (widest bounds).
 enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 
+enum class QFInterpolationType : int {LOR, GaussLegendre};
+
 class InterpolationRemap
 {
 private:
@@ -220,6 +222,8 @@ public:
                            std::vector<Vector> &ind_rho_e_v, int opt_type);
 
    bool visualization = true;
+   QFInterpolationType qf_interpolation_type =
+      QFInterpolationType::GaussLegendre;
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
