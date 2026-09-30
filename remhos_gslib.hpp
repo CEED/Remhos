@@ -46,6 +46,11 @@ void VisQuadratureFunction(ParMesh &pmesh, QuadratureFunction &q,
 //             * this is the most diffusive approach (widest bounds).
 enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 
+// Source representation for remapping a QuadratureFunction.
+// - LOR is piecewise constant on a low-order-refined mesh;
+// - GaussLegendre constructs a HO GridFunction on the initial mesh by taking
+//                 the quad values (directly takes them as DOF values).
+// The source is then interpolated on the new mesh.
 enum class QFInterpolationType : int {LOR, GaussLegendre};
 
 class InterpolationRemap

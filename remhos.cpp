@@ -1195,6 +1195,7 @@ int main(int argc, char *argv[])
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       interpolator.problem_id    = problem_num;
+      interpolator.qf_interpolation_type = qf_interpolation_type;
       interpolator.anderson_window = anderson_window;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);

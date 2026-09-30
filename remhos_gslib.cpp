@@ -742,53 +742,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    GetQuadPositions(qspace_final, pos_final, pos_quad_final);
    GetDOFPositions(pfes_v_final, pos_final, pos_dof_v_final);
 
-   // Generate the Low-Order-Refined GridFunctions for
-   // interpolating the QuadratureFunctions.
    const int order = qspace->GetIntRule(0).GetOrder() / 2;
-   const int ref_factor = order + 1;
-   ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
-                                            BasisType::ClosedGL);
-   L2_FECollection fec_lor(0, dim);
-   ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
-   ParGridFunction ind_0_lor(&pfes_lor),
-                   rho_0_lor(&pfes_lor), e_0_lor(&pfes_lor);
-   MFEM_VERIFY(ind_0.Size() == ind_0_lor.Size(), "Size mismatch ind LOR.");
-   MFEM_VERIFY(rho_0.Size() == rho_0_lor.Size(), "Size mismatch rho LOR.");
-   MFEM_VERIFY(e_0.Size()   == e_0_lor.Size(), "Size mismatch rho LOR.");
-   ind_0_lor = ind_0;
-   rho_0_lor = rho_0;
-   e_0_lor = e_0;
-   // Pressure function (not part of the solution state). Built always, so the
-   // pressure box is available for the violation report even without -pc.
-   ParGridFunction p_0_lor(&pfes_lor);
-   MFEM_VERIFY(p_0.Size() == p_0_lor.Size(), "Size mismatch p LOR.");
-   p_0_lor = p_0;
-
-   // Visualize the initial LOR GridFunctions.
-   if (visualization)
-   {
-      const std::string pp = "p" + std::to_string(problem_id) + " ";
-      const std::string ti = pp + "ind_0 LOR", tr = pp + "rho_0 LOR",
-                        te = pp + "e_0 LOR";
-      socketstream sock_ind, sock_rho, sock_e;
-      VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, ti.c_str(),
-                     0, 500, 350, 350);
-      VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, tr.c_str(),
-                     350, 500, 350, 350);
-      VisualizeField(sock_e, "localhost", 19916, e_0_lor, te.c_str(),
-                     700, 500, 350, 350);
-      if (p_control)
-      {
-         const std::string tp = pp + "p_0 LOR";
-         socketstream sock_p;
-         VisualizeField(sock_p, "localhost", 19916, p_0_lor, tp.c_str(),
-                        1050, 500, 350, 350);
-      }
-   }
-
-   //
-   // Interpolate into ind_rho_e_v_interp.
-   //
    Vector ind_rho_e_v_interp(ind_rho_e_v.Size());
    real_t *irev_data = ind_rho_e_v_interp.GetData();
    QuadratureFunction ind_interp(&qspace_final, irev_data),
@@ -798,15 +752,95 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    ParGridFunction v_interp(&pfes_v_final, irev_data + 3*size_qf);
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
-   finder.Setup(pmesh_lor);
-   // Interpolate ind at the quadrature positions.
-   finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
-   // Interpolate rho at the quadrature positions.
-   finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
-   // Interpolate e at the quadrature positions.
-   finder.Interpolate(pos_quad_final, e_0_lor, e_interp);
-   // Interpolate p at the quadrature positions (feeds the pressure box).
-   finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+
+   if (qf_interpolation_type == QFInterpolationType::LOR)
+   {
+      const int ref_factor = order + 1;
+      ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
+                                               BasisType::ClosedGL);
+      L2_FECollection fec_lor(0, dim);
+      ParFiniteElementSpace pfes_lor(&pmesh_lor, &fec_lor);
+      ParGridFunction ind_0_lor(&pfes_lor), rho_0_lor(&pfes_lor),
+                      e_0_lor(&pfes_lor), p_0_lor(&pfes_lor);
+      MFEM_VERIFY(ind_0.Size() == ind_0_lor.Size(), "Size mismatch ind LOR.");
+      MFEM_VERIFY(rho_0.Size() == rho_0_lor.Size(), "Size mismatch rho LOR.");
+      MFEM_VERIFY(e_0.Size()   == e_0_lor.Size(), "Size mismatch e LOR.");
+      MFEM_VERIFY(p_0.Size()   == p_0_lor.Size(), "Size mismatch p LOR.");
+      ind_0_lor = ind_0;
+      rho_0_lor = rho_0;
+      e_0_lor   = e_0;
+      p_0_lor   = p_0;
+
+      if (visualization)
+      {
+         const std::string pp = "p" + std::to_string(problem_id) + " ";
+         const std::string ti = pp + "ind_0 LOR", tr = pp + "rho_0 LOR",
+                           te = pp + "e_0 LOR";
+         socketstream sock_ind, sock_rho, sock_e;
+         VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, ti.c_str(),
+                        0, 500, 350, 350);
+         VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, tr.c_str(),
+                        350, 500, 350, 350);
+         VisualizeField(sock_e, "localhost", 19916, e_0_lor, te.c_str(),
+                        700, 500, 350, 350);
+         if (p_control)
+         {
+            const std::string tp = pp + "p_0 LOR";
+            socketstream sock_p;
+            VisualizeField(sock_p, "localhost", 19916, p_0_lor, tp.c_str(),
+                           1050, 500, 350, 350);
+         }
+      }
+
+      finder.Setup(pmesh_lor);
+      finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
+      finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
+      finder.Interpolate(pos_quad_final, e_0_lor, e_interp);
+      finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+   }
+   else
+   {
+      L2_FECollection fec_gl(order, dim, BasisType::GaussLegendre);
+      ParFiniteElementSpace pfes_gl(&pmesh_init, &fec_gl);
+      ParGridFunction ind_0_gl(&pfes_gl), rho_0_gl(&pfes_gl),
+                      e_0_gl(&pfes_gl), p_0_gl(&pfes_gl);
+      MFEM_VERIFY(ind_0.Size() == ind_0_gl.Size(), "Size mismatch ind GL.");
+      MFEM_VERIFY(rho_0.Size() == rho_0_gl.Size(), "Size mismatch rho GL.");
+      MFEM_VERIFY(e_0.Size()   == e_0_gl.Size(), "Size mismatch e GL.");
+      MFEM_VERIFY(p_0.Size()   == p_0_gl.Size(), "Size mismatch p GL.");
+      ind_0_gl = ind_0;
+      rho_0_gl = rho_0;
+      e_0_gl   = e_0;
+      p_0_gl   = p_0;
+
+      if (visualization)
+      {
+         const std::string pp = "p" + std::to_string(problem_id) + " ";
+         const std::string ti = pp + "ind_0 GL", tr = pp + "rho_0 GL",
+                           te = pp + "e_0 GL";
+         socketstream sock_ind, sock_rho, sock_e;
+         VisualizeField(sock_ind, "localhost", 19916, ind_0_gl, ti.c_str(),
+                        0, 500, 350, 350);
+         VisualizeField(sock_rho, "localhost", 19916, rho_0_gl, tr.c_str(),
+                        350, 500, 350, 350);
+         VisualizeField(sock_e, "localhost", 19916, e_0_gl, te.c_str(),
+                        700, 500, 350, 350);
+         if (p_control)
+         {
+            const std::string tp = pp + "p_0 GL";
+            socketstream sock_p;
+            VisualizeField(sock_p, "localhost", 19916, p_0_gl, tp.c_str(),
+                           1050, 500, 350, 350);
+         }
+      }
+
+      finder.Setup(pmesh_init);
+      finder.Interpolate(pos_quad_final, ind_0_gl, ind_interp);
+      finder.Interpolate(pos_quad_final, rho_0_gl, rho_interp);
+      finder.Interpolate(pos_quad_final, e_0_gl, e_interp);
+      finder.Interpolate(pos_quad_final, p_0_gl, p_interp);
+   }
+
    if (visualization)
    {
       const std::string t = "p" + std::to_string(problem_id) +
