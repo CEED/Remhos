@@ -169,8 +169,7 @@ int main(int argc, char *argv[])
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
-   QFInterpolationType qf_interpolation_type =
-      QFInterpolationType::GaussLegendre;
+   QFInterpolationType qf_interpolation_type = QFInterpolationType::LOR;
    bool project_analytic          = false;
    int optimization_type = 0;
    bool h1_seminorm = false;
