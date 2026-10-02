@@ -51,7 +51,7 @@ enum BoundsType {ELEM_INIT, ELEM_FINAL, ELEM_BOTH};
 // - GaussLegendre constructs a HO GridFunction on the initial mesh by taking
 //                 the quad values (directly takes them as DOF values).
 // The source is then interpolated on the new mesh.
-enum class QFInterpolationType : int {LOR, GaussLegendre};
+enum class QFInterpType : int {LOR, GaussLegendre};
 
 class InterpolationRemap
 {
@@ -227,8 +227,13 @@ public:
                            std::vector<Vector> &ind_rho_e_v, int opt_type);
 
    bool visualization = true;
-   QFInterpolationType qf_interpolation_type =
-      QFInterpolationType::GaussLegendre;
+   // Source representations used by RemapHydro. Indicators default to LOR to
+   // preserve material interfaces; smooth thermodynamic fields can use GL.
+   QFInterpType hydro_ind_interp_type = QFInterpType::LOR;
+   QFInterpType hydro_rho_interp_type = QFInterpType::GaussLegendre;
+   QFInterpType hydro_e_interp_type   = QFInterpType::GaussLegendre;
+   QFInterpType hydro_p_interp_type   = QFInterpType::GaussLegendre;
+   QFInterpType qf_interp_type        = QFInterpType::GaussLegendre;
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;

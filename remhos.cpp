@@ -169,7 +169,11 @@ int main(int argc, char *argv[])
    LOSolverType lo_type           = LOSolverType::None;
    FCTSolverType fct_type         = FCTSolverType::None;
    MonolithicSolverType mono_type = MonolithicSolverType::None;
-   QFInterpolationType qf_interpolation_type = QFInterpolationType::LOR;
+   QFInterpType qf_interp_type    = QFInterpType::LOR;
+   QFInterpType hydro_ind_interp_type = QFInterpType::LOR;
+   QFInterpType hydro_rho_interp_type = QFInterpType::LOR;
+   QFInterpType hydro_e_interp_type   = QFInterpType::LOR;
+   QFInterpType hydro_p_interp_type   = QFInterpType::LOR;
    bool project_analytic          = false;
    int optimization_type = 0;
    bool h1_seminorm = false;
@@ -235,10 +239,26 @@ int main(int argc, char *argv[])
                   "                   1 - Residual Distribution,\n\t"
                   "                   2 - Subcell Residual Distribution,\n\t"
                   "                   3 - Interpolation with GSLIB.");
-   args.AddOption((int*)(&qf_interpolation_type), "-qfi",
+   args.AddOption((int*)(&qf_interp_type), "-qfi",
                   "--qf-interpolation-type",
-                  "QuadratureFunction interpolation source: 0 - LOR,\n\t"
-                  "                                          1 - Gauss-Legendre L2.");
+                  "Scalar QuadratureFunction interpolation source: 0 - LOR,\n\t"
+                  "                                                 1 - Gauss-Legendre L2.");
+   args.AddOption((int*)(&hydro_ind_interp_type), "-qfi-ind",
+                  "--hydro-indicator-qf-interpolation-type",
+                  "Hydro indicator interpolation source: 0 - LOR,\n\t"
+                  "                                       1 - Gauss-Legendre L2.");
+   args.AddOption((int*)(&hydro_rho_interp_type), "-qfi-rho",
+                  "--hydro-density-qf-interpolation-type",
+                  "Hydro density interpolation source: 0 - LOR,\n\t"
+                  "                                     1 - Gauss-Legendre L2.");
+   args.AddOption((int*)(&hydro_e_interp_type), "-qfi-e",
+                  "--hydro-energy-qf-interpolation-type",
+                  "Hydro specific-energy interpolation source: 0 - LOR,\n\t"
+                  "                                             1 - Gauss-Legendre L2.");
+   args.AddOption((int*)(&hydro_p_interp_type), "-qfi-p",
+                  "--hydro-pressure-qf-interpolation-type",
+                  "Hydro pressure interpolation source: 0 - LOR,\n\t"
+                  "                                      1 - Gauss-Legendre L2.");
    args.AddOption(&project_analytic, "-proj", "--project", "-no-proj",
                   "--no-project",
                   "Project the analytic IC to the final mesh.");
@@ -310,9 +330,23 @@ int main(int argc, char *argv[])
       if (myid == 0) { args.PrintUsage(cout); }
       return 1;
    }
-   MFEM_VERIFY(qf_interpolation_type == QFInterpolationType::LOR ||
-               qf_interpolation_type == QFInterpolationType::GaussLegendre,
-               "Unknown QuadratureFunction interpolation type.");
+   const auto verify_qf_interpolation_type = [](QFInterpType type,
+                                                const char *field)
+   {
+      MFEM_VERIFY(type == QFInterpType::LOR ||
+                  type == QFInterpType::GaussLegendre,
+                  "Unknown QuadratureFunction interpolation type for " << field
+                  << ".");
+   };
+   verify_qf_interpolation_type(qf_interp_type, "the scalar remap");
+   verify_qf_interpolation_type(hydro_ind_interp_type,
+                                "the hydro indicator");
+   verify_qf_interpolation_type(hydro_rho_interp_type,
+                                "the hydro density");
+   verify_qf_interpolation_type(hydro_e_interp_type,
+                                "the hydro specific energy");
+   verify_qf_interpolation_type(hydro_p_interp_type,
+                                "the hydro pressure");
    if (myid == 0) { args.PrintOptions(cout); }
 
    // Enable hardware devices such as GPUs, and programming models such as
@@ -1062,7 +1096,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
-      interpolator.qf_interpolation_type = qf_interpolation_type;
+      interpolator.qf_interp_type = qf_interp_type;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.Remap(u_qf, x_final, uu_qf,
                          optimization_type);
@@ -1194,7 +1228,10 @@ int main(int argc, char *argv[])
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       interpolator.problem_id    = problem_num;
-      interpolator.qf_interpolation_type = qf_interpolation_type;
+      interpolator.hydro_ind_interp_type = hydro_ind_interp_type;
+      interpolator.hydro_rho_interp_type = hydro_rho_interp_type;
+      interpolator.hydro_e_interp_type   = hydro_e_interp_type;
+      interpolator.hydro_p_interp_type   = hydro_p_interp_type;
       interpolator.anderson_window = anderson_window;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.SetEnergyFESpace(pfes);

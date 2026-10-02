@@ -368,7 +368,7 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
    QuadratureFunction u_interpolated(qspace_final);
    FindPointsGSLIB finder(pmesh_init.GetComm());
 
-   if (qf_interpolation_type == QFInterpolationType::LOR)
+   if (qf_interp_type == QFInterpType::LOR)
    {
       // One constant L2 DOF per subcell matches the quadrature-point layout.
       const int ref_factor = order + 1;
@@ -722,6 +722,7 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    MFEM_VERIFY(dim > 1, "Interpolation remap works only in 2D and 3D.");
    MFEM_VERIFY(qspace && pfes_v, "Spaces are not specified.");
 
+   // Move the mesh to the final positions.
    pmesh_final.SetNodes(pos_final);
    QuadratureSpace qspace_final(pmesh_final, qspace->GetIntRule(0));
    ParFiniteElementSpace pfes_v_final(&pmesh_final, pfes_v->FEColl(), dim);
@@ -738,10 +739,14 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    ParGridFunction v_0(pfes_v, irev_ptr->GetData() + 3*size_qf);
 
    // Generate list of points where ire_initial will be interpolated.
+   // For both DOFs and quad points.
    Vector pos_quad_final, pos_dof_v_final;
    GetQuadPositions(qspace_final, pos_final, pos_quad_final);
    GetDOFPositions(pfes_v_final, pos_final, pos_dof_v_final);
 
+   //
+   // Interpolation step.
+   //
    const int order = qspace->GetIntRule(0).GetOrder() / 2;
    Vector ind_rho_e_v_interp(ind_rho_e_v.Size());
    real_t *irev_data = ind_rho_e_v_interp.GetData();
@@ -753,7 +758,60 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
    FindPointsGSLIB finder(pmesh_init.GetComm());
    finder.SetL2AvgType(FindPointsGSLIB::NONE);
 
-   if (qf_interpolation_type == QFInterpolationType::LOR)
+   const auto uses_lor = [](QFInterpType type)
+   {
+      return type == QFInterpType::LOR;
+   };
+   const bool need_lor = uses_lor(hydro_ind_interp_type) ||
+                         uses_lor(hydro_rho_interp_type) ||
+                         uses_lor(hydro_e_interp_type) ||
+                         uses_lor(hydro_p_interp_type);
+   const bool need_gl = !uses_lor(hydro_ind_interp_type) ||
+                        !uses_lor(hydro_rho_interp_type) ||
+                        !uses_lor(hydro_e_interp_type) ||
+                        !uses_lor(hydro_p_interp_type);
+
+   const auto visualize_source = [this, p_control](ParGridFunction &ind_source,
+                                                   ParGridFunction &rho_source,
+                                                   ParGridFunction &e_source,
+                                                   ParGridFunction &p_source,
+                                                   const char *source_name,
+                                                   QFInterpType source_type)
+   {
+      if (!visualization) { return; }
+
+      const std::string pp = "p" + std::to_string(problem_id) + " ";
+      if (hydro_ind_interp_type == source_type)
+      {
+         socketstream sock;
+         const std::string title = pp + "ind_0 " + source_name;
+         VisualizeField(sock, "localhost", 19916, ind_source, title.c_str(),
+                        0, 500, 350, 350);
+      }
+      if (hydro_rho_interp_type == source_type)
+      {
+         socketstream sock;
+         const std::string title = pp + "rho_0 " + source_name;
+         VisualizeField(sock, "localhost", 19916, rho_source, title.c_str(),
+                        350, 500, 350, 350);
+      }
+      if (hydro_e_interp_type == source_type)
+      {
+         socketstream sock;
+         const std::string title = pp + "e_0 " + source_name;
+         VisualizeField(sock, "localhost", 19916, e_source, title.c_str(),
+                        700, 500, 350, 350);
+      }
+      if (p_control && hydro_p_interp_type == source_type)
+      {
+         socketstream sock;
+         const std::string title = pp + "p_0 " + source_name;
+         VisualizeField(sock, "localhost", 19916, p_source, title.c_str(),
+                        1050, 500, 350, 350);
+      }
+   };
+
+   if (need_lor)
    {
       const int ref_factor = order + 1;
       ParMesh pmesh_lor = ParMesh::MakeRefined(pmesh_init, ref_factor,
@@ -770,35 +828,29 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       rho_0_lor = rho_0;
       e_0_lor   = e_0;
       p_0_lor   = p_0;
-
-      if (visualization)
-      {
-         const std::string pp = "p" + std::to_string(problem_id) + " ";
-         const std::string ti = pp + "ind_0 LOR", tr = pp + "rho_0 LOR",
-                           te = pp + "e_0 LOR";
-         socketstream sock_ind, sock_rho, sock_e;
-         VisualizeField(sock_ind, "localhost", 19916, ind_0_lor, ti.c_str(),
-                        0, 500, 350, 350);
-         VisualizeField(sock_rho, "localhost", 19916, rho_0_lor, tr.c_str(),
-                        350, 500, 350, 350);
-         VisualizeField(sock_e, "localhost", 19916, e_0_lor, te.c_str(),
-                        700, 500, 350, 350);
-         if (p_control)
-         {
-            const std::string tp = pp + "p_0 LOR";
-            socketstream sock_p;
-            VisualizeField(sock_p, "localhost", 19916, p_0_lor, tp.c_str(),
-                           1050, 500, 350, 350);
-         }
-      }
+      visualize_source(ind_0_lor, rho_0_lor, e_0_lor, p_0_lor, "LOR",
+                       QFInterpType::LOR);
 
       finder.Setup(pmesh_lor);
-      finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
-      finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
-      finder.Interpolate(pos_quad_final, e_0_lor, e_interp);
-      finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+      if (hydro_ind_interp_type == QFInterpType::LOR)
+      {
+         finder.Interpolate(pos_quad_final, ind_0_lor, ind_interp);
+      }
+      if (hydro_rho_interp_type == QFInterpType::LOR)
+      {
+         finder.Interpolate(pos_quad_final, rho_0_lor, rho_interp);
+      }
+      if (hydro_e_interp_type == QFInterpType::LOR)
+      {
+         finder.Interpolate(pos_quad_final, e_0_lor, e_interp);
+      }
+      if (hydro_p_interp_type == QFInterpType::LOR)
+      {
+         finder.Interpolate(pos_quad_final, p_0_lor, p_interp);
+      }
    }
-   else
+
+   if (need_gl)
    {
       L2_FECollection fec_gl(order, dim, BasisType::GaussLegendre);
       ParFiniteElementSpace pfes_gl(&pmesh_init, &fec_gl);
@@ -812,33 +864,26 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       rho_0_gl = rho_0;
       e_0_gl   = e_0;
       p_0_gl   = p_0;
-
-      if (visualization)
-      {
-         const std::string pp = "p" + std::to_string(problem_id) + " ";
-         const std::string ti = pp + "ind_0 GL", tr = pp + "rho_0 GL",
-                           te = pp + "e_0 GL";
-         socketstream sock_ind, sock_rho, sock_e;
-         VisualizeField(sock_ind, "localhost", 19916, ind_0_gl, ti.c_str(),
-                        0, 500, 350, 350);
-         VisualizeField(sock_rho, "localhost", 19916, rho_0_gl, tr.c_str(),
-                        350, 500, 350, 350);
-         VisualizeField(sock_e, "localhost", 19916, e_0_gl, te.c_str(),
-                        700, 500, 350, 350);
-         if (p_control)
-         {
-            const std::string tp = pp + "p_0 GL";
-            socketstream sock_p;
-            VisualizeField(sock_p, "localhost", 19916, p_0_gl, tp.c_str(),
-                           1050, 500, 350, 350);
-         }
-      }
+      visualize_source(ind_0_gl, rho_0_gl, e_0_gl, p_0_gl, "GL",
+                       QFInterpType::GaussLegendre);
 
       finder.Setup(pmesh_init);
-      finder.Interpolate(pos_quad_final, ind_0_gl, ind_interp);
-      finder.Interpolate(pos_quad_final, rho_0_gl, rho_interp);
-      finder.Interpolate(pos_quad_final, e_0_gl, e_interp);
-      finder.Interpolate(pos_quad_final, p_0_gl, p_interp);
+      if (hydro_ind_interp_type== QFInterpType::GaussLegendre)
+      {
+         finder.Interpolate(pos_quad_final, ind_0_gl, ind_interp);
+      }
+      if (hydro_rho_interp_type == QFInterpType::GaussLegendre)
+      {
+         finder.Interpolate(pos_quad_final, rho_0_gl, rho_interp);
+      }
+      if (hydro_e_interp_type == QFInterpType::GaussLegendre)
+      {
+         finder.Interpolate(pos_quad_final, e_0_gl, e_interp);
+      }
+      if (hydro_p_interp_type == QFInterpType::GaussLegendre)
+      {
+         finder.Interpolate(pos_quad_final, p_0_gl, p_interp);
+      }
    }
 
    if (visualization)
