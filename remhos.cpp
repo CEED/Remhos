@@ -178,6 +178,7 @@ int main(int argc, char *argv[])
    int optimization_type = 0;
    bool h1_seminorm = false;
    int max_opt_iter = 100;
+   double opt_abs_tol = 1e-10;
    int bounds_type = 0;
    bool pa = false;
    bool next_gen_full = false;
@@ -274,6 +275,8 @@ int main(int argc, char *argv[])
                   "Use to optimize only relevant subset. min bound != max bound");
    args.AddOption(&max_opt_iter, "-mi", "--max-optimization-iterations",
                   "Maximum optimization iterations");
+   args.AddOption(&opt_abs_tol, "-atol", "--optimization-absolute-tolerance",
+                  "Absolute tolerance for the optimization projection.");
    args.AddOption(&bounds_type, "-bt", "--bounds-type",
                   "Bounds stencil type: 0 - overlapping elements,\n\t"
                   "                     1 - matrix sparsity pattern.");
@@ -1019,6 +1022,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.atol          = opt_abs_tol;
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       ParGridFunction u_gf(&pfes);
@@ -1096,6 +1100,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.atol          = opt_abs_tol;
       interpolator.qf_interp_type = qf_interp_type;
       interpolator.SetQuadratureSpace(qspace);
       interpolator.Remap(u_qf, x_final, uu_qf,
@@ -1225,6 +1230,7 @@ int main(int argc, char *argv[])
       interpolator.visualization = visualization;
       interpolator.h1_seminorm   = h1_seminorm;
       interpolator.max_iter      = max_opt_iter;
+      interpolator.atol          = opt_abs_tol;
       interpolator.subprob       = optRelevantSubset;
       interpolator.weightedSpace = weightedSpaceType;
       interpolator.problem_id    = problem_num;
