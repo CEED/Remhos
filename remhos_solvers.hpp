@@ -87,6 +87,7 @@ class ForwardEulerIDPSolver : public IDPODESolver
 {
    Vector dx;
 public:
+   using IDPODESolver::Init;
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;
 };
@@ -119,6 +120,7 @@ public:
    void AddMasked(const Array<bool> &mask, real_t b,
                   const Vector &vb, Vector &va);
 
+   using IDPODESolver::Init;
    void Init(LimitedTimeDependentOperator &f) override;
    void Step(Vector &x, double &t, double &dt) override;
 };
