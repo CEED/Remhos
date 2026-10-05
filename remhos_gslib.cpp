@@ -17,6 +17,7 @@
 #include "remhos_gslib.hpp"
 #include "remhos_tools.hpp"
 #include "remhos_HiOp.hpp"
+#include "remhos_HydroPressureHiOp.hpp"
 #include "remhos_lvpp.hpp"
 
 #include <algorithm>
@@ -1250,33 +1251,108 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
       }
       else
       {
-//          if (remap_v)
-//          {
-//             auto hiop = new RemhosHydroHiOpProblem(qspace_final,
-//                                                    pfes_e_final, pfes_v_final,
-//                                                    pos_final,
-//                                                    initial_design, p_interp,
-//                                                    NumDesVar, x_minsub, x_maxsub,
-//                                                    volume_0, mass_0, moment_0, tot_en_0,
-//                                                    5, false, optProbInd, true,
-//                                                    subprob, p_control);
-//             hiop->setWeightedSpaceType(weightedSpace);
+         const bool use_pressure_based_e_bounds = false;
 
-//             if (p_control)
-//             {
-//                hiop->w_1 = 1.0;
-//                hiop->w_2 = 1.0;
-//                hiop->w_3 = 0.0;
-//                hiop->w_4 = 0.0;
-//                hiop->w_p = 1e6;
-//                hiop->w_4_H1 = 0.0;
-//                hiop->gamma = gamma;
-//             }
+         if (use_pressure_based_e_bounds)
+         {
+            MFEM_VERIFY(!subprob,
+                        "Pressure-based energy bounds are not yet supported "
+                        "with optimization subsets.");
 
-//             ot_prob = hiop;
-//          }
-//          else
-//          {
+            Vector e_min_p, e_max_p;
+
+            // Use the initially interpolated density when deriving the energy
+            // bounds for the monolithic optimization.
+            CalcEBoundsPBased(e_0, active_el_0, e_interp,
+                              p_max, p_min, rho_interp,
+                              pos_final, ind_max, gamma,
+                              e_min_p, e_max_p,
+                              p_max_ele, p_min_ele);
+
+            // Keep the bounds used by HiOp and the final diagnostics in sync.
+            e_min = e_min_p;
+            e_max = e_max_p;
+            design_min.GetBlock(2) = e_min_p;
+            design_max.GetBlock(2) = e_max_p;
+            x_minsub = design_min;
+            x_maxsub = design_max;
+
+            // Start HiOp from a point that satisfies the new energy bounds.
+            Vector &e_initial = initial_design.GetBlock(2);
+            for (int i = 0; i < e_initial.Size(); i++)
+            {
+               e_initial(i) = std::max(e_min_p(i),
+                                       std::min(e_initial(i), e_max_p(i)));
+            }
+         }
+
+         bool pressure_is_design_variable = false;
+         if (remap_v)
+         {
+            bool HydroRemapClassic = false;
+            if(HydroRemapClassic)
+            {
+            auto hiop = new RemhosHydroHiOpProblem(qspace_final,
+                                                   pfes_v_final,
+                                                   pos_final,
+                                                   initial_design, p_interp,
+                                                   NumDesVar, x_minsub, x_maxsub,
+                                                   volume_0, mass_0, moment_0,
+                                                   tot_en_0, 3 + dim,
+                                                   h1_seminorm, optProbInd,
+                                                   true, subprob, p_control);
+            hiop->setWeightedSpaceType(weightedSpace);
+
+            if (p_control)
+            {
+               hiop->w_1 = 1.0;
+               hiop->w_2 = 1.0;
+               hiop->w_3 = 0.0;
+               hiop->w_4 = 0.0;
+               hiop->w_p = 1e6;
+               hiop->w_4_H1 = 0.0;
+               hiop->gamma = gamma;
+            }
+
+
+            ot_prob = hiop;
+            }
+            else
+            {
+               pressure_is_design_variable = true;
+
+               // The pressure formulation has the same block layout as the
+               // classic formulation, with pressure replacing internal energy
+               // in block 2.
+               initial_design.GetBlock(2) = p_interp;
+               design_min.GetBlock(2) = p_min;
+               design_max.GetBlock(2) = p_max;
+               x_minsub = design_min;
+               x_maxsub = design_max;
+
+               auto hiop = new RemhosHydroPressureHiOpProblem(
+                              qspace_final, pfes_v_final, pos_final,
+                              initial_design, p_interp,
+                              NumDesVar, x_minsub, x_maxsub,
+                              volume_0, mass_0, moment_0, tot_en_0,
+                              3 + dim, h1_seminorm, optProbInd, gamma,
+                              true, subprob);
+               hiop->setWeightedSpaceType(weightedSpace);
+
+               if (p_control)
+               {
+                  hiop->w_1 = 1.0;
+                  hiop->w_2 = 1.0;
+                  hiop->w_p = 1e6;
+                  hiop->w_4 = 0.0;
+                  hiop->w_4_H1 = 0.0;
+               }
+
+               ot_prob = hiop;
+            }
+         }
+         else
+         {
 //             ot_prob = new RemhosIndRhoEHiOpProblem(qspace_final,
 //                                                    pfes_e_final,
 //                                                    pos_final,
@@ -1292,19 +1368,51 @@ void InterpolationRemap::RemapHydro(const Vector &ind_rho_e_v_0,
 //                weightedSpace);
 
 //             dynamic_cast<RemhosIndRhoEHiOpProblem*>(ot_prob)->gamma = gamma;
-//          }
-//          optsolver->SetOptimizationProblem(*ot_prob);
-//          optsolver->SetMaxIter(max_iter);
-//          optsolver->SetAbsTol(1e-7);
-//          optsolver->SetRelTol(1e-7);
-//          optsolver->SetPrintLevel(3);
+            MFEM_ABORT("Monolithic HiOp hydro remap requires remap_v.");
+         }
+         optsolver->SetOptimizationProblem(*ot_prob);
+         optsolver->SetMaxIter(max_iter);
+         optsolver->SetAbsTol(1e-7);
+         optsolver->SetRelTol(1e-7);
+         optsolver->SetPrintLevel(3);
 
-//          if (subprob)
-//          {
-//             optsolver->Mult(ind_rho_e_sub, y_out_sub);
-//             y_out.SetSubVector(optProbInd, y_out_sub);
-//          }
-//          else { optsolver->Mult(initial_design, y_out); }
+         if (subprob)
+         {
+            optsolver->Mult(ind_rho_e_sub, y_out_sub);
+            y_out.SetSubVector(optProbInd, y_out_sub);
+         }
+         else { optsolver->Mult(initial_design, y_out); }
+
+         if (pressure_is_design_variable)
+         {
+            Vector &ind_opt = y_out.GetBlock(0);
+            Vector &rho_opt = y_out.GetBlock(1);
+            Vector &p_opt = y_out.GetBlock(2);
+            const real_t empty_tolerance = 1e-12;
+
+            // Restore the external [ind,rho,e,v] representation.  The total
+            // energy constraint itself uses rho*e = p/gamma and therefore does
+            // not divide by rho at empty quadrature points.
+            for (int i = 0; i < p_opt.Size(); i++)
+            {
+               if (ind_opt[i] > empty_tolerance)
+               {
+                  MFEM_VERIFY(rho_opt[i] > empty_tolerance,
+                              "Non-positive density in an active material region.");
+                  p_opt[i] /= gamma*rho_opt[i];
+               }
+               else if (rho_opt[i] > empty_tolerance)
+               {
+                  p_opt[i] /= gamma*rho_opt[i];
+               }
+               else
+               {
+                  MFEM_VERIFY(std::abs(p_opt[i]) <= empty_tolerance,
+                              "Non-zero pressure at a zero-density point.");
+                  p_opt[i] = 0.0;
+               }
+            }
+         }
       }
 
       BlockVector T_vector_design(offset_true);
