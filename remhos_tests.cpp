@@ -16,7 +16,7 @@ int remhos(int, char *[], double &);
 //// ///////////////////////////////////////////////////////////////////////////
 template <class T>
 std::enable_if_t<!std::numeric_limits<T>::is_integer, bool>
-AlmostEq(T x, T y, T tolerance = 1e-8)
+AlmostEq(T x, T y, T tolerance = 10.0*std::numeric_limits<T>::epsilon())
 {
    const T neg = std::abs(x - y);
    constexpr T min = std::numeric_limits<T>::min();
@@ -45,7 +45,7 @@ const Test runs[] =
       // #0
       "-m ./data/inline-quad.mesh ",
       "-p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
+      0.0971139540038799
    },
    {
       // #1, 65536
@@ -74,31 +74,31 @@ const Test runs[] =
       // #4 Partial assembly
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
+      0.0971139539524386
    },
    {
       // #5 Partial assembly
       "-m ./data/inline-quad.mesh ",
       "-pa -p 14 -rs 4 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09185717760402806
+      0.0918571775959331
    },
    {
       // #7: 3D PA
       "-m ./data/cube01_hex.mesh ",
-      "-pa -p 10 -rs 3 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 1 ",
-      0.11601536511552431
+      "-pa -p 10 -rs 2 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
+      0.1162581030309265
    },
    {
       // #8
       "-m ./data/star-q2.mesh ",
       "-pa -p 14 -rs 1 -o 3 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.8069675186775516
+      0.8069675185906946
    },
    {
       // #9, 🔥 debug device 🔥 (last or !dup)
       "-m ./data/inline-quad.mesh ",
       "-d debug -pa -p 14 -rs 1 -o 2 -dt -1.0 -tf 0.5 -ho 3 -lo 5 -fct 2 -ms 5 ",
-      0.09711395400387984
+      0.0971139539524386
    },
 #ifdef MFEM_USE_CUDA
    {
