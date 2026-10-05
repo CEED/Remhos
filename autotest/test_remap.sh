@@ -37,7 +37,7 @@ for method in "${methods[@]}"; do
   printf "."
 
   echo -e '\n'"- 2D scalar analytic smooth QuadratureFunction" >> $file
-  run_line=$command" -m ./data/inline-quad.mesh -p 13 -rs 2 -tf 0.75 -mono 4 -proj "$method
+  run_line=$command" -m ./data/inline-quad.mesh -p 13 -rs 2 -tf 0.75 -mono 4 -proj -qfi 1 "$method
   echo -e $run_line >> $file
   $run_line | grep -e 'Mass initial' -e 'Mass interpolated diff:' \
                    -e 'Mass optimized diff:' -e 'L1 error:' -e 'L2 error:' >> $file
