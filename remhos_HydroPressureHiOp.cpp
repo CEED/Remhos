@@ -41,6 +41,7 @@ RemhosHydroPressureHiOpProblem::RemhosHydroPressureHiOpProblem(
      rho_0_(&qspace),
      gamma(gamma_)
 {
+   std::cout<<"Remap with preassure design variable"<<std::endl;
    MFEM_VERIFY(gamma > 0.0, "The pressure equation-of-state factor must be positive.");
 
    mesh_ = qspace_.GetMesh();
