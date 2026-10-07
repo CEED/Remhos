@@ -237,8 +237,8 @@ public:
    bool h1_seminorm   = false;
    bool subprob       = true;
    int  max_iter      = 100;
-   real_t atol        = 1e-10;
-   real_t rtol        = 1e-08;
+   real_t atol        = 1e-12;
+   real_t rtol        = 1e-12;
 
    // Anderson acceleration of the two-stage Dykstra projection (0 disables).
    int    anderson_window = 5;
