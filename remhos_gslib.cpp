@@ -282,8 +282,8 @@ void InterpolationRemap::Remap(const ParGridFunction &u_init,
 
       optsolver->SetOptimizationProblem(ot_prob);
       optsolver->SetMaxIter(1e06);
-      optsolver->SetAbsTol(1e-7);
-      optsolver->SetRelTol(1e-7);
+      optsolver->SetAbsTol(1e-12);
+      optsolver->SetRelTol(1e-12);
       optsolver->SetPrintLevel(3);
 
       if (subprob)
@@ -461,8 +461,8 @@ void InterpolationRemap::Remap(const QuadratureFunction &u_init,
 #endif
       }
 
-      const double rtol = 1.e-6;
-      const double atol = 1.e-6;
+      const double rtol = 1.e-12;
+      const double atol = 1.e-12;
       Vector y_out(u_desing.Size());
 
       const int numContraints = 1;
