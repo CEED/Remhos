@@ -7,6 +7,56 @@
                   High-order Remap Miniapp
 
 
+Version 2.0, released on Nov 13, 2026
+======================================
+
+- Added runtime device selection through MFEM's `-d` option and GPU support for
+  the main high-order, low-order and FCT solvers on CUDA and HIP devices.
+
+- Added device kernels for partial-assembly residual-distribution and subcell
+  residual-distribution methods in 2D and 3D, including optimized Q2 and Q3
+  kernels.
+
+- Made overlap- and matrix-sparsity-based bounds computations, shared-DOF
+  reductions, mesh motion and the Taylor-Green velocity function
+  device-friendly.
+
+- Added synchronized product-field remapping, including high- and low-order
+  product updates, ClipScale limiting and element-based FCT projection.
+
+- Added the mass-based element-average low-order solver and an option to form
+  solution bounds from the operator matrix sparsity pattern.
+
+- Added bounds-preserving Forward Euler and Runge-Kutta time integration,
+  including RK2, RK3, RK4 and RK6 schemes, and support for repeated time levels.
+
+- Added automatic time-step selection and adjustment based on low-order bounds,
+  with improved bounds verification and optional inactive-DOF masks.
+
+- Added automatic generation of well-partitioned Cartesian meshes based on the
+  dimension, MPI task count and requested number of elements per task.
+
+- Added optional Caliper profiling and Adiak metadata, figures of merit for the
+  main solver phases, and device-memory pool usage and high-water-mark
+  reporting.
+
+- Added a shared Umpire device-memory pool for MFEM and hypre, a configurable
+  initial pool size, pool warm-up and optional GPU-aware MPI communication.
+
+- Added CMake support with C++17, packaged dependency discovery, HIP builds,
+  separate library and executable targets, installation rules and CTest tests.
+
+- Added GitHub Actions regression testing, expanded CPU and GPU test coverage,
+  and refreshed the reference results for new algorithms and MFEM interfaces.
+
+- Added support for finite element orders zero and one, updated compatibility
+  with newer MFEM APIs, and fixed CUDA, HIP and NVCC build issues.
+
+- Fixed host-device synchronization and alias-memory transfers, product-remap
+  and time-step errors, mass reporting, final remap mesh position, bounds
+  checks, one-dimensional tests and several memory and round-off issues.
+
+
 Version 1.0, released on Mar 30, 2020
 =====================================
 
